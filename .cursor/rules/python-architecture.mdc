@@ -1,0 +1,19 @@
+---
+description: Python architecture boundaries for Velura CLI, DB, and integrations
+globs: "{cli.py,src/**/*.py,tests/**/*.py}"
+alwaysApply: false
+---
+
+# Python Architecture
+
+- Keep `cli.py` thin: parse commands, validate arguments, and delegate to `src/`.
+- Put persistence and queries in `src/db.py`; avoid duplicating SQL elsewhere.
+- Keep domain models in `src/models.py`.
+- Keep provider-specific API logic inside `src/posters/` and `src/analytics/`.
+- Prefer small functions with clear state transitions over large orchestration blocks.
+- When a change touches more than one layer, preserve the boundary between CLI, domain logic, and adapters.
+
+Example:
+
+- Bad: add SQL queries directly in `cli.py`.
+- Good: add a DB helper in `src/db.py` and call it from `cli.py`.

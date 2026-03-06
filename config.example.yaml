@@ -1,0 +1,70 @@
+site_url: "https://veluraesthetics.com"
+
+platforms:
+  enabled:
+    - youtube
+
+shopify:
+  store_url: ""
+  admin_api_token: ""
+
+openai:
+  api_key: "sk-proj-XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  model: "gpt-4.1-mini"
+
+gemini:
+  api_key: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  model: "gemini-2.0-flash"
+
+xai:
+  api_key: "xai-XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  model: "grok-imagine-video"
+  resolution: "720p"
+  aspect_ratio: "9:16"
+  poll_interval_seconds: 15
+  poll_timeout_seconds: 900
+
+youtube:
+  client_secrets_file: "youtube_client_secrets.json"
+  token_file: "youtube_token.json"
+  api_key: "AIzaXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+
+instagram:
+  access_token: "IGQVJXXXXXXXXXXXXXXXXXXXXXXXXX"
+  instagram_account_id: "17841400000000000"
+  gcs_bucket: "velura-instagram-uploads"
+
+tiktok:
+  client_key: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  client_secret: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+
+x:
+  api_key: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  api_secret: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  access_token: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  access_token_secret: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+
+gcs:
+  bucket_name: "velura-video-archive"
+  credentials_file: "gcs_service_account.json"
+
+briefing:
+  email: ""
+  slack_webhook: ""
+  smtp_host: "smtp.example.com"
+  smtp_port: 587
+  smtp_user: ""
+  smtp_pass: ""
+  from_email: "velura@example.com"
+  smtp_tls: true
+
+posting:
+  stagger_minutes:
+    tiktok: 0
+    instagram: 120
+    youtube: 360
+    x: 480
+
+data_root: "~/.velura"
+
+daily_budget_usd: 50.0

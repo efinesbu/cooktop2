@@ -1,0 +1,34 @@
+# Secrets & config
+config.yaml
+youtube_client_secrets.json
+
+# Database
+db/velura.db
+db/velura.db-journal
+db/velura.db-wal
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Velura data (stored in ~/.velura/)
+videos/
+product-images/

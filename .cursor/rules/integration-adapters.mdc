@@ -1,0 +1,19 @@
+---
+description: Standards for social posting and analytics adapter implementations
+globs: "{src/posters/**/*.py,src/analytics/**/*.py}"
+alwaysApply: false
+---
+
+# Integration Adapters
+
+- Keep platform-specific behavior inside the relevant adapter module.
+- Use shared retry, timeout, and persistence helpers instead of duplicating logic.
+- Make adapter methods idempotent where possible and preserve enough state to retry safely.
+- Validate config early and fail with actionable error messages.
+- Add or update contract tests whenever adapter behavior changes.
+- Document external prerequisites such as public upload URLs, scopes, or rate-limit behavior.
+
+Example:
+
+- Bad: hide platform-specific prerequisites in a generic helper.
+- Good: validate required config in the adapter and explain the missing prerequisite clearly.

@@ -1,0 +1,17 @@
+---
+description: Task sizing and batching rules for safe incremental changes
+alwaysApply: true
+---
+
+# Task Sizing
+
+- If a task touches more than 3 files, split it into smaller batches before editing.
+- Prefer completing one stable interface change before starting the next dependent batch.
+- Parallelize only independent workstreams with explicit handoff points.
+- Add rules and guidance first when introducing new project-wide constraints.
+- If a requested change is ambiguous or too broad, ask before proceeding.
+
+Example:
+
+- Bad: change schema, CLI, posters, analytics, and docs in one pass.
+- Good: ship schema and DB helpers first, then CLI, then posting flow, then docs/tests.

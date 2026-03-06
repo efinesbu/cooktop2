@@ -1,0 +1,17 @@
+---
+description: Testing requirements for workflow changes, bug fixes, and operator feedback
+globs: "{src/**/*.py,tests/**/*.py,cli.py}"
+alwaysApply: false
+---
+
+# Testing Requirements
+
+- Clarify ambiguity first when requirements are unclear.
+- After every task, list edge cases and suggest tests.
+- Treat every bug fix as test first: reproduce with a failing test, then fix until it passes.
+- After operator correction, document what went wrong and how to prevent it next time.
+- `tests/` should mirror `src/`, with shared fixtures in `tests/conftest.py`.
+- Cover contract shape, boundary inputs, DB round-trips, idempotency, API failures, and cost accuracy.
+- Use mocks for external APIs; do not rely on real network calls in tests.
+
+Run tests with `pytest tests/ -v`.
