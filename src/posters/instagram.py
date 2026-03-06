@@ -51,7 +51,7 @@ class InstagramPoster(BasePoster):
             "override _get_public_url() for your hosting provider."
         )
 
-    @retry_transient
+    @retry_transient()
     def upload(self, video_path: Path, caption: str, hashtags: list[str]) -> str:
         full_caption = f"{caption}\n\n{' '.join(f'#{h}' for h in hashtags)}"
         video_url = self._get_public_url(video_path)

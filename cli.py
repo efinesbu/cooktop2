@@ -475,32 +475,68 @@ def include(slug: str):
 # preview
 # ---------------------------------------------------------------------------
 
+def _review_display_status(content: Content, payloads: list[PlatformPayload]) -> str:
+    """Derive Review column status from content and payloads: pending, approved, rejected, scheduled, posted."""
+    if content.review_status == "rejected":
+        return "rejected"
+    if content.review_status == "pending":
+        return "pending"
+    # approved (or legacy posted/partial_failure): show actual workflow state from payloads
+    if not payloads:
+        return content.review_status
+    statuses = {p.status for p in payloads}
+    if statuses <= {"posted"}:
+        return "posted"
+    if "scheduled" in statuses:
+        return "scheduled"
+    if "posted" in statuses:
+        return "partial"
+    return "approved"
+
+
 @cli.command()
-@click.option("--today", is_flag=True, required=True, help="Show today's content")
-def preview(today: bool):
+@click.option("--today", is_flag=True, help="Show today's content (00:00–23:59 local)")
+@click.option("--last-24h", "last_24h", is_flag=True, help="Show content from the last 24 hours")
+def preview(today: bool, last_24h: bool):
     """Preview generated content."""
+    if not today and not last_24h:
+        console.print("[red]Provide either --today or --last-24h.[/red]")
+        return
+    if today and last_24h:
+        console.print("[red]Provide only one of --today or --last-24h.[/red]")
+        return
     _init()
-    items = db.list_content_today()
+    if last_24h:
+        items = db.list_content_last_24h()
+        title = "Content (last 24 hours)"
+        empty_msg = "No content in the last 24 hours."
+    else:
+        items = db.list_content_today()
+        title = "Today's Content"
+        empty_msg = "No content generated today."
     if not items:
-        console.print("[yellow]No content generated today.[/yellow]")
+        console.print(f"[yellow]{empty_msg}[/yellow]")
         return
 
-    table = Table(title="Today's Content")
+    table = Table(title=title)
+    table.add_column("Row", justify="right", style="dim")
     table.add_column("ID", style="cyan", max_width=12)
     table.add_column("Product")
     table.add_column("Theme")
     table.add_column("Hook Type")
     table.add_column("Review", justify="center")
     table.add_column("Payloads", justify="right")
-    for c in items:
-        payload_count = len(db.list_platform_payloads(c.id))
+    for i, c in enumerate(items, start=1):
+        payloads = db.list_platform_payloads(c.id)
+        review_status = _review_display_status(c, payloads)
         table.add_row(
+            str(i),
             c.id[:12],
             c.product_sku,
             c.theme,
             c.hook_type,
-            c.review_status,
-            str(payload_count),
+            review_status,
+            str(len(payloads)),
         )
     console.print(table)
 
@@ -509,49 +545,106 @@ def preview(today: bool):
 # approve / reject / schedule / post
 # ---------------------------------------------------------------------------
 
+def _resolve_content(content_id: str, use_last_24h: bool = False):
+    """Resolve --content-id to a Content. Accepts row number (1-based) from preview (today or last-24h)."""
+    if content_id.isdigit() and int(content_id) >= 1:
+        idx = int(content_id) - 1
+        items = db.list_content_last_24h() if use_last_24h else db.list_content_today()
+        if idx < len(items):
+            return items[idx]
+        # If row is out of range for "today", try last-24h so row numbers match preview --last-24h
+        if not use_last_24h:
+            items_24h = db.list_content_last_24h()
+            if idx < len(items_24h):
+                return items_24h[idx]
+        return None
+    return db.get_content(content_id)
+
+
 @cli.command()
-@click.option("--content-id", required=True, help="Approve a specific content piece")
-def approve(content_id: str):
-    """Approve a generated content item for scheduling/posting."""
+@click.option(
+    "--content-id",
+    "content_ids",
+    required=True,
+    multiple=True,
+    help="Row number(s) from preview (e.g. --content-id 1 --content-id 2 --content-id 3)",
+)
+def approve(content_ids: tuple[str, ...]):
+    """Approve generated content items for scheduling/posting."""
     _init()
-    content = db.get_content(content_id)
-    if not content:
-        console.print(f"[red]Content {content_id} not found.[/red]")
+    failed = []
+    approved = []
+    for cid in content_ids:
+        content = _resolve_content(cid)
+        if not content:
+            failed.append(cid)
+            continue
+        db.approve_content(content.id)
+        approved.append(cid)
+    for cid in failed:
+        console.print(f"[red]Content {cid} not found.[/red]")
+    if failed and not approved:
         sys.exit(1)
-    db.approve_content(content_id)
-    console.print(
-        f"[green]Approved[/green] {content_id}. "
-        "Next step: run `python cli.py schedule --content-id <id>`."
-    )
+    if approved:
+        ids_str = ", ".join(approved)
+        console.print(
+            f"[green]Approved[/green] row(s) {ids_str}. "
+            f"Next step: run `python cli.py schedule --content-id {' --content-id '.join(approved)}`."
+        )
 
 
 @cli.command()
-@click.option("--content-id", required=True, help="Reject a specific content piece")
+@click.option(
+    "--content-id",
+    "content_ids",
+    required=True,
+    multiple=True,
+    help="Row number(s) from preview (e.g. --content-id 1 --content-id 2)",
+)
 @click.option("--reason", required=True, help="Reason for rejection")
-def reject(content_id: str, reason: str):
-    """Reject a generated content item."""
+def reject(content_ids: tuple[str, ...], reason: str):
+    """Reject generated content items."""
     _init()
-    content = db.get_content(content_id)
-    if not content:
-        console.print(f"[red]Content {content_id} not found.[/red]")
+    failed = []
+    rejected = []
+    for cid in content_ids:
+        content = _resolve_content(cid)
+        if not content:
+            failed.append(cid)
+            continue
+        db.reject_content(content.id, reason)
+        rejected.append(cid)
+    for cid in failed:
+        console.print(f"[red]Content {cid} not found.[/red]")
+    if failed and not rejected:
         sys.exit(1)
-    db.reject_content(content_id, reason)
-    console.print(f"[yellow]Rejected[/yellow] {content_id}: {reason}")
+    if rejected:
+        console.print(f"[yellow]Rejected[/yellow] row(s) {', '.join(rejected)}: {reason}")
 
 
 @cli.command()
 @click.option("--today", is_flag=True, help="Schedule all approved content from today")
-@click.option("--content-id", "content_id", default=None, help="Schedule a specific approved content piece")
-def schedule(today: bool, content_id: Optional[str]):
+@click.option(
+    "--content-id",
+    "content_ids",
+    multiple=True,
+    help="Row number(s) from preview (e.g. --content-id 1 --content-id 2)",
+)
+def schedule(today: bool, content_ids: tuple[str, ...]):
     """Schedule approved content for staggered posting."""
     _init()
 
-    if not today and not content_id:
-        console.print("[red]Provide either --today or --content-id.[/red]")
+    if not today and not content_ids:
+        console.print("[red]Provide either --today or --content-id (one or more).[/red]")
         sys.exit(1)
 
-    if content_id:
-        _schedule_single(content_id)
+    if content_ids:
+        any_failed = False
+        for cid in content_ids:
+            if not _schedule_single(cid):
+                any_failed = True
+        if any_failed:
+            sys.exit(1)
     elif today:
         _schedule_today()
 
@@ -563,40 +656,55 @@ def post_due_cmd():
     _post_due()
 
 @cli.command("post")
-@click.option("--today", is_flag=True, help="Post all approved content from today")
-@click.option("--content-id", "content_id", default=None, help="Post a specific content piece")
-def post_cmd(today: bool, content_id: Optional[str]):
+@click.option("--today", is_flag=True, help="Post all approved content from the last 24 hours immediately")
+@click.option(
+    "--content-id",
+    "content_ids",
+    multiple=True,
+    help="Row number(s) from preview (e.g. --content-id 1 --content-id 2)",
+)
+def post_cmd(today: bool, content_ids: tuple[str, ...]):
     """Post content to all platforms."""
     _init()
 
-    if not today and not content_id:
-        console.print("[red]Provide either --today or --content-id.[/red]")
+    if not today and not content_ids:
+        console.print("[red]Provide either --today or --content-id (one or more).[/red]")
         sys.exit(1)
 
-    if content_id:
-        _post_single(content_id)
+    if content_ids:
+        any_failed = False
+        for cid in content_ids:
+            if not _post_single(cid):
+                any_failed = True
+        if any_failed:
+            sys.exit(1)
     elif today:
-        console.print(
-            "[yellow]`post --today` now acts as a convenience wrapper: "
-            "schedule approved content from today, then post anything due.[/yellow]"
-        )
-        _schedule_today()
-        _post_due()
+        items = [c for c in db.list_content_last_24h() if c.review_status == "approved"]
+        if not items:
+            console.print("[yellow]No approved content in the last 24 hours.[/yellow]")
+            return
+        any_failed = False
+        for content in items:
+            if not _post_single(content.id):
+                any_failed = True
+        if any_failed:
+            sys.exit(1)
 
 
-def _schedule_single(content_id: str):
-    content = db.get_content(content_id)
+def _schedule_single(content_id: str) -> bool:
+    content = _resolve_content(content_id)
     if not content:
         console.print(f"[red]Content {content_id} not found.[/red]")
-        sys.exit(1)
+        return False
     if content.review_status != "approved":
         console.print(
-            f"[red]Content {content_id} is not approved (status={content.review_status}).[/red]"
+            f"[red]Row {content_id} is not approved (status={content.review_status}).[/red]"
         )
-        sys.exit(1)
+        return False
 
     scheduled = _schedule_payloads_for_content(content)
-    console.print(f"[green]Scheduled {scheduled}[/green] payloads for {content.id[:12]}.")
+    console.print(f"[green]Scheduled {scheduled}[/green] payloads for row {content_id}.")
+    return True
 
 
 def _schedule_today():
@@ -611,16 +719,29 @@ def _schedule_today():
     console.print(f"\n[green]Scheduled {total}[/green] payloads across {len(items)} approved items.")
 
 
-def _post_single(content_id: str):
-    content = db.get_content(content_id)
+def _schedule_last_24h():
+    """Schedule approved content from the last 24 hours (matches preview --last-24h)."""
+    items = [c for c in db.list_content_last_24h() if c.review_status == "approved"]
+    if not items:
+        console.print("[yellow]No approved content to schedule in the last 24 hours.[/yellow]")
+        return
+
+    total = 0
+    for content in items:
+        total += _schedule_payloads_for_content(content)
+    console.print(f"\n[green]Scheduled {total}[/green] payloads across {len(items)} approved items.")
+
+
+def _post_single(content_id: str) -> bool:
+    content = _resolve_content(content_id)
     if not content:
         console.print(f"[red]Content {content_id} not found.[/red]")
-        sys.exit(1)
+        return False
 
     product = db.get_product(content.product_sku)
     if not product:
         console.print(f"[red]Product {content.product_sku} not found.[/red]")
-        sys.exit(1)
+        return False
 
     payloads = db.list_platform_payloads(content.id)
     if payloads:
@@ -653,7 +774,7 @@ def _post_single(content_id: str):
             f"\n[green]Posted {posted}[/green] payloads for {content.id[:12]}. "
             f"[yellow]Skipped {skipped}[/yellow]."
         )
-        return
+        return True
 
     captions, hashtags = _load_post_metadata(content)
     console.print(
@@ -661,10 +782,13 @@ def _post_single(content_id: str):
     )
     console.print(Panel(f"Posting [bold]{content.id}[/bold]", style="blue"))
     _post_content_to_all(content, product, captions, hashtags)
+    return True
 
 
 def _post_due():
-    payloads = db.list_due_platform_payloads()
+    # Use UTC now so due check matches publish_at (stored in UTC from scheduling)
+    now_iso = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    payloads = db.list_due_platform_payloads(now_iso=now_iso)
     if not payloads:
         console.print("[yellow]No scheduled payloads are due.[/yellow]")
         return

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -33,8 +34,9 @@ class YouTubePoster(BasePoster):
         return self._service
 
     def _load_credentials(self) -> Credentials:
-        secrets_file = config.get("youtube.client_secrets_file")
-        token_path = Path(config.get("youtube.token_file", "youtube_token.json"))
+        secrets_file = Path(config.get("youtube.client_secrets_file")).expanduser()
+        token_path = Path(config.get("youtube.token_file", "youtube_token.json")).expanduser()
+        login_hint = config.get("youtube.login_hint")
 
         creds: Credentials | None = None
         if token_path.exists():
@@ -43,13 +45,34 @@ class YouTubePoster(BasePoster):
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         elif not creds or not creds.valid:
-            flow = InstalledAppFlow.from_client_secrets_file(secrets_file, _SCOPES)
-            creds = flow.run_local_server(port=0)
+            flow = self._build_oauth_flow(secrets_file)
+            creds = flow.run_local_server(
+                port=0,
+                redirect_uri_trailing_slash=False,
+                prompt="select_account",
+                login_hint=login_hint or None,
+            )
 
-        token_path.write_text(creds.to_json())
+        token_path.write_text(creds.to_json(), encoding="utf-8")
         return creds
 
-    @retry_transient
+    def _build_oauth_flow(self, secrets_file: Path) -> InstalledAppFlow:
+        client_config = json.loads(secrets_file.read_text(encoding="utf-8"))
+        if "installed" not in client_config:
+            if "web" in client_config:
+                raise ValueError(
+                    "YouTube OAuth requires a Google Cloud Desktop app client secrets JSON. "
+                    "The configured file contains a web client, which causes redirect_uri_mismatch "
+                    "with the local browser callback. Create a Desktop app OAuth client, download "
+                    "its JSON, update youtube.client_secrets_file, and retry."
+                )
+            raise ValueError(
+                "Invalid YouTube client secrets file. Expected a Google OAuth client JSON "
+                "with an 'installed' section."
+            )
+        return InstalledAppFlow.from_client_config(client_config, _SCOPES)
+
+    @retry_transient()
     def upload(self, video_path: Path, caption: str, hashtags: list[str]) -> str:
         service = self._get_service()
 

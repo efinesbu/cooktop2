@@ -1,6 +1,7 @@
 # Secrets & config
 config.yaml
 youtube_client_secrets.json
+youtube_token.json
 
 # Database
 db/velura.db

@@ -142,7 +142,7 @@ Copy `config.example.yaml` to `config.yaml` and fill in:
 - **OpenAI** — API key + model for script generation
 - **Gemini** — Google AI API key
 - **xAI** — Video generation API key, optional `xai.model` (default `grok-imagine-video`), optional `xai.resolution`/`xai.aspect_ratio`, and polling controls via `xai.poll_interval_seconds` and `xai.poll_timeout_seconds`
-- **YouTube** — OAuth2 client secrets JSON for posting, optional `youtube.token_file` for the cached login token, plus `youtube.api_key` for analytics pulls
+- **YouTube** — Google OAuth Desktop app client secrets JSON for posting, optional `youtube.token_file` for the cached login token, optional `youtube.login_hint` to suggest the correct Google account during auth, plus `youtube.api_key` for analytics pulls
 - **Instagram** — Graph API access token + account ID; set `instagram.gcs_bucket` if you want automatic public video hosting for Reels
 - **TikTok** — Client key + secret (Content Posting API must be approved)
 - **X** — API key/secret + access token/secret (Basic tier for posting)
@@ -153,7 +153,9 @@ If you are managing inventory manually, use `add-product` to maintain your catal
 
 If `platforms.enabled` is omitted, Velura auto-enables only the platforms that have the required credentials present. Missing Instagram, TikTok, or X credentials will no longer block a YouTube-only workflow.
 
-For YouTube posting, the upload goes to whichever Google/YouTube account completes the OAuth browser flow when `youtube_token.json` is created. If you authorize the wrong account, delete the token file and run the upload again to re-authenticate.
+For YouTube posting, `youtube.client_secrets_file` must be a Google Cloud OAuth client JSON for a `Desktop app`. A `Web application` client will fail with `Error 400: redirect_uri_mismatch` because Velura uses a localhost callback during the installed-app auth flow.
+
+The upload goes to whichever Google/YouTube account completes the OAuth browser flow when `youtube_token.json` is created. Set `youtube.login_hint` if you want Google to prefill the intended account, and delete the token file before retrying if you need to switch accounts.
 
 xAI video generation now uses the async `POST /v1/videos/generations` flow and polls `GET /v1/videos/{request_id}` until the video is ready. The default poll interval is 15 seconds, and you can change it with `xai.poll_interval_seconds` in `config.yaml`.
 

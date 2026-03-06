@@ -27,6 +27,7 @@ xai:
 youtube:
   client_secrets_file: "youtube_client_secrets.json"
   token_file: "youtube_token.json"
+  login_hint: "fine@fineindustriesllc.com"
   api_key: "AIzaXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 
 instagram:

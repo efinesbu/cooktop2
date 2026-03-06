@@ -254,14 +254,35 @@ def insert_content(c: Content) -> None:
 def get_content(content_id: str) -> Content | None:
     with _connect() as conn:
         row = conn.execute("SELECT * FROM content WHERE id=?", (content_id,)).fetchone()
-    return _row_to_content(row) if row else None
+        if row:
+            return _row_to_content(row)
+        # Preview table shows id[:12]; allow prefix match when unique
+        if content_id and len(content_id) <= 16 and content_id.isalnum():
+            rows = conn.execute(
+                "SELECT * FROM content WHERE id LIKE ?", (content_id + "%",)
+            ).fetchall()
+            if len(rows) == 1:
+                return _row_to_content(rows[0])
+    return None
 
 
 def list_content_today() -> list[Content]:
     with _connect() as conn:
         rows = conn.execute(
             """SELECT * FROM content
-               WHERE date(created_at, 'localtime') = date('now', 'localtime')"""
+               WHERE date(created_at, 'localtime') = date('now', 'localtime')
+               ORDER BY created_at ASC"""
+        ).fetchall()
+    return [_row_to_content(r) for r in rows]
+
+
+def list_content_last_24h() -> list[Content]:
+    """Content created in the last 24 hours (rolling window, local time)."""
+    with _connect() as conn:
+        rows = conn.execute(
+            """SELECT * FROM content
+               WHERE datetime(created_at, 'localtime') >= datetime('now', 'localtime', '-24 hours')
+               ORDER BY created_at DESC"""
         ).fetchall()
     return [_row_to_content(r) for r in rows]
 
