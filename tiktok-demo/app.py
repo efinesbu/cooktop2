@@ -15,7 +15,7 @@ CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.y
 with open(CONFIG_PATH, "r") as f:
     config = yaml.safe_load(f)
 
-# TikTok Sandbox Credentials
+# TikTok Sandbox Credentials Configuration
 tiktok_config = config.get("tiktok-sandbox", {})
 TIKTOK_CLIENT_KEY = tiktok_config.get("client_key")
 TIKTOK_CLIENT_SECRET = tiktok_config.get("client_secret")
@@ -23,7 +23,7 @@ TIKTOK_CLIENT_SECRET = tiktok_config.get("client_secret")
 # Redirect URI must EXACTLY match one registered in TikTok Developer Portal.
 # For local dev: use http://localhost:8000/callback (add it in Login Kit > Redirect URIs)
 # For production: use https://demo.veluraesthetics.com/callback
-REDIRECT_URI = os.environ.get("TIKTOK_REDIRECT_URI") or tiktok_config.get("redirect_uri") or "http://localhost:8000/callback"
+REDIRECT_URI = tiktok_config.get("redirect_uri") or os.environ.get("TIKTOK_REDIRECT_URI") or "http://localhost:8000/callback"
 COOKIE_SECURE = REDIRECT_URI.startswith("https://")
 OAUTH_COOKIE_SAMESITE = "none" if COOKIE_SECURE else "lax"
 
