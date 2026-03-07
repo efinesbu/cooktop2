@@ -146,6 +146,7 @@ Copy `config.example.yaml` to `config.yaml` and fill in:
 - **Instagram** — Graph API access token + account ID; set `instagram.gcs_bucket` if you want automatic public video hosting for Reels
 - **TikTok** — `tiktok.client_key`, `tiktok.client_secret`, `tiktok.access_token`, and `tiktok.refresh_token` for posting; Content Posting API approval is required. Analytics only need the client key + secret. The separate review demo uses `tiktok-sandbox.*` settings.
 - **X** — API key/secret + access token/secret (Basic tier for posting)
+- **Make bridge** — optional `make_bridge.webhook_url` plus `make_bridge.r2.account_id`, `make_bridge.r2.access_key_id`, `make_bridge.r2.secret_access_key`, and `make_bridge.r2.bucket_name` if you want to upload finished `.mp4` files to Cloudflare R2 and forward a presigned URL to Make.com
 - **GCS** — Bucket name + service account credentials (optional, for archival)
 - **Briefing email** — optional SMTP settings if you want `morning-briefing` emailed
 
@@ -158,6 +159,49 @@ For YouTube posting, `youtube.client_secrets_file` must be a Google Cloud OAuth 
 The upload goes to whichever Google/YouTube account completes the OAuth browser flow when `youtube_token.json` is created. Set `youtube.login_hint` if you want Google to prefill the intended account, and delete the token file before retrying if you need to switch accounts.
 
 xAI video generation now uses the async `POST /v1/videos/generations` flow and polls `GET /v1/videos/{request_id}` until the video is ready. The default poll interval is 15 seconds, and you can change it with `xai.poll_interval_seconds` in `config.yaml`.
+
+## Make.com Upload Bridge
+
+Use `upload_to_make.py` when a generated video has already been approved, scheduled, and posted in your workflow and you want to hand the final `.mp4` off to a Make.com scenario for Instagram follow-up.
+
+The script:
+
+- uploads the local `.mp4` to Cloudflare R2 with `boto3`
+- generates a 30-minute presigned URL for that object
+- sends `{"video_url": "...", "caption": "..."}` to your Make.com webhook with `requests`
+
+Configuration can come from either a local `.env` file or `config.yaml`. Environment variables take precedence:
+
+```env
+R2_ACCOUNT_ID=YOUR_CLOUDFLARE_R2_ACCOUNT_ID
+R2_ACCESS_KEY_ID=YOUR_CLOUDFLARE_R2_ACCESS_KEY_ID
+R2_SECRET_ACCESS_KEY=YOUR_CLOUDFLARE_R2_SECRET_ACCESS_KEY
+R2_BUCKET_NAME=your-r2-bucket-name
+MAKE_WEBHOOK_URL=https://hook.us2.make.com/your-webhook-id
+```
+
+Equivalent `config.yaml` block:
+
+```yaml
+make_bridge:
+  webhook_url: "https://hook.us2.make.com/your-webhook-id"
+  r2:
+    account_id: "YOUR_CLOUDFLARE_R2_ACCOUNT_ID"
+    access_key_id: "YOUR_CLOUDFLARE_R2_ACCESS_KEY_ID"
+    secret_access_key: "YOUR_CLOUDFLARE_R2_SECRET_ACCESS_KEY"
+    bucket_name: "your-r2-bucket-name"
+```
+
+Run it with:
+
+```bash
+python upload_to_make.py --video path/to/video.mp4 --caption "Your Instagram caption"
+```
+
+Optional:
+
+- pass `--object-key` if you want to control the R2 path instead of using the default timestamped key
+- pass `--config path/to/config.yaml` if your config file is not at the repo root
 
 ## TikTok Setup
 

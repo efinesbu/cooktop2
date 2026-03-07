@@ -7,6 +7,7 @@ from pathlib import Path
 import httpx
 
 from src import config
+from src.make_bridge import bridge_video_to_make, is_bridge_configured
 from src.posters.base import BasePoster, TransientError, retry_transient
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ class InstagramPoster(BasePoster):
         self._access_token: str = config.get("instagram.access_token", "")
         self._account_id: str = config.get("instagram.instagram_account_id", "")
         self._gcs_bucket: str | None = config.get("instagram.gcs_bucket")
+        self._use_make_bridge = is_bridge_configured()
 
     def _get_public_url(self, video_path: Path) -> str:
         """Return a publicly-accessible URL for the local video file.
@@ -54,6 +56,13 @@ class InstagramPoster(BasePoster):
     @retry_transient()
     def upload(self, video_path: Path, caption: str, hashtags: list[str]) -> str:
         full_caption = f"{caption}\n\n{' '.join(f'#{h}' for h in hashtags)}"
+
+        if self._use_make_bridge:
+            result = bridge_video_to_make(video_path, full_caption)
+            handoff_id = f"make:{result.object_key}"
+            logger.info("Handed Instagram payload to Make bridge: %s", handoff_id)
+            return handoff_id
+
         video_url = self._get_public_url(video_path)
 
         try:

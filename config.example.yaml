@@ -56,6 +56,14 @@ x:
   access_token: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
   access_token_secret: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 
+make_bridge:
+  webhook_url: "https://hook.us2.make.com/your-webhook-id"
+  r2:
+    account_id: "YOUR_CLOUDFLARE_R2_ACCOUNT_ID"
+    access_key_id: "YOUR_CLOUDFLARE_R2_ACCESS_KEY_ID"
+    secret_access_key: "YOUR_CLOUDFLARE_R2_SECRET_ACCESS_KEY"
+    bucket_name: "your-r2-bucket-name"
+
 gcs:
   bucket_name: "velura-video-archive"
   credentials_file: "gcs_service_account.json"

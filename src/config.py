@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from dotenv import load_dotenv
 from src.models import PLATFORMS
 
 _DEFAULT_CONFIG_PATH = Path("config.yaml")
@@ -102,7 +103,7 @@ def enabled_platforms(purpose: str = "posting") -> list[str]:
     return [
         platform
         for platform in _requested_platforms()
-        if all(_is_configured(key) for key in requirements.get(platform, ()))
+        if _is_platform_configured(platform, requirements.get(platform, ()), purpose)
     ]
 
 
@@ -158,3 +159,45 @@ def _is_configured(key: str) -> bool:
     if key.endswith("_file"):
         return Path(str(value)).expanduser().exists()
     return True
+
+
+def _is_platform_configured(
+    platform: str,
+    requirements: tuple[str, ...],
+    purpose: str,
+) -> bool:
+    if purpose == "posting" and platform == "instagram":
+        return _is_instagram_posting_configured()
+    return all(_is_configured(key) for key in requirements)
+
+
+def _is_instagram_posting_configured() -> bool:
+    direct_instagram_keys = (
+        "instagram.access_token",
+        "instagram.instagram_account_id",
+        "instagram.gcs_bucket",
+    )
+    if all(_is_configured(key) for key in direct_instagram_keys):
+        return True
+
+    load_dotenv()
+    return all(
+        _has_non_empty_value(value)
+        for value in (
+            os.getenv("R2_ACCOUNT_ID") or get("make_bridge.r2.account_id"),
+            os.getenv("R2_ACCESS_KEY_ID")
+            or os.getenv("AWS_ACCESS_KEY_ID")
+            or get("make_bridge.r2.access_key_id"),
+            os.getenv("R2_SECRET_ACCESS_KEY")
+            or os.getenv("AWS_SECRET_ACCESS_KEY")
+            or get("make_bridge.r2.secret_access_key"),
+            os.getenv("R2_BUCKET_NAME") or get("make_bridge.r2.bucket_name"),
+            os.getenv("MAKE_WEBHOOK_URL") or get("make_bridge.webhook_url"),
+        )
+    )
+
+
+def _has_non_empty_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    return bool(value)

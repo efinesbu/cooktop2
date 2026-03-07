@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 import sys
 import types
@@ -54,6 +55,7 @@ sys.modules.setdefault(
 
 import cli as cli_module
 from src import db
+from src.make_bridge import BridgeResult
 from src.models import Content, PlatformPayload, Product
 
 
@@ -216,6 +218,95 @@ def test_schedule_and_post_due_skip_disabled_platform_payloads(
     assert posts[0].platform == "youtube"
 
 
+def test_approve_schedule_and_post_due_instagram_via_make_bridge(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "posting": {"stagger_minutes": {"instagram": 0}},
+            "platforms": {"enabled": ["instagram"]},
+            "make_bridge": {
+                "webhook_url": "https://example.make.test/webhook",
+                "r2": {
+                    "account_id": "account-123",
+                    "access_key_id": "access-key",
+                    "secret_access_key": "secret-key",
+                    "bucket_name": "velura-r2",
+                },
+            },
+            "data_root": str(tmp_path / "velura-data"),
+        },
+    )
+
+    instagram_module = _load_real_instagram_module()
+
+    product = Product(sku="serum-ig", name="Serum IG")
+    db.upsert_product(product)
+
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(b"video")
+    content = Content(
+        id="content-ig-123",
+        product_sku=product.sku,
+        theme="benefit",
+        hook_type="question",
+        video_local_path=str(video_path),
+    )
+    db.insert_content(content)
+    db.upsert_platform_payload(
+        PlatformPayload(
+            content_id=content.id,
+            platform="instagram",
+            caption="Launch caption",
+            hashtags="launch,velura",
+            utm_url="https://example.com/products/serum-ig?utm_content=content-ig-123",
+        )
+    )
+
+    calls: list[tuple[Path, str]] = []
+
+    def fake_bridge(video_path_arg: Path, caption: str, **kwargs) -> BridgeResult:
+        calls.append((video_path_arg, caption))
+        assert kwargs == {}
+        return BridgeResult(
+            object_key="videos/clip-123.mp4",
+            video_url="https://signed.example/video.mp4",
+            webhook_status_code=200,
+            webhook_response_text="accepted",
+        )
+
+    monkeypatch.setattr(instagram_module, "bridge_video_to_make", fake_bridge)
+    monkeypatch.setitem(cli_module.POSTERS, "instagram", instagram_module.InstagramPoster)
+
+    runner = CliRunner()
+
+    approved = runner.invoke(cli_module.cli, ["approve", "--content-id", content.id])
+    assert approved.exit_code == 0
+
+    scheduled = runner.invoke(cli_module.cli, ["schedule", "--content-id", content.id])
+    assert scheduled.exit_code == 0
+    payload = db.get_platform_payload(content.id, "instagram")
+    assert payload is not None
+    assert payload.status == "scheduled"
+    assert payload.publish_at is not None
+
+    posted = runner.invoke(cli_module.cli, ["post-due"])
+    assert posted.exit_code == 0
+
+    payload = db.get_platform_payload(content.id, "instagram")
+    assert payload is not None
+    assert payload.status == "posted"
+
+    assert calls == [(video_path, "Launch caption\n\n#launch #velura")]
+    posts = db.list_posts_for_content(content.id)
+    assert len(posts) == 1
+    assert posts[0].platform == "instagram"
+    assert posts[0].post_id == "make:videos/clip-123.mp4"
+
+
 def test_add_product_command_saves_manual_catalog_entry(
     tmp_db: Path,
     monkeypatch,
@@ -253,3 +344,8 @@ def test_add_product_command_saves_manual_catalog_entry(
     assert product.name == "Brow Pomade"
     assert product.product_url == "https://veluraesthetics.com/products/brow-pomade"
     assert product.generation_ready is False
+
+
+def _load_real_instagram_module():
+    sys.modules.pop("src.posters.instagram", None)
+    return importlib.import_module("src.posters.instagram")
