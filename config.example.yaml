@@ -11,6 +11,9 @@ shopify:
 openai:
   api_key: "sk-proj-XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
   model: "gpt-4.1-mini"
+  # GPT-5.4 pricing (defaults): $2.50/1M input, $15/1M output
+  # input_per_million_usd: 2.50
+  # output_per_million_usd: 15.0
 
 gemini:
   api_key: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"

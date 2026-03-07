@@ -33,21 +33,29 @@ def list_hooks(ids: Iterable[str] | None = None) -> list[HookDefinition]:
 
 
 def get_theme(theme_id: str) -> ThemeDefinition:
-    try:
+    if theme_id in THEME_MAP:
         return THEME_MAP[theme_id]
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown theme '{theme_id}'. Allowed values: {', '.join(THEMES)}"
-        ) from exc
+    # Legacy/unknown: use neutral weight so reports and bandit display still work
+    return ThemeDefinition(
+        id=theme_id,
+        label=theme_id,
+        summary="Legacy or unknown theme",
+        prompt_guidance="",
+        default_weight=1.0,
+    )
 
 
 def get_hook(hook_id: str) -> HookDefinition:
-    try:
+    if hook_id in HOOK_TYPE_MAP:
         return HOOK_TYPE_MAP[hook_id]
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown hook_type '{hook_id}'. Allowed values: {', '.join(HOOK_TYPES)}"
-        ) from exc
+    # Legacy/unknown: use neutral weight so reports and bandit display still work
+    return HookDefinition(
+        id=hook_id,
+        label=hook_id,
+        summary="Legacy or unknown hook type",
+        prompt_guidance="",
+        default_weight=1.0,
+    )
 
 
 def base_weight(theme_id: str, hook_id: str) -> float:

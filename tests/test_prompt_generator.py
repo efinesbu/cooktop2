@@ -126,6 +126,9 @@ def test_generate_content_uses_openai_and_persists_outputs(
     assert len(costs) == 1
     assert costs[0].api_provider == "openai"
     assert costs[0].tokens_or_units == 200
+    # 120 input @ $2.50/1M + 80 output @ $15/1M = 0.0003 + 0.0012 = 0.0015
+    assert costs[0].cost_usd is not None
+    assert abs(costs[0].cost_usd - 0.0015) < 1e-6
 
 
 def test_generate_content_allows_prompt_selected_labels_without_overrides(

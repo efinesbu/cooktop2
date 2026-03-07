@@ -8,8 +8,8 @@ import uuid
 from typing import Any
 
 from src import config, db
-from src.creative_strategy import get_hook, get_theme, whitelist_prompt_lines
-from src.models import Content, Cost, PlatformPayload, Product, ProductImage
+from src.creative_strategy import whitelist_prompt_lines
+from src.models import Content, Cost, HOOK_TYPES, PlatformPayload, Product, ProductImage, THEMES
 from src.utm import build_full_utm_link
 
 logger = logging.getLogger(__name__)
@@ -168,11 +168,15 @@ def generate_content(
     usage = response.usage
     input_tokens = usage.prompt_tokens if usage else 0
     output_tokens = usage.completion_tokens if usage else 0
+    input_per_m = float(config.get("openai.input_per_million_usd", 2.50))
+    output_per_m = float(config.get("openai.output_per_million_usd", 15.0))
+    cost_usd = (input_tokens / 1_000_000 * input_per_m) + (output_tokens / 1_000_000 * output_per_m)
     db.insert_cost(Cost(
         content_id=content_id,
         step="prompt_gen",
         api_provider="openai",
         tokens_or_units=input_tokens + output_tokens,
+        cost_usd=cost_usd,
     ))
 
     extras = {
@@ -265,8 +269,14 @@ def _validate_response_shape(
 
     returned_theme = data["theme"].strip()
     returned_hook = data["hook_type"].strip()
-    get_theme(returned_theme)
-    get_hook(returned_hook)
+    if returned_theme not in THEMES:
+        raise ValueError(
+            f"OpenAI response theme '{returned_theme}' not in whitelist. Allowed: {', '.join(THEMES)}"
+        )
+    if returned_hook not in HOOK_TYPES:
+        raise ValueError(
+            f"OpenAI response hook_type '{returned_hook}' not in whitelist. Allowed: {', '.join(HOOK_TYPES)}"
+        )
 
     if theme and returned_theme != theme:
         raise ValueError(

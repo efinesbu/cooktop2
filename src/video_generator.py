@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 XAI_VIDEO_GENERATIONS_ENDPOINT = "https://api.x.ai/v1/videos/generations"
 XAI_VIDEO_STATUS_ENDPOINT = "https://api.x.ai/v1/videos/{request_id}"
 TARGET_DURATION_SECONDS = 15
+XAI_VIDEO_COST_PER_SECOND_USD = 0.05
 MAX_RETRIES = 3
 INITIAL_BACKOFF = 2.0
 DEFAULT_POLL_INTERVAL_SECONDS = 15.0
@@ -78,8 +79,10 @@ def generate_video(
     db.update_content_video_path(content.id, str(video_path))
 
     video_meta = response_data.get("video", {})
-    cost_usd = response_data.get("cost_usd")
     duration = int(video_meta.get("duration") or TARGET_DURATION_SECONDS)
+    cost_usd = response_data.get("cost_usd")
+    if cost_usd is None:
+        cost_usd = duration * XAI_VIDEO_COST_PER_SECOND_USD
     db.insert_cost(Cost(
         content_id=content.id,
         step="video_gen",

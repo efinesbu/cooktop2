@@ -47,6 +47,7 @@ def generate_starting_image(content: Content, product: Product) -> Path:
         content_id=content.id,
         step="image_gen",
         api_provider="gemini",
+        cost_usd=0.0,
     ))
 
     return out_path
