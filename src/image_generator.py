@@ -37,7 +37,8 @@ def generate_starting_image(content: Content, product: Product) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{content.id}_start.png"
 
-    image_bytes = _generate_with_retries(client, model, contents, max_attempts=3)
+    aspect_ratio = config.get("gemini.aspect_ratio", "9:16")
+    image_bytes = _generate_with_retries(client, model, contents, aspect_ratio, max_attempts=3)
 
     out_path.write_bytes(image_bytes)
     logger.info("Saved starting image to %s", out_path)
@@ -95,6 +96,7 @@ def _generate_with_retries(
     client: genai.Client,
     model: str,
     contents: list[types.Part] | str,
+    aspect_ratio: str = "9:16",
     max_attempts: int = 3,
 ) -> bytes:
     delay = 2.0
@@ -105,6 +107,7 @@ def _generate_with_retries(
                 contents=contents,
                 config=types.GenerateContentConfig(
                     response_modalities=["IMAGE"],
+                    image_config=types.ImageConfig(aspect_ratio=aspect_ratio),
                 ),
             )
             for part in response.candidates[0].content.parts:

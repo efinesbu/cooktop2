@@ -34,7 +34,7 @@ def generate_video(
     model = config.get("xai.model", "grok-imagine-video")
     poll_interval = float(config.get("xai.poll_interval_seconds", DEFAULT_POLL_INTERVAL_SECONDS))
     poll_timeout = float(config.get("xai.poll_timeout_seconds", DEFAULT_POLL_TIMEOUT_SECONDS))
-    aspect_ratio = config.get("xai.aspect_ratio")
+    aspect_ratio = config.get("xai.aspect_ratio", "9:16")
     resolution = config.get("xai.resolution", DEFAULT_RESOLUTION)
 
     if poll_interval <= 0:
@@ -50,8 +50,7 @@ def generate_video(
         "duration": TARGET_DURATION_SECONDS,
         "resolution": resolution,
     }
-    if aspect_ratio:
-        request_payload["aspect_ratio"] = aspect_ratio
+    request_payload["aspect_ratio"] = aspect_ratio
 
     headers = {
         "Authorization": f"Bearer {api_key}",
