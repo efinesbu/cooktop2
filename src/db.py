@@ -30,6 +30,7 @@ def set_db_path(path: Path | str) -> None:
 def init_db() -> None:
     schema = Path("db/schema.sql").read_text(encoding="utf-8")
     with _connect() as conn:
+        _migrate_bandit_tables(conn)
         conn.executescript(schema)
         _run_migrations(conn)
 
@@ -69,25 +70,61 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_payloads_content ON platform_payloads(content_id);
         CREATE INDEX IF NOT EXISTS idx_payloads_publish ON platform_payloads(publish_at);
         CREATE INDEX IF NOT EXISTS idx_payloads_status  ON platform_payloads(status);
-        CREATE TABLE IF NOT EXISTS bandit_observations (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            post_id         INTEGER NOT NULL UNIQUE REFERENCES posts(id),
-            metric_id       INTEGER NOT NULL REFERENCES metrics(id),
-            product_sku     TEXT NOT NULL REFERENCES products(sku),
-            theme           TEXT NOT NULL,
-            hook_type       TEXT NOT NULL,
-            engagement_rate REAL NOT NULL,
-            success         INTEGER NOT NULL,
-            observed_at     TEXT DEFAULT (datetime('now'))
-        );
-        CREATE INDEX IF NOT EXISTS idx_bandit_obs_product ON bandit_observations(product_sku);
         """
     )
+    _migrate_bandit_tables(conn)
 
 
 def _table_columns(conn: sqlite3.Connection, table_name: str) -> list[str]:
     rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
     return [row["name"] for row in rows]
+
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
+def _migrate_bandit_tables(conn: sqlite3.Connection) -> None:
+    if _table_exists(conn, "bandit_state"):
+        bandit_state_columns = set(_table_columns(conn, "bandit_state"))
+        if "arm_key" not in bandit_state_columns:
+            conn.execute("ALTER TABLE bandit_state RENAME TO bandit_state_legacy")
+
+    if _table_exists(conn, "bandit_observations"):
+        observation_columns = set(_table_columns(conn, "bandit_observations"))
+        if "content_id" not in observation_columns:
+            conn.execute("ALTER TABLE bandit_observations RENAME TO bandit_observations_legacy")
+
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS bandit_state (
+            arm_key         TEXT PRIMARY KEY,
+            theme           TEXT NOT NULL,
+            hook_type       TEXT NOT NULL,
+            alpha           REAL DEFAULT 1.0,
+            beta            REAL DEFAULT 1.0,
+            last_updated    TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS bandit_observations (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            content_id      TEXT NOT NULL UNIQUE REFERENCES content(id),
+            product_sku     TEXT NOT NULL REFERENCES products(sku),
+            arm_key         TEXT NOT NULL,
+            theme           TEXT NOT NULL,
+            hook_type       TEXT NOT NULL,
+            aggregated_engagement_rate REAL NOT NULL,
+            success         INTEGER NOT NULL,
+            observed_at     TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_bandit_state_theme ON bandit_state(theme, hook_type);
+        CREATE INDEX IF NOT EXISTS idx_bandit_obs_arm     ON bandit_observations(arm_key);
+        CREATE INDEX IF NOT EXISTS idx_bandit_obs_product ON bandit_observations(product_sku);
+        """
+    )
 
 
 @contextmanager
@@ -558,52 +595,84 @@ def list_metrics_since(days: int = 30) -> list[Metric]:
 def upsert_bandit_arm(arm: BanditArm) -> None:
     with _connect() as conn:
         conn.execute(
-            """INSERT INTO bandit_state (product_sku, theme, hook_type, successes, failures)
+            """INSERT INTO bandit_state (arm_key, theme, hook_type, alpha, beta)
                VALUES (?,?,?,?,?)
-               ON CONFLICT(product_sku, theme, hook_type) DO UPDATE SET
-                 successes=excluded.successes,
-                 failures=excluded.failures,
+               ON CONFLICT(arm_key) DO UPDATE SET
+                 theme=excluded.theme,
+                 hook_type=excluded.hook_type,
+                 alpha=excluded.alpha,
+                 beta=excluded.beta,
                  last_updated=datetime('now')""",
-            (arm.product_sku, arm.theme, arm.hook_type,
-             arm.successes, arm.failures),
+            (arm.arm_key, arm.theme, arm.hook_type, arm.alpha, arm.beta),
         )
 
 
-def get_bandit_arms(product_sku: str) -> list[BanditArm]:
+def seed_bandit_arms(arms: list[BanditArm]) -> None:
+    for arm in arms:
+        upsert_bandit_arm(arm)
+
+
+def get_bandit_arm(arm_key: str) -> BanditArm | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM bandit_state WHERE arm_key=?",
+            (arm_key,),
+        ).fetchone()
+    if not row:
+        return None
+    return BanditArm(
+        arm_key=row["arm_key"],
+        theme=row["theme"],
+        hook_type=row["hook_type"],
+        alpha=row["alpha"],
+        beta=row["beta"],
+        last_updated=row["last_updated"],
+    )
+
+
+def list_bandit_arms() -> list[BanditArm]:
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM bandit_state WHERE product_sku=?", (product_sku,)
+            "SELECT * FROM bandit_state ORDER BY theme, hook_type"
         ).fetchall()
     return [
         BanditArm(
-            product_sku=r["product_sku"], theme=r["theme"],
-            hook_type=r["hook_type"], successes=r["successes"],
-            failures=r["failures"], last_updated=r["last_updated"],
+            arm_key=row["arm_key"],
+            theme=row["theme"],
+            hook_type=row["hook_type"],
+            alpha=row["alpha"],
+            beta=row["beta"],
+            last_updated=row["last_updated"],
         )
-        for r in rows
+        for row in rows
     ]
 
 
-def increment_bandit(product_sku: str, theme: str, hook_type: str,
-                     success: bool) -> None:
-    col = "successes" if success else "failures"
-    initial_successes = 2 if success else 1
-    initial_failures = 1 if success else 2
+def get_bandit_arms(product_sku: str | None = None) -> list[BanditArm]:
+    return list_bandit_arms()
+
+
+def increment_bandit(arm_key: str, success: bool) -> None:
+    arm = get_bandit_arm(arm_key)
+    if arm is None:
+        raise ValueError(f"Bandit arm not found: {arm_key}")
+
+    col = "alpha" if success else "beta"
     with _connect() as conn:
         conn.execute(
-            f"""INSERT INTO bandit_state (product_sku, theme, hook_type, successes, failures)
-                VALUES (?,?,?,?,?)
-                ON CONFLICT(product_sku, theme, hook_type) DO UPDATE SET
-                  {col}={col}+1, last_updated=datetime('now')""",
-            (product_sku, theme, hook_type, initial_successes, initial_failures),
+            f"""UPDATE bandit_state
+                SET {col}={col}+1,
+                    last_updated=datetime('now')
+                WHERE arm_key=?""",
+            (arm_key,),
         )
+    
 
-
-def has_bandit_observation(post_id: int) -> bool:
+def has_bandit_observation_for_content(content_id: str) -> bool:
     with _connect() as conn:
         row = conn.execute(
-            "SELECT 1 FROM bandit_observations WHERE post_id=?",
-            (post_id,),
+            "SELECT 1 FROM bandit_observations WHERE content_id=?",
+            (content_id,),
         ).fetchone()
     return row is not None
 
@@ -612,15 +681,15 @@ def insert_bandit_observation(observation: BanditObservation) -> int:
     with _connect() as conn:
         cur = conn.execute(
             """INSERT INTO bandit_observations
-               (post_id, metric_id, product_sku, theme, hook_type, engagement_rate, success)
+               (content_id, product_sku, arm_key, theme, hook_type, aggregated_engagement_rate, success)
                VALUES (?,?,?,?,?,?,?)""",
             (
-                observation.post_id,
-                observation.metric_id,
+                observation.content_id,
                 observation.product_sku,
+                observation.arm_key,
                 observation.theme,
                 observation.hook_type,
-                observation.engagement_rate,
+                observation.aggregated_engagement_rate,
                 int(observation.success),
             ),
         )

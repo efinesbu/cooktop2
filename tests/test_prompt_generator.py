@@ -218,3 +218,9 @@ def test_generate_content_allows_prompt_selected_labels_without_overrides(
     assert content.theme == "routine"
     assert content.hook_type == "quick_tip"
     assert content.hook_text == response_payload["hook_text"]
+
+    # YouTube captions must end with "Link in bio"
+    payloads = db.list_platform_payloads(content.id)
+    youtube_payload = next(p for p in payloads if p.platform == "youtube")
+    assert youtube_payload.caption is not None
+    assert youtube_payload.caption.rstrip().lower().endswith("link in bio")

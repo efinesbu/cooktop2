@@ -22,8 +22,9 @@ pip install -r requirements.txt
 
 # 5. Configure
 cp config.example.yaml config.yaml
-# Fill in the keys for the providers you are ready to use.
-# Optional: set `platforms.enabled` to only the platforms you want active right now.
+cp .env.example .env
+# Put API keys and tokens in .env (never commit .env). Env vars override config.yaml.
+# Fill in config.yaml for non-secret settings. Set `platforms.enabled` to the platforms you want.
 
 # 6. Add a product to the local catalog
 python cli.py add-product --sku <product-slug> --name "Product Name" --url https://your-site.com/products/<handle>
@@ -40,7 +41,7 @@ python cli.py sync-products
 ```
 8:00 AM   pull-analytics + morning-briefing (cron)
           Operator reviews briefing
-          Operator runs: python cli.py run --auto --count 12
+          Operator runs: python cli.py run --auto --count 8
           Preview: python cli.py preview --today
           Approve: python cli.py approve --content-id <id>
           Schedule: python cli.py schedule --today
@@ -56,8 +57,8 @@ python cli.py sync-products
 | `sync-products` | Pull product catalog from Shopify if configured |
 | `register-images --product SLUG` | Scan and register local product images |
 | `morning-briefing` | Generate daily performance + recommendation report |
-| `run --auto --count N` | Generate N clips for eligible products using learning-biased strategy recommendations |
-| `run --product SLUG --count N` | Generate with prompt-selected theme/hook from the whitelist |
+| `run --auto --count N` | Generate N total clips across eligible products using the shared bandit allocation |
+| `run --product SLUG --count N` | Generate N clips using shared bandit theme/hook recommendations (starter arms) |
 | `run --product SLUG --theme T --hook H --count N` | Generate with manual strategy overrides |
 | `run --product SLUG --theme T... --hook H... --count N --rotate-theme-hook` | Cycle through provided manual theme/hook overrides once per clip |
 | `exclude --product SLUG --reason "..."` | Exclude product from generation |
@@ -92,16 +93,23 @@ Python CLI (local machine)
 
 Velura now treats `theme` and `hook_type` as real creative strategy labels instead of pure CLI metadata.
 
-- If you run `python cli.py run --product <slug> --count N`, the prompt generator chooses the best `theme` and `hook_type` from a curated whitelist and persists the exact labels it used.
+- If you run `python cli.py run --product <slug> --count N` without `--theme` or `--hook`, the shared bandit recommends theme/hook pairs from the starter arms; the prompt generator then fills in the creative details.
 - If you pass `--theme` or `--hook`, those values become locked overrides and the generator fills in the rest.
 - If you also pass `--rotate-theme-hook`, manual runs cycle through the provided `--theme` and `--hook` values clip-by-clip when `count > 1` instead of repeating the same locked pair.
-- `run --auto` still auto-selects products, but the creative strategy layer now applies cold-start weights first and gradually shifts toward learned winners as analytics accumulate.
+- `run --auto` now uses one shared global bandit across eligible products, allocates a daily total number of clips, and learns once per creative instead of once per platform post.
 - Reporting, UTM campaign naming, morning briefing recommendations, and bandit learning all use the persisted labels returned by generation.
 
 Current curated whitelist:
 
-- Themes: `benefit`, `problem_solution`, `curiosity`, `social_proof`, `routine`, `urgency`
+- Themes: `benefit`, `problem_solution`, `curiosity`, `social_proof`, `routine`, `urgency`, `fear`
 - Hook types: `question`, `bold_claim`, `relatable_pain`, `visual_surprise`, `quick_tip`
+
+Starter shared bandit arms:
+
+- `problem_solution__relatable_pain`
+- `benefit__bold_claim`
+- `curiosity__question`
+- `benefit__visual_surprise`
 
 ## Project Structure
 
@@ -145,6 +153,7 @@ Copy `config.example.yaml` to `config.yaml` and fill in:
 - **YouTube** — Google OAuth Desktop app client secrets JSON for posting, optional `youtube.token_file` for the cached login token, optional `youtube.login_hint` to suggest the correct Google account during auth, plus `youtube.api_key` for analytics pulls
 - **Instagram** — Graph API access token + account ID; set `instagram.gcs_bucket` if you want automatic public video hosting for Reels
 - **TikTok** — `tiktok.client_key`, `tiktok.client_secret`, `tiktok.access_token`, and `tiktok.refresh_token` for posting; Content Posting API approval is required. Analytics only need the client key + secret. The separate review demo uses `tiktok-sandbox.*` settings.
+- **Bandit** — optional shared-bandit controls for `bandit.daily_slots`, `bandit.min_top_k`, `bandit.allocation_ceiling`, `bandit.expand_after_creatives`, and `bandit.starter_arms`; used by `run --auto` and `run --product SLUG` (when no `--theme`/`--hook` is given)
 - **X** — API key/secret + access token/secret (Basic tier for posting)
 - **Make bridge** — optional `make_bridge.webhook_url` plus `make_bridge.r2.account_id`, `make_bridge.r2.access_key_id`, `make_bridge.r2.secret_access_key`, and `make_bridge.r2.bucket_name` if you want to upload finished `.mp4` files to Cloudflare R2 and forward a presigned URL to Make.com
 - **GCS** — Bucket name + service account credentials (optional, for archival)

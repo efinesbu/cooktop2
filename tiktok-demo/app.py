@@ -5,20 +5,26 @@ import logging
 import yaml
 import requests
 import secrets
+
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response, HTTPException, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from urllib.parse import urlencode
 
+load_dotenv()
+
 # Load config
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
-with open(CONFIG_PATH, "r") as f:
-    config = yaml.safe_load(f)
+config = {}
+if os.path.exists(CONFIG_PATH):
+    with open(CONFIG_PATH, "r") as f:
+        config = yaml.safe_load(f) or {}
 
-# TikTok Sandbox Credentials Configuration
+# TikTok Sandbox Credentials – env vars override config.yaml
 tiktok_config = config.get("tiktok-sandbox", {})
-TIKTOK_CLIENT_KEY = tiktok_config.get("client_key")
-TIKTOK_CLIENT_SECRET = tiktok_config.get("client_secret")
+TIKTOK_CLIENT_KEY = os.getenv("TIKTOK_SANDBOX_CLIENT_KEY") or tiktok_config.get("client_key")
+TIKTOK_CLIENT_SECRET = os.getenv("TIKTOK_SANDBOX_CLIENT_SECRET") or tiktok_config.get("client_secret")
 
 # Redirect URI must EXACTLY match one registered in TikTok Developer Portal.
 # For local dev: use http://localhost:8000/callback (add it in Login Kit > Redirect URIs)

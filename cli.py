@@ -12,7 +12,6 @@ from rich.table import Table
 
 from src import bandit, config, db, storage
 from src.analytics import PULLERS
-from src.creative_strategy import base_weight
 from src.cost_tracker import check_budget, content_cost_summary
 from src.image_generator import generate_starting_image
 from src.models import Content, HOOK_TYPES, PLATFORMS, PlatformPayload, Post, Product, THEMES
@@ -346,7 +345,7 @@ def morning_briefing_cmd():
 @click.option("--product", "slugs", multiple=True, help="Product SKU (repeatable)")
 @click.option("--theme", "themes", multiple=True, type=click.Choice(THEMES), help="Theme (repeatable)")
 @click.option("--hook", "hooks", multiple=True, type=click.Choice(HOOK_TYPES), help="Hook type (repeatable)")
-@click.option("--count", default=4, show_default=True, help="Clips per product")
+@click.option("--count", default=8, show_default=True, help="Total clips across all products in --auto mode")
 @click.option(
     "--rotate-theme-hook",
     is_flag=True,
@@ -387,17 +386,38 @@ def _run_auto(count: int, should_post: bool):
         console.print("[yellow]No eligible products found.[/yellow]")
         return
 
-    total = 0
-    for product in products:
-        console.print(Panel(f"[bold]{product.name}[/bold] ({product.sku})", style="blue"))
-        rec = bandit.recommend(product.sku, count)
-        for alloc in rec.allocations:
-            for _ in range(alloc.count):
-                result = _generate_single(product, alloc.theme, alloc.hook_type, should_post)
-                if result:
-                    total += 1
+    recommendation = bandit.recommend(total_slots=count)
+    queued_runs: list[tuple[Product, str, str]] = []
+    for index, alloc in enumerate(recommendation.allocations):
+        for _ in range(alloc.count):
+            product = products[len(queued_runs) % len(products)]
+            queued_runs.append((product, alloc.theme, alloc.hook_type))
 
-    console.print(f"\n[green]{total}[/green] pieces of content generated across {len(products)} products.")
+    summary = Table(title="Global Bandit Allocation")
+    summary.add_column("Theme", style="cyan")
+    summary.add_column("Hook Type")
+    summary.add_column("Clips", justify="right")
+    for alloc in recommendation.allocations:
+        summary.add_row(alloc.theme, alloc.hook_type, str(alloc.count))
+    console.print(summary)
+
+    total = 0
+    grouped_runs: dict[str, list[tuple[str, str]]] = {}
+    for product, theme, hook_type in queued_runs:
+        grouped_runs.setdefault(product.sku, []).append((theme, hook_type))
+
+    for product in products:
+        product_runs = grouped_runs.get(product.sku, [])
+        if not product_runs:
+            continue
+        console.print(Panel(f"[bold]{product.name}[/bold] ({product.sku})", style="blue"))
+        for theme, hook_type in product_runs:
+            result = _generate_single(product, theme, hook_type, should_post)
+            if result:
+                total += 1
+
+    piece = "piece" if total == 1 else "pieces"
+    console.print(f"\n[green]{total}[/green] {piece} of content generated ({len(products)} products eligible).")
 
 
 def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
@@ -415,7 +435,15 @@ def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
             continue
 
         console.print(Panel(f"[bold]{product.name}[/bold] ({product.sku})", style="blue"))
-        for theme, hook in _manual_strategy_runs(themes, hooks, count, rotate_theme_hook):
+        if not themes and not hooks:
+            rec = bandit.recommend(total_slots=count)
+            strategy_pairs = []
+            for alloc in rec.allocations:
+                for _ in range(alloc.count):
+                    strategy_pairs.append((alloc.theme, alloc.hook_type))
+        else:
+            strategy_pairs = _manual_strategy_runs(themes, hooks, count, rotate_theme_hook)
+        for theme, hook in strategy_pairs:
             result = _generate_single(product, theme, hook, should_post)
             if result:
                 total += 1
@@ -990,28 +1018,29 @@ def _report_platform_metrics(content_list: list[Content]):
 
 
 def _report_bandit_weights(slug: str):
-    arms = db.get_bandit_arms(slug)
+    del slug
+    arms = db.list_bandit_arms()
     if not arms:
         console.print("[dim]No bandit arms initialized yet.[/dim]")
         return
 
-    recommendation_count = min(5, len(THEMES) * len(HOOK_TYPES))
-    rec = bandit.recommend(slug, recommendation_count)
+    recommendation_count = int(config.get("bandit.daily_slots", 8))
+    rec = bandit.recommend(recommendation_count)
 
     rec_table = Table(title="Current Recommendations")
     rec_table.add_column("Theme", style="cyan")
     rec_table.add_column("Hook Type")
-    rec_table.add_column("Base Weight", justify="right")
+    rec_table.add_column("Posterior Mean", justify="right")
     rec_table.add_column("Sampled Score", justify="right")
     rec_table.add_column("Mode")
     for alloc in rec.allocations:
         arm = next((item for item in arms if item.theme == alloc.theme and item.hook_type == alloc.hook_type), None)
-        trials = max((arm.successes + arm.failures - 2), 0) if arm else 0
+        trials = max(int((arm.alpha + arm.beta) - 2), 0) if arm else 0
         mode = "explore" if trials < 5 else "exploit"
         rec_table.add_row(
             alloc.theme,
             alloc.hook_type,
-            f"{base_weight(alloc.theme, alloc.hook_type):.2f}",
+            f"{bandit.posterior_mean(arm):.3f}" if arm else "0.500",
             f"{alloc.score:.3f}",
             mode,
         )
@@ -1019,24 +1048,24 @@ def _report_bandit_weights(slug: str):
 
     arms.sort(
         key=lambda a: (
-            a.successes / max(a.successes + a.failures, 1),
-            base_weight(a.theme, a.hook_type),
+            bandit.posterior_mean(a),
+            a.alpha,
         ),
         reverse=True,
     )
     table = Table(title="Learned Strategy Performance (top 10)")
     table.add_column("Theme", style="cyan")
     table.add_column("Hook Type")
-    table.add_column("Base Weight", justify="right")
+    table.add_column("Arm Key")
     table.add_column("Trials", justify="right")
-    table.add_column("Win Rate", justify="right")
+    table.add_column("Posterior Mean", justify="right")
     for arm in arms[:10]:
-        trials = max(arm.successes + arm.failures - 2, 0)
-        rate = arm.successes / max(arm.successes + arm.failures, 1) * 100
+        trials = max(int((arm.alpha + arm.beta) - 2), 0)
+        rate = bandit.posterior_mean(arm) * 100
         table.add_row(
             arm.theme,
             arm.hook_type,
-            f"{base_weight(arm.theme, arm.hook_type):.2f}",
+            arm.arm_key,
             str(trials),
             f"{rate:.0f}%",
         )

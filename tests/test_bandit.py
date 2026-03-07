@@ -4,17 +4,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src import bandit, db
-from src.creative_strategy import base_weight
-from src.models import HOOK_TYPES, HOOK_DEFINITIONS, Product, THEMES, THEME_DEFINITIONS
+from src.models import HOOK_DEFINITIONS, HOOK_TYPES, Product, THEMES, THEME_DEFINITIONS
 
 
 def test_recommend_flat_priors(tmp_db: Path) -> None:
     db.upsert_product(Product(sku="flat-test", name="Flat"))
 
     with patch("numpy.random.beta", return_value=0.5):
-        rec = bandit.recommend("flat-test", count=1)
+        rec = bandit.recommend(total_slots=1)
 
-    assert rec.product_sku == "flat-test"
     assert len(rec.allocations) == 1
     assert rec.allocations[0].count == 1
 
@@ -24,7 +22,7 @@ def test_recommend_returns_correct_count(tmp_db: Path) -> None:
 
     requested = 5
     with patch("numpy.random.beta", return_value=0.5):
-        rec = bandit.recommend("count-test", count=requested)
+        rec = bandit.recommend(total_slots=requested)
 
     total_allocated = sum(a.count for a in rec.allocations)
     assert total_allocated == requested
@@ -34,21 +32,21 @@ def test_initialize_arms(tmp_db: Path) -> None:
     db.upsert_product(Product(sku="init-test", name="Init"))
     bandit.initialize_arms("init-test")
 
-    arms = db.get_bandit_arms("init-test")
-    expected_count = len(THEMES) * len(HOOK_TYPES)
+    arms = db.list_bandit_arms()
+    expected_count = len(bandit.starter_arm_keys())
     assert len(arms) == expected_count
 
     themes_seen = {a.theme for a in arms}
     hooks_seen = {a.hook_type for a in arms}
-    assert themes_seen == set(THEMES)
-    assert hooks_seen == set(HOOK_TYPES)
+    assert themes_seen.issubset(set(THEMES))
+    assert hooks_seen.issubset(set(HOOK_TYPES))
 
     for arm in arms:
-        assert arm.successes == 1
-        assert arm.failures == 1
+        assert arm.alpha == 1.0
+        assert arm.beta == 1.0
 
 
-def test_whitelist_is_meaningful_and_distinct() -> None:
+def test_whitelist_and_starter_arms_are_meaningful() -> None:
     assert THEMES == [theme.id for theme in THEME_DEFINITIONS if theme.enabled]
     assert HOOK_TYPES == [hook.id for hook in HOOK_DEFINITIONS if hook.enabled]
     assert len(THEMES) == len(set(THEMES))
@@ -58,30 +56,30 @@ def test_whitelist_is_meaningful_and_distinct() -> None:
     assert "quick_tip" in HOOK_TYPES
     assert "visual_surprise" in HOOK_TYPES
 
-
-def test_recommend_can_filter_by_theme(tmp_db: Path) -> None:
-    db.upsert_product(Product(sku="theme-filter", name="Theme Filter"))
-
-    with patch("numpy.random.random", return_value=0.5):
-        rec = bandit.recommend("theme-filter", count=3, theme="benefit")
-
-    assert len(rec.allocations) == 3
-    assert {alloc.theme for alloc in rec.allocations} == {"benefit"}
-    assert {alloc.hook_type for alloc in rec.allocations}.issubset(set(HOOK_TYPES))
+    starter_keys = bandit.starter_arm_keys()
+    assert len(starter_keys) == 4
+    for key in starter_keys:
+        theme, hook_type = bandit.parse_arm_key(key)
+        assert theme in THEMES
+        assert hook_type in HOOK_TYPES
 
 
-def test_recommend_uses_cold_start_weights(tmp_db: Path) -> None:
-    db.upsert_product(Product(sku="weighted-test", name="Weighted"))
+def test_recommend_gives_top_k_a_minimum_slot(tmp_db: Path) -> None:
+    db.upsert_product(Product(sku="topk-test", name="Top K"))
 
-    with patch("numpy.random.random", return_value=1.0):
-        rec = bandit.recommend("weighted-test", count=1)
+    with patch("numpy.random.beta", side_effect=[0.9, 0.8, 0.7, 0.1]):
+        rec = bandit.recommend(total_slots=4)
 
-    top = rec.allocations[0]
-    winning_weight = base_weight(top.theme, top.hook_type)
+    assert sum(item.count for item in rec.allocations) == 4
+    assert len(rec.allocations) >= 3
+    assert all(item.count >= 1 for item in rec.allocations[:3])
 
-    all_weights = [
-        base_weight(theme, hook_type)
-        for theme in THEMES
-        for hook_type in HOOK_TYPES
-    ]
-    assert winning_weight == max(all_weights)
+
+def test_recommend_enforces_allocation_ceiling(tmp_db: Path) -> None:
+    db.upsert_product(Product(sku="ceiling-test", name="Ceiling"))
+
+    with patch("numpy.random.beta", side_effect=[0.99, 0.01, 0.01, 0.01]):
+        rec = bandit.recommend(total_slots=8)
+
+    assert sum(item.count for item in rec.allocations) == 8
+    assert max(item.count for item in rec.allocations) <= 5

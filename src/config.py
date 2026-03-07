@@ -11,6 +11,40 @@ from src.models import PLATFORMS
 _DEFAULT_CONFIG_PATH = Path("config.yaml")
 _config: dict[str, Any] | None = None
 
+# Dotted config keys that can be overridden by environment variables.
+# Env vars take precedence over config.yaml when set.
+_ENV_OVERRIDES: dict[str, str] = {
+    "openai.api_key": "OPENAI_API_KEY",
+    "gemini.api_key": "GEMINI_API_KEY",
+    "xai.api_key": "XAI_API_KEY",
+    "youtube.api_key": "YOUTUBE_API_KEY",
+    "tiktok.client_key": "TIKTOK_CLIENT_KEY",
+    "tiktok.client_secret": "TIKTOK_CLIENT_SECRET",
+    "tiktok.access_token": "TIKTOK_ACCESS_TOKEN",
+    "tiktok.refresh_token": "TIKTOK_REFRESH_TOKEN",
+    "tiktok-sandbox.client_key": "TIKTOK_SANDBOX_CLIENT_KEY",
+    "tiktok-sandbox.client_secret": "TIKTOK_SANDBOX_CLIENT_SECRET",
+    "x.api_key": "X_API_KEY",
+    "x.api_secret": "X_API_SECRET",
+    "x.access_token": "X_ACCESS_TOKEN",
+    "x.access_token_secret": "X_ACCESS_TOKEN_SECRET",
+    "instagram.access_token": "INSTAGRAM_ACCESS_TOKEN",
+    "instagram.instagram_account_id": "INSTAGRAM_ACCOUNT_ID",
+    "shopify.store_url": "SHOPIFY_STORE_URL",
+    "shopify.admin_api_token": "SHOPIFY_ADMIN_API_TOKEN",
+    "make_bridge.webhook_url": "MAKE_WEBHOOK_URL",
+    "make_bridge.r2.account_id": "R2_ACCOUNT_ID",
+    "make_bridge.r2.access_key_id": "R2_ACCESS_KEY_ID",
+    "make_bridge.r2.secret_access_key": "R2_SECRET_ACCESS_KEY",
+    "make_bridge.r2.bucket_name": "R2_BUCKET_NAME",
+    "briefing.email": "BRIEFING_EMAIL",
+    "briefing.smtp_host": "SMTP_HOST",
+    "briefing.smtp_port": "SMTP_PORT",
+    "briefing.smtp_user": "SMTP_USER",
+    "briefing.smtp_pass": "SMTP_PASS",
+    "briefing.from_email": "BRIEFING_FROM_EMAIL",
+}
+
 _POSTING_REQUIREMENTS: dict[str, tuple[str, ...]] = {
     "youtube": ("youtube.client_secrets_file",),
     "instagram": (
@@ -53,6 +87,7 @@ def _resolve_data_root(raw: str) -> Path:
 
 def load_config(path: Path | str | None = None) -> dict[str, Any]:
     global _config
+    load_dotenv()
     if _config is not None:
         return _config
     cfg_path = Path(path) if path else _DEFAULT_CONFIG_PATH
@@ -67,7 +102,14 @@ def load_config(path: Path | str | None = None) -> dict[str, Any]:
 
 
 def get(key: str, default: Any = None) -> Any:
-    """Dot-notation lookup, e.g. get('shopify.store_url')."""
+    """Dot-notation lookup, e.g. get('shopify.store_url').
+    For keys in _ENV_OVERRIDES, env vars take precedence over config.yaml."""
+    load_dotenv()
+    env_var = _ENV_OVERRIDES.get(key)
+    if env_var:
+        val = os.getenv(env_var)
+        if val is not None and str(val).strip():
+            return val.strip()
     cfg = load_config()
     parts = key.split(".")
     node: Any = cfg

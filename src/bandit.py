@@ -1,88 +1,186 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from math import floor
 from statistics import median
 
 import numpy as np
 
-from src import db
-from src.creative_strategy import base_weight
+from src import config, db
 from src.models import (
     BanditArm,
     BanditObservation,
     BanditRecommendation,
     ThemeHookAllocation,
-    THEMES,
-    HOOK_TYPES,
 )
 
+ARM_KEY_SEPARATOR = "__"
+DEFAULT_STARTER_ARMS: list[tuple[str, str]] = [
+    ("problem_solution", "relatable_pain"),
+    ("benefit", "bold_claim"),
+    ("curiosity", "question"),
+    ("benefit", "visual_surprise"),
+]
 
-def recommend(
-    product_sku: str,
-    count: int,
-    theme: str | None = None,
-    hook_type: str | None = None,
-) -> BanditRecommendation:
-    existing_arms = db.get_bandit_arms(product_sku)
-    if not existing_arms:
-        initialize_arms(product_sku)
-        existing_arms = db.get_bandit_arms(product_sku)
-    existing = {(a.theme, a.hook_type): a for a in existing_arms}
 
-    scored: list[tuple[str, str, float]] = []
-    for theme_id in THEMES:
-        if theme and theme_id != theme:
+def arm_key(theme: str, hook_type: str) -> str:
+    return f"{theme}{ARM_KEY_SEPARATOR}{hook_type}"
+
+
+def parse_arm_key(key: str) -> tuple[str, str]:
+    theme, hook_type = key.split(ARM_KEY_SEPARATOR, 1)
+    return theme, hook_type
+
+
+def starter_arm_keys() -> list[str]:
+    configured = config.get("bandit.starter_arms")
+    if configured is None:
+        return [arm_key(theme, hook_type) for theme, hook_type in DEFAULT_STARTER_ARMS]
+    if not isinstance(configured, list):
+        raise ValueError("config.yaml `bandit.starter_arms` must be a list of arm keys")
+    return [str(value).strip() for value in configured if str(value).strip()]
+
+
+def initialize_arms(product_sku: str | None = None) -> None:
+    del product_sku
+    existing = {arm.arm_key for arm in db.list_bandit_arms()}
+    starter_arms = []
+    for key in starter_arm_keys():
+        if key in existing:
             continue
-        for hook_id in HOOK_TYPES:
-            if hook_type and hook_id != hook_type:
-                continue
-            arm = existing.get((theme_id, hook_id))
-            score = _score_arm(theme_id, hook_id, arm)
-            scored.append((theme_id, hook_id, score))
+        theme, hook_type = parse_arm_key(key)
+        starter_arms.append(
+            BanditArm(
+                arm_key=key,
+                theme=theme,
+                hook_type=hook_type,
+                alpha=1.0,
+                beta=1.0,
+            )
+        )
+    if starter_arms:
+        db.seed_bandit_arms(starter_arms)
 
-    if not scored:
-        raise ValueError("No eligible theme/hook combinations are available for recommendation.")
 
-    scored.sort(key=lambda x: x[2], reverse=True)
+def recommend(total_slots: int = 8) -> BanditRecommendation:
+    if total_slots <= 0:
+        raise ValueError("total_slots must be positive")
 
-    allocation_map: dict[tuple[str, str], int] = defaultdict(int)
-    for i in range(count):
-        idx = i % len(scored)
-        key = (scored[idx][0], scored[idx][1])
-        allocation_map[key] += 1
+    initialize_arms()
+    arms = db.list_bandit_arms()
+    if not arms:
+        raise ValueError("No bandit arms are available for recommendation.")
+
+    sampled_scores = {
+        arm.arm_key: float(np.random.beta(arm.alpha, arm.beta))
+        for arm in arms
+    }
+    ranked_arms = sorted(
+        arms,
+        key=lambda arm: sampled_scores[arm.arm_key],
+        reverse=True,
+    )
+
+    top_k = min(_min_top_k(), len(ranked_arms), total_slots)
+    max_per_arm = _max_slots_per_arm(total_slots)
+    allocation_map = {arm.arm_key: 0 for arm in ranked_arms}
+
+    for arm in ranked_arms[:top_k]:
+        allocation_map[arm.arm_key] += 1
+
+    remaining_slots = total_slots - top_k
+    if remaining_slots > 0:
+        _allocate_remaining_slots(
+            ranked_arms,
+            sampled_scores,
+            allocation_map,
+            remaining_slots,
+            max_per_arm,
+        )
 
     allocations = [
         ThemeHookAllocation(
-            theme=theme,
-            hook_type=hook_type,
-            count=allocation_map[(theme, hook_type)],
-            score=score,
+            theme=arm.theme,
+            hook_type=arm.hook_type,
+            count=allocation_map[arm.arm_key],
+            score=sampled_scores[arm.arm_key],
         )
-        for theme, hook_type, score in scored
-        if (theme, hook_type) in allocation_map
+        for arm in ranked_arms
+        if allocation_map[arm.arm_key] > 0
     ]
-
-    return BanditRecommendation(product_sku=product_sku, allocations=allocations)
-
-
-def _score_arm(theme: str, hook_type: str, arm: BanditArm | None) -> float:
-    weight = base_weight(theme, hook_type)
-    if arm is None or _arm_trials(arm) == 0:
-        return float(np.random.random() * weight)
-    alpha = arm.successes
-    beta_param = arm.failures
-    return float(np.random.beta(alpha, beta_param) * weight)
+    return BanditRecommendation(allocations=allocations)
 
 
-def _arm_trials(arm: BanditArm) -> int:
-    return max(arm.successes + arm.failures - 2, 0)
+def ranked_arm_summaries() -> list[tuple[BanditArm, float]]:
+    initialize_arms()
+    arms = db.list_bandit_arms()
+    return sorted(
+        [(arm, posterior_mean(arm)) for arm in arms],
+        key=lambda item: item[1],
+        reverse=True,
+    )
+
+
+def posterior_mean(arm: BanditArm) -> float:
+    return arm.alpha / max(arm.alpha + arm.beta, 1.0)
+
+
+def _min_top_k() -> int:
+    return max(int(config.get("bandit.min_top_k", 3)), 0)
+
+
+def _max_slots_per_arm(total_slots: int) -> int:
+    ceiling = float(config.get("bandit.allocation_ceiling", 0.7))
+    return max(1, floor(total_slots * ceiling))
+
+
+def _allocate_remaining_slots(
+    ranked_arms: list[BanditArm],
+    sampled_scores: dict[str, float],
+    allocation_map: dict[str, int],
+    remaining_slots: int,
+    max_per_arm: int,
+) -> None:
+    eligible_arms = [
+        arm for arm in ranked_arms
+        if allocation_map[arm.arm_key] < max_per_arm
+    ]
+    if not eligible_arms:
+        return
+
+    total_score = sum(sampled_scores[arm.arm_key] for arm in eligible_arms)
+    if total_score <= 0:
+        total_score = float(len(eligible_arms))
+
+    desired_extras = {
+        arm.arm_key: remaining_slots * (
+            sampled_scores[arm.arm_key] / total_score
+            if total_score > 0 else 1.0 / len(eligible_arms)
+        )
+        for arm in eligible_arms
+    }
+    extra_allocations = {arm.arm_key: 0 for arm in eligible_arms}
+
+    for _ in range(remaining_slots):
+        candidates = [
+            arm for arm in eligible_arms
+            if allocation_map[arm.arm_key] < max_per_arm
+        ]
+        if not candidates:
+            break
+        chosen = max(
+            candidates,
+            key=lambda arm: (
+                desired_extras[arm.arm_key] - extra_allocations[arm.arm_key],
+                sampled_scores[arm.arm_key],
+            ),
+        )
+        allocation_map[chosen.arm_key] += 1
+        extra_allocations[chosen.arm_key] += 1
 
 
 def update_from_metrics() -> int:
     posts = db.list_recent_posts(days=30)
-
-    post_data: list[tuple[int, int, str, str, str, float]] = []
-    product_rates: dict[str, list[float]] = defaultdict(list)
+    creative_metrics: dict[str, dict[str, str | int]] = {}
 
     for post in posts:
         if post.id is None:
@@ -94,50 +192,51 @@ def update_from_metrics() -> int:
         if content is None:
             continue
 
-        engagement_rate = (
-            (metrics.likes + metrics.comments + metrics.shares + metrics.saves)
-            / max(metrics.views, 1)
+        aggregate = creative_metrics.setdefault(
+            content.id,
+            {
+                "product_sku": content.product_sku,
+                "theme": content.theme,
+                "hook_type": content.hook_type,
+                "views": 0,
+                "engagements": 0,
+            },
         )
-        post_data.append((
-            post.id,
-            metrics.id or 0,
-            content.product_sku,
-            content.theme,
-            content.hook_type,
-            engagement_rate,
-        ))
-        product_rates[content.product_sku].append(engagement_rate)
+        aggregate["views"] = int(aggregate["views"]) + metrics.views
+        aggregate["engagements"] = int(aggregate["engagements"]) + (
+            metrics.likes + metrics.comments + metrics.shares + metrics.saves
+        )
+
+    creative_rates = [
+        int(item["engagements"]) / max(int(item["views"]), 1)
+        for item in creative_metrics.values()
+    ]
+    global_median = median(creative_rates) if creative_rates else 0.0
 
     updated = 0
-    for post_id, metric_id, product_sku, theme, hook_type, rate in post_data:
-        if db.has_bandit_observation(post_id):
+    for content_id, aggregate in creative_metrics.items():
+        if db.has_bandit_observation_for_content(content_id):
             continue
-        med = median(product_rates[product_sku])
-        success = rate > med
-        db.increment_bandit(product_sku, theme, hook_type, success)
-        db.insert_bandit_observation(BanditObservation(
-            post_id=post_id,
-            metric_id=metric_id,
-            product_sku=product_sku,
-            theme=theme,
-            hook_type=hook_type,
-            engagement_rate=rate,
-            success=success,
-        ))
+        theme = str(aggregate["theme"])
+        hook_type = str(aggregate["hook_type"])
+        key = arm_key(theme, hook_type)
+        if db.get_bandit_arm(key) is None:
+            continue
+
+        rate = int(aggregate["engagements"]) / max(int(aggregate["views"]), 1)
+        success = rate > global_median
+        db.increment_bandit(key, success)
+        db.insert_bandit_observation(
+            BanditObservation(
+                content_id=content_id,
+                product_sku=str(aggregate["product_sku"]),
+                arm_key=key,
+                theme=theme,
+                hook_type=hook_type,
+                aggregated_engagement_rate=rate,
+                success=success,
+            )
+        )
         updated += 1
 
     return updated
-
-
-def initialize_arms(product_sku: str) -> None:
-    existing = {(a.theme, a.hook_type) for a in db.get_bandit_arms(product_sku)}
-    for theme in THEMES:
-        for hook_type in HOOK_TYPES:
-            if (theme, hook_type) not in existing:
-                db.upsert_bandit_arm(BanditArm(
-                    product_sku=product_sku,
-                    theme=theme,
-                    hook_type=hook_type,
-                    successes=1,
-                    failures=1,
-                ))

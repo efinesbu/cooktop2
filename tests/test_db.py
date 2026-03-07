@@ -122,25 +122,27 @@ def test_bandit_state_roundtrip(
     db_with_product: Path, sample_product: Product
 ) -> None:
     arm = BanditArm(
-        product_sku=sample_product.sku,
+        arm_key="fear__question",
         theme="fear",
         hook_type="question",
-        successes=5,
-        failures=3,
+        alpha=5,
+        beta=3,
     )
     db.upsert_bandit_arm(arm)
 
-    arms = db.get_bandit_arms(sample_product.sku)
+    arms = db.list_bandit_arms()
     assert len(arms) == 1
+    assert arms[0].arm_key == "fear__question"
     assert arms[0].theme == "fear"
     assert arms[0].hook_type == "question"
-    assert arms[0].successes == 5
-    assert arms[0].failures == 3
+    assert arms[0].alpha == 5
+    assert arms[0].beta == 3
 
-    db.increment_bandit(sample_product.sku, "fear", "question", success=True)
-    arms = db.get_bandit_arms(sample_product.sku)
-    assert arms[0].successes == 6
-    assert arms[0].failures == 3
+    db.increment_bandit("fear__question", success=True)
+    fetched = db.get_bandit_arm("fear__question")
+    assert fetched is not None
+    assert fetched.alpha == 6
+    assert fetched.beta == 3
 
 
 def test_cost_tracking(
@@ -224,25 +226,64 @@ def test_bandit_observation_helpers(
     db_with_product: Path, sample_content: Content
 ) -> None:
     db.insert_content(sample_content)
-    post_id = db.insert_post(
-        Post(content_id=sample_content.id, platform="youtube", post_id="yt-obs")
-    )
-    metric_id = db.insert_metric(
-        Metric(post_id=post_id, platform="youtube", views=100, likes=30)
-    )
-
-    assert db.has_bandit_observation(post_id) is False
+    assert db.has_bandit_observation_for_content(sample_content.id) is False
 
     db.insert_bandit_observation(
         BanditObservation(
-            post_id=post_id,
-            metric_id=metric_id,
+            content_id=sample_content.id,
             product_sku=sample_content.product_sku,
+            arm_key="benefit__bold_claim",
             theme=sample_content.theme,
             hook_type=sample_content.hook_type,
-            engagement_rate=0.3,
+            aggregated_engagement_rate=0.3,
             success=True,
         )
     )
 
-    assert db.has_bandit_observation(post_id) is True
+    assert db.has_bandit_observation_for_content(sample_content.id) is True
+
+
+def test_bandit_migration_preserves_legacy_tables(tmp_db: Path) -> None:
+    with db._connect() as conn:
+        conn.execute("ALTER TABLE bandit_state RENAME TO bandit_state_new")
+        conn.execute("ALTER TABLE bandit_observations RENAME TO bandit_observations_new")
+        conn.executescript(
+            """
+            CREATE TABLE bandit_state (
+                product_sku     TEXT NOT NULL,
+                theme           TEXT NOT NULL,
+                hook_type       TEXT NOT NULL,
+                successes       INTEGER DEFAULT 1,
+                failures        INTEGER DEFAULT 1,
+                last_updated    TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (product_sku, theme, hook_type)
+            );
+            CREATE TABLE bandit_observations (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                post_id         INTEGER NOT NULL UNIQUE,
+                metric_id       INTEGER NOT NULL,
+                product_sku     TEXT NOT NULL,
+                theme           TEXT NOT NULL,
+                hook_type       TEXT NOT NULL,
+                engagement_rate REAL NOT NULL,
+                success         INTEGER NOT NULL,
+                observed_at     TEXT DEFAULT (datetime('now'))
+            );
+            """
+        )
+
+        db._migrate_bandit_tables(conn)
+
+        tables = {
+            row["name"]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "bandit_state_legacy" in tables
+        assert "bandit_observations_legacy" in tables
+
+        bandit_state_columns = set(db._table_columns(conn, "bandit_state"))
+        observation_columns = set(db._table_columns(conn, "bandit_observations"))
+        assert {"arm_key", "alpha", "beta"}.issubset(bandit_state_columns)
+        assert {"content_id", "arm_key", "aggregated_engagement_rate"}.issubset(observation_columns)

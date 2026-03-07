@@ -4,44 +4,35 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src import bandit, db, product_images
-from src.models import HOOK_TYPES, Product, THEMES
+from src.models import Product
 
 
 def test_recommend_initializes_missing_arms(tmp_db: Path) -> None:
     db.upsert_product(Product(sku="auto-init", name="Auto Init"))
 
     with patch("numpy.random.beta", return_value=0.5):
-        rec = bandit.recommend("auto-init", count=2)
+        rec = bandit.recommend(total_slots=2)
 
-    assert rec.product_sku == "auto-init"
     assert sum(item.count for item in rec.allocations) == 2
-    assert len(db.get_bandit_arms("auto-init")) == len(THEMES) * len(HOOK_TYPES)
+    assert len(db.list_bandit_arms()) == len(bandit.starter_arm_keys())
 
 
 def test_increment_bandit_records_first_observation(tmp_db: Path) -> None:
     db.upsert_product(Product(sku="first-obs", name="First Observation"))
+    bandit.initialize_arms()
+    starter_key = bandit.starter_arm_keys()[0]
 
-    db.increment_bandit("first-obs", "fear", "question", success=True)
-    arms = db.get_bandit_arms("first-obs")
-    assert len(arms) == 1
-    assert arms[0].successes == 2
-    assert arms[0].failures == 1
+    db.increment_bandit(starter_key, success=True)
+    arm = db.get_bandit_arm(starter_key)
+    assert arm is not None
+    assert arm.alpha == 2.0
+    assert arm.beta == 1.0
 
-    db.increment_bandit("first-obs", "fear", "question", success=False)
-    arms = db.get_bandit_arms("first-obs")
-    assert arms[0].successes == 2
-    assert arms[0].failures == 2
-
-
-def test_recommend_can_filter_by_hook_type(tmp_db: Path) -> None:
-    db.upsert_product(Product(sku="hook-filter", name="Hook Filter"))
-
-    with patch("numpy.random.random", return_value=0.5):
-        rec = bandit.recommend("hook-filter", count=2, hook_type="question")
-
-    assert sum(item.count for item in rec.allocations) == 2
-    assert {item.hook_type for item in rec.allocations} == {"question"}
-    assert {item.theme for item in rec.allocations}.issubset(set(THEMES))
+    db.increment_bandit(starter_key, success=False)
+    arm = db.get_bandit_arm(starter_key)
+    assert arm is not None
+    assert arm.alpha == 2.0
+    assert arm.beta == 2.0
 
 
 def test_register_images_initializes_bandit_for_ready_product(

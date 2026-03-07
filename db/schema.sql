@@ -84,23 +84,22 @@ CREATE TABLE IF NOT EXISTS metrics (
 );
 
 CREATE TABLE IF NOT EXISTS bandit_state (
-    product_sku     TEXT NOT NULL REFERENCES products(sku),
+    arm_key         TEXT PRIMARY KEY,
     theme           TEXT NOT NULL,
     hook_type       TEXT NOT NULL,
-    successes       INTEGER DEFAULT 1,
-    failures        INTEGER DEFAULT 1,
-    last_updated    TEXT DEFAULT (datetime('now')),
-    PRIMARY KEY (product_sku, theme, hook_type)
+    alpha           REAL DEFAULT 1.0,
+    beta            REAL DEFAULT 1.0,
+    last_updated    TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS bandit_observations (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    post_id         INTEGER NOT NULL UNIQUE REFERENCES posts(id),
-    metric_id       INTEGER NOT NULL REFERENCES metrics(id),
+    content_id      TEXT NOT NULL UNIQUE REFERENCES content(id),
     product_sku     TEXT NOT NULL REFERENCES products(sku),
+    arm_key         TEXT NOT NULL,
     theme           TEXT NOT NULL,
     hook_type       TEXT NOT NULL,
-    engagement_rate REAL NOT NULL,
+    aggregated_engagement_rate REAL NOT NULL,
     success         INTEGER NOT NULL,
     observed_at     TEXT DEFAULT (datetime('now'))
 );
@@ -125,6 +124,8 @@ CREATE INDEX IF NOT EXISTS idx_posts_content      ON posts(content_id);
 CREATE INDEX IF NOT EXISTS idx_posts_platform     ON posts(platform);
 CREATE INDEX IF NOT EXISTS idx_metrics_post       ON metrics(post_id);
 CREATE INDEX IF NOT EXISTS idx_metrics_pulled     ON metrics(pulled_at);
+CREATE INDEX IF NOT EXISTS idx_bandit_state_theme ON bandit_state(theme, hook_type);
+CREATE INDEX IF NOT EXISTS idx_bandit_obs_arm     ON bandit_observations(arm_key);
 CREATE INDEX IF NOT EXISTS idx_bandit_obs_product ON bandit_observations(product_sku);
 CREATE INDEX IF NOT EXISTS idx_costs_content      ON costs(content_id);
 CREATE INDEX IF NOT EXISTS idx_product_images_sku ON product_images(product_sku);

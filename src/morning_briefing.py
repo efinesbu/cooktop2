@@ -8,7 +8,6 @@ from email.mime.text import MIMEText
 from typing import NamedTuple
 
 from src import bandit, config, db
-from src.creative_strategy import base_weight
 from src.cost_tracker import check_budget
 from src.models import Metric, Post, Product, PLATFORMS
 
@@ -249,27 +248,28 @@ def generate_briefing() -> str:
 
     heading("BANDIT RECOMMENDATIONS")
     products = db.list_products(active_only=True, exclude_excluded=True)
+    daily_slots = int(config.get("bandit.daily_slots", 8))
 
     if products:
-        for product in products:
-            rec = bandit.recommend(product.sku, 4)
-            lines.append(f"\n  {product.name} ({product.sku}):")
+        rec = bandit.recommend(daily_slots)
+        arms = {(arm.theme, arm.hook_type): arm for arm in db.list_bandit_arms()}
+        lines.append(f"Recommended allocation ({daily_slots} posts):")
+        for alloc in rec.allocations:
+            arm = arms.get((alloc.theme, alloc.hook_type))
+            trials = max(int((arm.alpha + arm.beta) - 2), 0) if arm else 0
+            mode = "explore" if trials < 5 else "exploit"
+            marker = "\u25c7" if mode == "explore" else "\u25c6"
+            learned_rate = (bandit.posterior_mean(arm) * 100) if arm else 50.0
+            lines.append(
+                f"  {marker} {alloc.theme}/{alloc.hook_type} ({mode})"
+                f" \u2014 mean {learned_rate:.0f}%, score {alloc.score:.3f}, clips {alloc.count}"
+            )
 
-            arms = {(a.theme, a.hook_type): a for a in db.get_bandit_arms(product.sku)}
-            for alloc in rec.allocations:
-                arm = arms.get((alloc.theme, alloc.hook_type))
-                trials = (arm.successes + arm.failures - 2) if arm else 0
-                mode = "explore" if trials < 5 else "exploit"
-                marker = "\u25c7" if mode == "explore" else "\u25c6"
-                learned_rate = (
-                    (arm.successes / max(arm.successes + arm.failures, 1)) * 100
-                    if arm else 50.0
-                )
-                lines.append(
-                    f"    {marker} {alloc.theme}/{alloc.hook_type} ({mode})"
-                    f" \u2014 base {base_weight(alloc.theme, alloc.hook_type):.2f},"
-                    f" learned {learned_rate:.0f}%, score {alloc.score:.3f}, clips {alloc.count}"
-                )
+        suggested_per_product = max(daily_slots // max(len(products), 1), 1)
+        lines.append("")
+        lines.append(
+            f"Suggested split: about {suggested_per_product} per product across {len(products)} active products"
+        )
     else:
         lines.append("No active products to recommend for.")
 

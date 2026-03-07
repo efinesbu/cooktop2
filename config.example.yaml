@@ -1,3 +1,8 @@
+# Velura config – non-secret settings. For API keys and tokens, prefer .env:
+#   cp .env.example .env
+#   # Edit .env with real values (never commit .env)
+# Env vars override config.yaml for keys listed in .env.example.
+
 site_url: "https://veluraesthetics.com"
 
 platforms:
@@ -91,3 +96,15 @@ posting:
 data_root: "~/.velura"
 
 daily_budget_usd: 50.0
+
+# Shared bandit: used by run --auto and run --product SLUG (when no --theme/--hook)
+bandit:
+  daily_slots: 8
+  min_top_k: 3
+  allocation_ceiling: 0.7
+  expand_after_creatives: 40
+  starter_arms:
+    - "problem_solution__relatable_pain"
+    - "benefit__bold_claim"
+    - "curiosity__question"
+    - "benefit__visual_surprise"

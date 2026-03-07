@@ -1,5 +1,6 @@
 # Secrets & config
 config.yaml
+.env
 youtube_client_secrets.json
 youtube_token.json
 

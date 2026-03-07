@@ -223,23 +223,23 @@ class Metric:
 
 @dataclass
 class BanditArm:
-    product_sku: str = ""
+    arm_key: str = ""
     theme: str = ""
     hook_type: str = ""
-    successes: int = 1
-    failures: int = 1
+    alpha: float = 1.0
+    beta: float = 1.0
     last_updated: Optional[str] = None
 
 
 @dataclass
 class BanditObservation:
     id: Optional[int] = None
-    post_id: int = 0
-    metric_id: int = 0
+    content_id: str = ""
     product_sku: str = ""
+    arm_key: str = ""
     theme: str = ""
     hook_type: str = ""
-    engagement_rate: float = 0.0
+    aggregated_engagement_rate: float = 0.0
     success: bool = False
     observed_at: Optional[str] = None
 
@@ -257,8 +257,7 @@ class Cost:
 
 @dataclass
 class BanditRecommendation:
-    """Output from bandit.recommend() — allocation for one product."""
-    product_sku: str
+    """Output from bandit.recommend() — global allocation across products."""
     allocations: list[ThemeHookAllocation] = field(default_factory=list)
 
 

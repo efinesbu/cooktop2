@@ -76,6 +76,13 @@ class YouTubePoster(BasePoster):
     def upload(self, video_path: Path, caption: str, hashtags: list[str]) -> str:
         service = self._get_service()
 
+        # YouTube captions must end with "Link in bio"
+        caption = caption.strip()
+        if caption and not caption.rstrip().lower().endswith("link in bio"):
+            caption = f"{caption}\n\nLink in bio"
+        elif not caption:
+            caption = "Link in bio"
+
         tags = list(hashtags) + ["Shorts"]
         title = caption.split("\n", 1)[0][:100]
 

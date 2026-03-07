@@ -5,12 +5,6 @@ import types
 
 from click.testing import CliRunner
 
-
-class _UnusedPoster:
-    def __init__(self, *args, **kwargs) -> None:
-        pass
-
-
 sys.modules.setdefault(
     "tweepy",
     types.SimpleNamespace(
@@ -34,25 +28,8 @@ sys.modules.setdefault(
     "src.prompt_generator",
     types.SimpleNamespace(generate_content=lambda *args, **kwargs: (None, {})),
 )
-sys.modules.setdefault(
-    "src.posters.youtube",
-    types.SimpleNamespace(YouTubePoster=_UnusedPoster),
-)
-sys.modules.setdefault(
-    "src.posters.instagram",
-    types.SimpleNamespace(InstagramPoster=_UnusedPoster),
-)
-sys.modules.setdefault(
-    "src.posters.tiktok",
-    types.SimpleNamespace(TikTokPoster=_UnusedPoster),
-)
-sys.modules.setdefault(
-    "src.posters.x",
-    types.SimpleNamespace(XPoster=_UnusedPoster),
-)
-
 import cli as cli_module
-from src.models import Product
+from src.models import BanditRecommendation, Product, ThemeHookAllocation
 
 
 def test_run_cli_rejects_rotation_with_auto() -> None:
@@ -79,11 +56,21 @@ def test_run_auto_requires_generation_ready(monkeypatch) -> None:
     assert captured["generation_ready_only"] is True
 
 
-def test_run_manual_allows_prompt_selected_theme_and_hook(monkeypatch) -> None:
+def test_run_manual_uses_bandit_when_no_theme_or_hook(monkeypatch) -> None:
     monkeypatch.setattr(
         cli_module.db,
         "get_product",
         lambda sku: Product(sku=sku, name=f"Product {sku}"),
+    )
+    monkeypatch.setattr(
+        cli_module.bandit,
+        "recommend",
+        lambda total_slots: BanditRecommendation(
+            allocations=[
+                ThemeHookAllocation(theme="curiosity", hook_type="question", count=1, score=0.7),
+                ThemeHookAllocation(theme="benefit", hook_type="visual_surprise", count=1, score=0.6),
+            ]
+        ),
     )
 
     calls: list[tuple[str | None, str | None]] = []
@@ -96,7 +83,7 @@ def test_run_manual_allows_prompt_selected_theme_and_hook(monkeypatch) -> None:
 
     cli_module._run_manual(("sku-1",), (), (), count=2, should_post=False)
 
-    assert calls == [(None, None), (None, None)]
+    assert calls == [("curiosity", "question"), ("benefit", "visual_surprise")]
 
 
 def test_run_manual_supports_partial_overrides(monkeypatch) -> None:
@@ -177,3 +164,36 @@ def test_run_manual_rotates_theme_and_hook_when_enabled(monkeypatch) -> None:
         ("social_proof", "question"),
         ("benefit", "quick_tip"),
     ]
+
+
+def test_run_auto_uses_global_allocation_and_round_robin_product_split(monkeypatch) -> None:
+    products = [
+        Product(sku="sku-1", name="Product 1", generation_ready=True),
+        Product(sku="sku-2", name="Product 2", generation_ready=True),
+    ]
+    monkeypatch.setattr(cli_module.db, "list_products", lambda **kwargs: products)
+    monkeypatch.setattr(
+        cli_module.bandit,
+        "recommend",
+        lambda total_slots: BanditRecommendation(
+            allocations=[
+                ThemeHookAllocation(theme="benefit", hook_type="bold_claim", count=2, score=0.8),
+                ThemeHookAllocation(theme="curiosity", hook_type="question", count=1, score=0.6),
+            ]
+        ),
+    )
+
+    calls: list[tuple[str, str, str]] = []
+
+    def fake_generate_single(product, theme, hook_type, should_post):
+        calls.append((product.sku, theme, hook_type))
+        return object()
+
+    monkeypatch.setattr(cli_module, "_generate_single", fake_generate_single)
+
+    cli_module._run_auto(count=3, should_post=False)
+
+    assert len(calls) == 3
+    assert calls.count(("sku-1", "benefit", "bold_claim")) == 1
+    assert calls.count(("sku-2", "benefit", "bold_claim")) == 1
+    assert calls.count(("sku-1", "curiosity", "question")) == 1

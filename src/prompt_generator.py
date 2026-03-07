@@ -43,13 +43,13 @@ RESPOND WITH ONLY valid JSON matching this exact schema — no markdown fences, 
   "theme": "string — chosen from allowed themes in the user message",
   "hook_type": "string — chosen from allowed hook types in the user message",
   "hook_text": "string — short opening hook line for overlay/caption fallback",
-  "starting_image_prompt": "string — must describe a cinematic 3D closeup of an anthropomorphic target product standing on a luxury bathroom counter. Include a high-quality Pixar-style face with large expressive eyes and an articulated mouth, soft focus luxury bathroom background, volumetric lighting, octane render, unreal engine 5, 4k, and the brand 'velura' in brown writing using 'Cormorant Garamond', Georgia, 'Times New Roman', serif. Add 1-2 sentences of variation-specific visual detail.",
-  "scene_1_desc": "string — 7.5-second shot description that starts with a strong hook and focuses on expression plus minimal, slow movements.",
-  "scene_2_desc": "string — 7.5-second shot description that starts with 'HARD CUT' and moves to a new angle with subtle product demo visuals.",
+  "starting_image_prompt": "string — must describe a cinematic 3D closeup of an anthropomorphic target product standing on a luxury bathroom counter. Include a high-quality Pixar-style face with large expressive eyes and an articulated mouth, soft focus luxury bathroom background, volumetric lighting, octane render, unreal engine 5, 4k, and the brand 'velura' in brown writing using font style Cormorant Garamond, Georgia, Times New Roman, serif. Add 1-2 sentences of variation-specific visual detail.",
+  "scene_1_desc": "string — 7.5-second shot description that starts with a strong hook and focuses on expression plus minimal, slow movements. accurate lipsync with the voiceover script.",
+  "scene_2_desc": "string — 7.5-second shot description that starts with 'HARD CUT' and moves to a new angle with subtle product demo visuals. accurate lipsync with the voiceover script.",
   "scene_1_script": "string — 15 words, first person, simple vocabulary.",
   "scene_2_script": "string — 15 words, first person, FTC-compliant benefits, ending with a call to action.",
-  "platform_captions": {
-    "youtube": "string — YouTube Shorts caption (max 100 chars, keyword-rich)",
+    "platform_captions": {
+    "youtube": "string — YouTube Shorts caption (max 100 chars, keyword-rich, must end with 'Link in bio')",
     "instagram": "string — Instagram Reels caption (conversational, emoji-friendly, 1-2 sentences)",
     "tiktok": "string — TikTok caption (trendy, casual, max 150 chars)",
     "x": "string — X/Twitter caption (max 280 chars, concise and punchy)"
@@ -152,6 +152,13 @@ def generate_content(
     db.insert_content(content)
 
     platform_captions: dict[str, str] = parsed.get("platform_captions", {})
+    # Ensure YouTube caption always ends with "Link in bio"
+    if "youtube" in platform_captions:
+        cap = platform_captions["youtube"].strip()
+        if cap and not cap.rstrip().lower().endswith("link in bio"):
+            platform_captions["youtube"] = f"{cap}\n\nLink in bio"
+        elif not cap:
+            platform_captions["youtube"] = "Link in bio"
     hashtags = parsed.get("hashtags", [])
     hashtag_csv = ",".join(tag.strip().lstrip("#") for tag in hashtags if tag.strip())
     utm_url = build_full_utm_link(content, product)

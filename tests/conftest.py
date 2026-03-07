@@ -19,6 +19,17 @@ def tmp_db(tmp_path: Path) -> Generator[Path, None, None]:
     db._DB_PATH = old_path
 
 
+# Env vars that override config.yaml; cleared in tests so patched config wins.
+from src.config import _ENV_OVERRIDES
+
+
+@pytest.fixture(autouse=True)
+def _clear_config_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear env override vars so tests using patched config get deterministic values."""
+    for env_var in _ENV_OVERRIDES.values():
+        monkeypatch.delenv(env_var, raising=False)
+
+
 @pytest.fixture
 def mock_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict:
     test_cfg = {

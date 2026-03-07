@@ -12,31 +12,33 @@ def _create_post_with_metric(
     content_id: str,
     theme: str,
     hook_type: str,
+    platform: str = "youtube",
     views: int,
     likes: int,
     comments: int = 0,
     shares: int = 0,
     saves: int = 0,
 ) -> int:
-    db.insert_content(
-        Content(
-            id=content_id,
-            product_sku=product_sku,
-            theme=theme,
-            hook_type=hook_type,
+    if db.get_content(content_id) is None:
+        db.insert_content(
+            Content(
+                id=content_id,
+                product_sku=product_sku,
+                theme=theme,
+                hook_type=hook_type,
+            )
         )
-    )
     post_id = db.insert_post(
         Post(
             content_id=content_id,
-            platform="youtube",
-            post_id=f"yt-{content_id}",
+            platform=platform,
+            post_id=f"{platform}-{content_id}",
         )
     )
     db.insert_metric(
         Metric(
             post_id=post_id,
-            platform="youtube",
+            platform=platform,
             views=views,
             likes=likes,
             comments=comments,
@@ -49,20 +51,21 @@ def _create_post_with_metric(
 
 def test_update_from_metrics_is_idempotent(tmp_db: Path) -> None:
     db.upsert_product(Product(sku="serum-x", name="Serum X"))
+    bandit.initialize_arms()
 
     _create_post_with_metric(
         product_sku="serum-x",
         content_id="content-a",
-        theme="benefit",
-        hook_type="question",
+        theme="problem_solution",
+        hook_type="relatable_pain",
         views=100,
         likes=40,
     )
     _create_post_with_metric(
         product_sku="serum-x",
         content_id="content-b",
-        theme="curiosity",
-        hook_type="quick_tip",
+        theme="benefit",
+        hook_type="bold_claim",
         views=100,
         likes=10,
     )
@@ -71,28 +74,29 @@ def test_update_from_metrics_is_idempotent(tmp_db: Path) -> None:
     assert updated == 2
 
     first_pass = {
-        (arm.theme, arm.hook_type): (arm.successes, arm.failures)
-        for arm in db.get_bandit_arms("serum-x")
+        arm.arm_key: (arm.alpha, arm.beta)
+        for arm in db.list_bandit_arms()
     }
 
     updated = bandit.update_from_metrics()
     assert updated == 0
 
     second_pass = {
-        (arm.theme, arm.hook_type): (arm.successes, arm.failures)
-        for arm in db.get_bandit_arms("serum-x")
+        arm.arm_key: (arm.alpha, arm.beta)
+        for arm in db.list_bandit_arms()
     }
     assert second_pass == first_pass
 
 
-def test_update_from_metrics_uses_latest_metric_for_each_post(tmp_db: Path) -> None:
+def test_update_from_metrics_aggregates_by_creative_and_uses_latest_metric_per_post(tmp_db: Path) -> None:
     db.upsert_product(Product(sku="serum-y", name="Serum Y"))
+    bandit.initialize_arms()
 
     post_id = _create_post_with_metric(
         product_sku="serum-y",
         content_id="content-c",
         theme="benefit",
-        hook_type="question",
+        hook_type="bold_claim",
         views=100,
         likes=10,
     )
@@ -106,8 +110,17 @@ def test_update_from_metrics_uses_latest_metric_for_each_post(tmp_db: Path) -> N
     )
     _create_post_with_metric(
         product_sku="serum-y",
+        content_id="content-c",
+        theme="benefit",
+        hook_type="bold_claim",
+        platform="instagram",
+        views=100,
+        likes=20,
+    )
+    _create_post_with_metric(
+        product_sku="serum-y",
         content_id="content-d",
-        theme="social_proof",
+        theme="problem_solution",
         hook_type="relatable_pain",
         views=100,
         likes=20,
@@ -116,8 +129,16 @@ def test_update_from_metrics_uses_latest_metric_for_each_post(tmp_db: Path) -> N
     updated = bandit.update_from_metrics()
     assert updated == 2
 
-    arms = {(arm.theme, arm.hook_type): arm for arm in db.get_bandit_arms("serum-y")}
-    assert arms[("benefit", "question")].successes == 2
-    assert arms[("benefit", "question")].failures == 1
-    assert arms[("social_proof", "relatable_pain")].successes == 1
-    assert arms[("social_proof", "relatable_pain")].failures == 2
+    winning_arm = db.get_bandit_arm(bandit.arm_key("benefit", "bold_claim"))
+    losing_arm = db.get_bandit_arm(bandit.arm_key("problem_solution", "relatable_pain"))
+
+    assert winning_arm is not None
+    assert winning_arm.alpha == 2.0
+    assert winning_arm.beta == 1.0
+
+    assert losing_arm is not None
+    assert losing_arm.alpha == 1.0
+    assert losing_arm.beta == 2.0
+
+    assert db.has_bandit_observation_for_content("content-c") is True
+    assert db.has_bandit_observation_for_content("content-d") is True
