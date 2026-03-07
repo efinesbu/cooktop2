@@ -38,6 +38,16 @@ instagram:
 tiktok:
   client_key: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
   client_secret: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  access_token: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  refresh_token: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+
+tiktok-sandbox:
+  client_key: "YOUR_TIKTOK_SANDBOX_CLIENT_KEY"
+  client_secret: "YOUR_TIKTOK_SANDBOX_CLIENT_SECRET"
+  # Must exactly match a Login Kit redirect URI configured in TikTok Developer Portal.
+  # Local testing: http://localhost:8000/callback
+  # Review/demo via Cloudflare Tunnel: https://demo.veluraesthetics.com/callback
+  redirect_uri: "https://demo.veluraesthetics.com/callback"
 
 x:
   api_key: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"

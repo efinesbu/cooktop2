@@ -144,7 +144,7 @@ Copy `config.example.yaml` to `config.yaml` and fill in:
 - **xAI** — Video generation API key, optional `xai.model` (default `grok-imagine-video`), optional `xai.resolution`/`xai.aspect_ratio`, and polling controls via `xai.poll_interval_seconds` and `xai.poll_timeout_seconds`
 - **YouTube** — Google OAuth Desktop app client secrets JSON for posting, optional `youtube.token_file` for the cached login token, optional `youtube.login_hint` to suggest the correct Google account during auth, plus `youtube.api_key` for analytics pulls
 - **Instagram** — Graph API access token + account ID; set `instagram.gcs_bucket` if you want automatic public video hosting for Reels
-- **TikTok** — Client key + secret (Content Posting API must be approved)
+- **TikTok** — `tiktok.client_key`, `tiktok.client_secret`, `tiktok.access_token`, and `tiktok.refresh_token` for posting; Content Posting API approval is required. Analytics only need the client key + secret. The separate review demo uses `tiktok-sandbox.*` settings.
 - **X** — API key/secret + access token/secret (Basic tier for posting)
 - **GCS** — Bucket name + service account credentials (optional, for archival)
 - **Briefing email** — optional SMTP settings if you want `morning-briefing` emailed
@@ -158,6 +158,44 @@ For YouTube posting, `youtube.client_secrets_file` must be a Google Cloud OAuth 
 The upload goes to whichever Google/YouTube account completes the OAuth browser flow when `youtube_token.json` is created. Set `youtube.login_hint` if you want Google to prefill the intended account, and delete the token file before retrying if you need to switch accounts.
 
 xAI video generation now uses the async `POST /v1/videos/generations` flow and polls `GET /v1/videos/{request_id}` until the video is ready. The default poll interval is 15 seconds, and you can change it with `xai.poll_interval_seconds` in `config.yaml`.
+
+## TikTok Setup
+
+Velura has two separate TikTok paths:
+
+- **Main Velura posting/analytics** uses the `tiktok` config block and the code under `src/posters/tiktok.py` and `src/analytics/tiktok.py`.
+- **TikTok app review demo** uses the standalone FastAPI app in `tiktok-demo/` and the `tiktok-sandbox` config block.
+
+### Main Velura TikTok config
+
+Use the `tiktok` block in `config.yaml` when you want Velura itself to post or pull TikTok analytics:
+
+```yaml
+tiktok:
+  client_key: "YOUR_PRODUCTION_CLIENT_KEY"
+  client_secret: "YOUR_PRODUCTION_CLIENT_SECRET"
+  access_token: "YOUR_USER_ACCESS_TOKEN"
+  refresh_token: "YOUR_USER_REFRESH_TOKEN"
+```
+
+Notes:
+
+- Posting requires all four values above because the poster uploads with the current access token and refreshes it when TikTok returns `401`.
+- Analytics only require `tiktok.client_key` and `tiktok.client_secret`, but leaving the full block populated is the simplest setup if you plan to post.
+- If `platforms.enabled` is omitted, TikTok posting is only auto-enabled when the required posting keys are present.
+
+### TikTok review demo
+
+Use the standalone app in `tiktok-demo/` when TikTok approvers need a public site to log into and test:
+
+```yaml
+tiktok-sandbox:
+  client_key: "YOUR_SANDBOX_OR_REVIEW_APP_CLIENT_KEY"
+  client_secret: "YOUR_SANDBOX_OR_REVIEW_APP_CLIENT_SECRET"
+  redirect_uri: "https://demo.veluraesthetics.com/callback"
+```
+
+For the full runbook, see `tiktok-demo/README.md`.
 
 ## Data Storage
 
