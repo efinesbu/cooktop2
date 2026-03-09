@@ -247,6 +247,7 @@ def test_run_auto_parallelizes_across_products_below_threshold(monkeypatch) -> N
         Product(sku="sku-2", name="Product 2", generation_ready=True),
     ]
     monkeypatch.setattr(cli_module.db, "list_products", lambda **kwargs: products)
+    monkeypatch.setattr(cli_module.random, "randrange", lambda _: 0)
     monkeypatch.setattr(
         cli_module.bandit,
         "recommend",
@@ -298,6 +299,7 @@ def test_run_auto_uses_global_allocation_and_round_robin_product_split(monkeypat
         Product(sku="sku-2", name="Product 2", generation_ready=True),
     ]
     monkeypatch.setattr(cli_module.db, "list_products", lambda **kwargs: products)
+    monkeypatch.setattr(cli_module.random, "randrange", lambda _: 0)
     monkeypatch.setattr(
         cli_module.bandit,
         "recommend",
@@ -323,3 +325,38 @@ def test_run_auto_uses_global_allocation_and_round_robin_product_split(monkeypat
     assert calls.count(("sku-1", "benefit", "bold_claim")) == 1
     assert calls.count(("sku-2", "benefit", "bold_claim")) == 1
     assert calls.count(("sku-1", "curiosity", "question")) == 1
+
+
+def test_run_auto_randomizes_round_robin_starting_product(monkeypatch) -> None:
+    products = [
+        Product(sku="sku-1", name="Product 1", generation_ready=True),
+        Product(sku="sku-2", name="Product 2", generation_ready=True),
+        Product(sku="sku-3", name="Product 3", generation_ready=True),
+    ]
+    monkeypatch.setattr(cli_module.db, "list_products", lambda **kwargs: products)
+    monkeypatch.setattr(
+        cli_module.bandit,
+        "recommend",
+        lambda total_slots: BanditRecommendation(
+            allocations=[
+                ThemeHookAllocation(theme="benefit", hook_type="bold_claim", count=3, score=0.8),
+            ]
+        ),
+    )
+
+    calls: list[tuple[str, str, str]] = []
+
+    def fake_generate_single(product, theme, hook_type, should_post):
+        calls.append((product.sku, theme, hook_type))
+        return object()
+
+    monkeypatch.setattr(cli_module.random, "randrange", lambda _: 1)
+    monkeypatch.setattr(cli_module, "_generate_single", fake_generate_single)
+
+    cli_module._run_auto(count=3, should_post=False)
+
+    assert calls == [
+        ("sku-2", "benefit", "bold_claim"),
+        ("sku-3", "benefit", "bold_claim"),
+        ("sku-1", "benefit", "bold_claim"),
+    ]

@@ -67,6 +67,31 @@ class FakeYouTubePoster:
         return "yt-123"
 
 
+def _seed_approved_youtube_content(
+    content_id: str,
+    product: Product,
+    video_path: Path,
+) -> None:
+    content = Content(
+        id=content_id,
+        product_sku=product.sku,
+        theme="benefit",
+        hook_type="question",
+        video_local_path=str(video_path),
+    )
+    db.insert_content(content)
+    db.approve_content(content.id)
+    db.upsert_platform_payload(
+        PlatformPayload(
+            content_id=content.id,
+            platform="youtube",
+            caption="Launch caption",
+            hashtags="launch,velura",
+            utm_url=f"https://example.com/products/{product.sku}?utm_content={content.id}",
+        )
+    )
+
+
 def test_approve_schedule_and_post_due(
     tmp_db: Path,
     monkeypatch,
@@ -266,11 +291,10 @@ def test_approve_schedule_and_post_due_instagram_via_make_bridge(
         )
     )
 
-    calls: list[tuple[Path, str]] = []
+    calls: list[tuple[Path, str, dict[str, str]]] = []
 
     def fake_bridge(video_path_arg: Path, caption: str, **kwargs) -> BridgeResult:
-        calls.append((video_path_arg, caption))
-        assert kwargs == {}
+        calls.append((video_path_arg, caption, kwargs))
         return BridgeResult(
             object_key="videos/clip-123.mp4",
             video_url="https://signed.example/video.mp4",
@@ -300,11 +324,127 @@ def test_approve_schedule_and_post_due_instagram_via_make_bridge(
     assert payload is not None
     assert payload.status == "posted"
 
-    assert calls == [(video_path, "Launch caption\n\n#launch #velura")]
+    assert calls == [(
+        video_path,
+        "Launch caption\n\n#launch #velura",
+        {"platform": "instagram"},
+    )]
     posts = db.list_posts_for_content(content.id)
     assert len(posts) == 1
     assert posts[0].platform == "instagram"
     assert posts[0].post_id == "make:videos/clip-123.mp4"
+
+
+def test_post_command_delays_repeated_platform_posts(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    client_secrets = tmp_path / "youtube_client_secrets.json"
+    client_secrets.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "platforms": {"enabled": ["youtube"]},
+            "youtube": {"client_secrets_file": str(client_secrets)},
+            "data_root": str(tmp_path / "velura-data"),
+        },
+    )
+
+    product = Product(sku="serum-delay", name="Serum Delay")
+    db.upsert_product(product)
+    video_path = tmp_path / "clip-delay.mp4"
+    video_path.write_bytes(b"video")
+    _seed_approved_youtube_content("content-delay-1", product, video_path)
+    _seed_approved_youtube_content("content-delay-2", product, video_path)
+
+    sleep_calls: list[int] = []
+
+    def fake_sleep(seconds: int) -> None:
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(cli_module.time, "sleep", fake_sleep)
+    monkeypatch.setitem(cli_module.POSTERS, "youtube", FakeYouTubePoster)
+
+    runner = CliRunner()
+    posted = runner.invoke(
+        cli_module.cli,
+        [
+            "post",
+            "--content-id",
+            "content-delay-1",
+            "--content-id",
+            "content-delay-2",
+            "--delay-1",
+        ],
+    )
+
+    assert posted.exit_code == 0
+    assert sleep_calls == [30, 30]
+    assert "Next youtube post in 60 seconds." in posted.output
+    assert "Next youtube post in 30 seconds." in posted.output
+
+    posts = db.list_posts_for_content("content-delay-1") + db.list_posts_for_content("content-delay-2")
+    assert len(posts) == 2
+    assert db.get_platform_payload("content-delay-1", "youtube").status == "posted"
+    assert db.get_platform_payload("content-delay-2", "youtube").status == "posted"
+
+
+def test_post_command_nodelay_skips_repeated_platform_waits(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    client_secrets = tmp_path / "youtube_client_secrets.json"
+    client_secrets.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "platforms": {"enabled": ["youtube"]},
+            "youtube": {"client_secrets_file": str(client_secrets)},
+            "data_root": str(tmp_path / "velura-data"),
+        },
+    )
+
+    product = Product(sku="serum-fast", name="Serum Fast")
+    db.upsert_product(product)
+    video_path = tmp_path / "clip-fast.mp4"
+    video_path.write_bytes(b"video")
+    _seed_approved_youtube_content("content-fast-1", product, video_path)
+    _seed_approved_youtube_content("content-fast-2", product, video_path)
+
+    sleep_calls: list[int] = []
+
+    def fake_sleep(seconds: int) -> None:
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(cli_module.time, "sleep", fake_sleep)
+    monkeypatch.setitem(cli_module.POSTERS, "youtube", FakeYouTubePoster)
+
+    runner = CliRunner()
+    posted = runner.invoke(
+        cli_module.cli,
+        [
+            "post",
+            "--content-id",
+            "content-fast-1",
+            "--content-id",
+            "content-fast-2",
+            "--nodelay",
+        ],
+    )
+
+    assert posted.exit_code == 0
+    assert sleep_calls == []
+    assert "Next youtube post in" not in posted.output
+
+
+def test_post_command_rejects_delay_above_999_minutes(tmp_db: Path) -> None:
+    runner = CliRunner()
+    result = runner.invoke(cli_module.cli, ["post", "--today", "--delay-1000"])
+
+    assert result.exit_code != 0
+    assert "Use --delay-XXX with XXX between 0 and 999." in result.output
 
 
 def test_add_product_command_saves_manual_catalog_entry(

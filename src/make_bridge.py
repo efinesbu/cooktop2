@@ -115,13 +115,23 @@ def bridge_video_to_make(
     caption: str,
     *,
     object_key: str | None = None,
+    content_id: str | None = None,
+    platform: str | None = None,
     config_path: Path | None = None,
 ) -> BridgeResult:
     validate_video_path(video_path)
     settings = load_bridge_settings(config_path=config_path)
     resolved_object_key = object_key or default_object_key(video_path)
     video_url = upload_video_to_r2(video_path, resolved_object_key, settings)
-    response = send_to_make(video_url, caption, settings.make_webhook_url)
+    response = send_to_make(
+        video_url,
+        caption,
+        settings.make_webhook_url,
+        content_id=content_id,
+        platform=platform,
+        handoff_object_key=resolved_object_key,
+        handoff_id=f"make:{resolved_object_key}",
+    )
     return BridgeResult(
         object_key=resolved_object_key,
         video_url=video_url,
@@ -157,10 +167,29 @@ def upload_video_to_r2(video_path: Path, object_key: str, settings: BridgeSettin
     )
 
 
-def send_to_make(video_url: str, caption: str, webhook_url: str) -> requests.Response:
+def send_to_make(
+    video_url: str,
+    caption: str,
+    webhook_url: str,
+    *,
+    content_id: str | None = None,
+    platform: str | None = None,
+    handoff_object_key: str | None = None,
+    handoff_id: str | None = None,
+) -> requests.Response:
+    payload: dict[str, str] = {"video_url": video_url, "caption": caption}
+    if content_id:
+        payload["content_id"] = content_id
+    if platform:
+        payload["platform"] = platform
+    if handoff_object_key:
+        payload["handoff_object_key"] = handoff_object_key
+    if handoff_id:
+        payload["handoff_id"] = handoff_id
+
     response = requests.post(
         webhook_url,
-        json={"video_url": video_url, "caption": caption},
+        json=payload,
         timeout=30,
     )
     response.raise_for_status()

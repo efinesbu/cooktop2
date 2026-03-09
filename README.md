@@ -39,7 +39,7 @@ python cli.py sync-products
 ## Daily Workflow
 
 ```
-8:00 AM   pull-analytics + morning-briefing (cron)
+8:00 AM   pull-analytics + report (cron)
           Operator reviews briefing
           Operator runs: python cli.py run --auto --count 8
           Preview: python cli.py preview --today
@@ -56,7 +56,7 @@ python cli.py sync-products
 | `add-product --sku SLUG --name "Name"` | Create or update a product in the local catalog |
 | `sync-products` | Pull product catalog from Shopify if configured |
 | `register-images --product SLUG` | Scan and register local product images |
-| `morning-briefing` | Generate daily performance + recommendation report |
+| `report` | Generate daily performance + recommendation report |
 | `run --auto --count N` | Generate N total clips across eligible products using the shared bandit allocation |
 | `run --product SLUG --count N` | Generate N clips using shared bandit theme/hook recommendations (starter arms) |
 | `run --product SLUG --theme T --hook H --count N` | Generate with manual strategy overrides |
@@ -69,11 +69,13 @@ python cli.py sync-products
 | `schedule --today` | Schedule approved content using staggered platform offsets |
 | `schedule --content-id ID` | Schedule one approved content item |
 | `post-due` | Publish payloads whose `publish_at` is due |
-| `post --today` | Convenience wrapper: schedule approved content, then publish due payloads |
-| `post --content-id ID` | Manually post a specific content piece |
+| `post --today` | Immediately post approved content from the last 24 hours; repeated posts on the same platform wait 5 minutes by default |
+| `post --content-id ID` | Manually post a specific content piece; add `--delay-XXX` to change the same-platform wait or `--nodelay` to post everything immediately |
 | `pull-analytics` | Pull metrics from all platforms |
-| `report --product SLUG` | Product performance report |
+| `report-product --product SLUG` | Product performance report |
 | `archive` | Archive old videos to GCS |
+
+For immediate posting with `post`, Velura now waits 5 minutes between the second and later posts on the same platform during that command. Use `--delay-XXX` with `XXX` from `0` to `999` to override the wait, for example `python cli.py post --today --delay-15`. Use `--nodelay` to keep the old behavior and post everything back-to-back. During each wait, the CLI prints a progress line every 30 seconds so you know when the next same-platform post will start.
 
 ## Architecture
 
@@ -151,13 +153,14 @@ Copy `config.example.yaml` to `config.yaml` and fill in:
 - **Gemini** — Google AI API key, optional `gemini.aspect_ratio` (default `9:16` for vertical short-form)
 - **xAI** — Video generation API key, optional `xai.model` (default `grok-imagine-video`), optional `xai.resolution`/`xai.aspect_ratio` (default `9:16` for vertical short-form), and polling controls via `xai.poll_interval_seconds` and `xai.poll_timeout_seconds`
 - **YouTube** — Google OAuth Desktop app client secrets JSON for posting, optional `youtube.token_file` for the cached login token, optional `youtube.login_hint` to suggest the correct Google account during auth, plus `youtube.api_key` for analytics pulls
-- **Instagram** — Graph API access token + account ID; set `instagram.gcs_bucket` if you want automatic public video hosting for Reels
+- **Instagram** — Graph API access token + account ID; set `instagram.gcs_bucket` if you want automatic public video hosting for Reels. If you post through the Make bridge, your Make scenario must persist the final Instagram media ID back into Velura or `pull-analytics` cannot fetch Reel metrics.
+- **Instagram sync** — optional `instagram_sync.spreadsheet_id`, `instagram_sync.worksheet_name`, and `instagram_sync.credentials_file` if you want `pull-analytics` to read a Google Sheet exported from Make and replace temporary `make:...` handoff ids with real Instagram media ids before analytics pulls run
 - **TikTok** — `tiktok.client_key`, `tiktok.client_secret`, `tiktok.access_token`, and `tiktok.refresh_token` for posting; Content Posting API approval is required. Analytics only need the client key + secret. The separate review demo uses `tiktok-sandbox.*` settings.
 - **Bandit** — optional shared-bandit controls for `bandit.daily_slots`, `bandit.min_top_k`, `bandit.allocation_ceiling`, `bandit.expand_after_creatives`, and `bandit.starter_arms`; used by `run --auto` and `run --product SLUG` (when no `--theme`/`--hook` is given)
 - **X** — API key/secret + access token/secret (Basic tier for posting)
 - **Make bridge** — optional `make_bridge.webhook_url` plus `make_bridge.r2.account_id`, `make_bridge.r2.access_key_id`, `make_bridge.r2.secret_access_key`, and `make_bridge.r2.bucket_name` if you want to upload finished `.mp4` files to Cloudflare R2 and forward a presigned URL to Make.com
 - **GCS** — Bucket name + service account credentials (optional, for archival)
-- **Briefing email** — optional SMTP settings if you want `morning-briefing` emailed
+- **Briefing email** — optional SMTP settings if you want `report` emailed
 
 If you are managing inventory manually, use `add-product` to maintain your catalog and `exclude --product SLUG --reason "out of stock"` to keep a product out of generation or posting rotation.
 
@@ -178,6 +181,53 @@ The script:
 - uploads the local `.mp4` to Cloudflare R2 with `boto3`
 - generates a 30-minute presigned URL for that object
 - sends `{"video_url": "...", "caption": "..."}` to your Make.com webhook with `requests`
+
+If you use the built-in Instagram Make bridge in `post-due`, Velura stores a temporary handoff id like `make:videos/...` at post time. That value is only enough to track the upload handoff, not to pull Instagram analytics later. To capture Instagram metrics reliably, make sure your Make scenario:
+
+- publishes the Reel and captures the real Instagram media id returned by Meta
+- calls back into your Velura database or follow-up sync step to replace the temporary `make:...` value in `posts.post_id` with that real media id
+- keeps using the same Instagram Business account whose token is configured in `instagram.access_token`
+
+Without that write-back step, `python cli.py pull-analytics` will skip Instagram metrics for Make-bridged posts because Meta's insights API only accepts real media ids.
+
+If you do not want to expose a callback server, Velura can also sync the final Instagram ids from a public Google Sheet when `pull-analytics` runs. Configure:
+
+```yaml
+instagram_sync:
+  spreadsheet_id: "1xqShI6fSYiIlYIlJI-nE9GvuNPH6qM-1F4h_vEfjrf4"
+  worksheet_gid: "0"
+```
+
+The worksheet should contain these headers:
+
+- `handoff_id`
+- `handoff_object_key`
+- `platform`
+- `instagram_post_id`
+- `content_id`
+- `posted_at`
+
+Mapping behavior during `pull-analytics`:
+
+- Velura reads the sheet first, before platform analytics pulls begin
+- it only considers rows where `platform=instagram` and `instagram_post_id` is populated
+- it matches rows to local posts by `handoff_id` first
+- if `handoff_id` is blank, it falls back to `content_id`
+- it updates the local Instagram `posts.post_id` from the temporary `make:...` handoff id to the real `instagram_post_id`
+
+Public Google Sheet requirements:
+
+- publish or share the sheet so the CSV export is readable without auth
+- set `instagram_sync.spreadsheet_id` to the Google Sheet id
+- set `instagram_sync.worksheet_gid` to the tab gid, usually `0` for the first tab
+
+Optional private-sheet mode:
+
+- you can still use a private sheet by setting `instagram_sync.credentials_file`
+- if `credentials_file` is present, Velura uses the Google Sheets API instead of public CSV export
+- `worksheet_name` is only needed for the authenticated Sheets API path
+
+If the public CSV is not readable, `pull-analytics` will print an Instagram sheet sync warning and continue with the normal platform pulls.
 
 Configuration can come from either a local `.env` file or `config.yaml`. Environment variables take precedence:
 
@@ -269,14 +319,14 @@ pytest tests/ -v
 ### Windows (Task Scheduler)
 
 Create two tasks:
-- **Morning (8:00 AM):** `.venv\Scripts\python cli.py pull-analytics` then `cli.py morning-briefing`
+- **Morning (8:00 AM):** `.venv\Scripts\python cli.py pull-analytics` then `cli.py report`
 - **Evening (8:00 PM):** `.venv\Scripts\python cli.py pull-analytics`
 - **Optional publish worker (every 15 minutes):** `.venv\Scripts\python cli.py post-due`
 
 ### Linux/macOS (crontab)
 
 ```cron
-0 7 * * * cd /path/to/repo && .venv/bin/python cli.py pull-analytics && .venv/bin/python cli.py morning-briefing
+0 7 * * * cd /path/to/repo && .venv/bin/python cli.py pull-analytics && .venv/bin/python cli.py report
 0 19 * * * cd /path/to/repo && .venv/bin/python cli.py pull-analytics
 */15 * * * * cd /path/to/repo && .venv/bin/python cli.py post-due
 ```

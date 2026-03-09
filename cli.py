@@ -3,7 +3,10 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
+import random
+import re
 import sys
+import time
 from typing import Optional
 
 import click
@@ -15,6 +18,10 @@ from src import bandit, config, db, storage
 from src.analytics import PULLERS
 from src.cost_tracker import check_budget, content_cost_summary
 from src.image_generator import generate_starting_image
+from src.instagram_sheet_sync import (
+    inspect_instagram_post_ids_from_sheet,
+    sync_instagram_post_ids_from_sheet,
+)
 from src.models import Content, HOOK_TYPES, PLATFORMS, PlatformPayload, Post, Product, THEMES
 from src.morning_briefing import display_briefing, email_briefing, generate_briefing
 from src.posters.instagram import InstagramPoster
@@ -34,6 +41,7 @@ POSTERS = {
     "tiktok": TikTokPoster,
     "x": XPoster,
 }
+POST_DELAY_PATTERN = re.compile(r"^--delay-(\d{1,3})$")
 
 
 def _init():
@@ -42,7 +50,8 @@ def _init():
 
 
 def _post_content_to_all(content: Content, product: Product,
-                         captions: dict[str, str], hashtags: list[str]):
+                         captions: dict[str, str], hashtags: list[str],
+                         delay_state: dict[str, object] | None = None):
     results = []
     enabled = config.enabled_platforms("posting")
     if not enabled:
@@ -54,6 +63,7 @@ def _post_content_to_all(content: Content, product: Product,
 
     for platform in enabled:
         poster_cls = POSTERS[platform]
+        _wait_for_next_platform_post(platform, delay_state)
         try:
             poster = poster_cls()
             post = poster.post(content, product, captions, hashtags)
@@ -61,6 +71,8 @@ def _post_content_to_all(content: Content, product: Product,
             results.append(post)
         except Exception as exc:
             console.print(f"  [red]✗[/red] Failed to post to {platform}: {exc}")
+        finally:
+            _mark_platform_attempt(platform, delay_state)
     return results
 
 
@@ -68,6 +80,77 @@ def _hashtags_to_list(raw: str | None) -> list[str]:
     if not raw:
         return []
     return [tag.strip().lstrip("#") for tag in raw.split(",") if tag.strip()]
+
+
+def _parse_post_delay_args(extra_args: list[str]) -> tuple[int, bool]:
+    delay_minutes = 5
+    no_delay = False
+    seen_delay = False
+
+    for arg in extra_args:
+        if arg == "--nodelay":
+            no_delay = True
+            continue
+
+        match = POST_DELAY_PATTERN.fullmatch(arg)
+        if match:
+            if seen_delay:
+                raise click.UsageError("Provide only one --delay-XXX option.")
+            delay_minutes = int(match.group(1))
+            seen_delay = True
+            continue
+
+        if arg.startswith("--delay-"):
+            raise click.UsageError("Use --delay-XXX with XXX between 0 and 999.")
+
+        if arg.startswith("-"):
+            raise click.UsageError(f"No such option: {arg}")
+
+        raise click.UsageError(f"Unexpected argument: {arg}")
+
+    return delay_minutes, no_delay
+
+
+def _build_post_delay_state(delay_minutes: int, no_delay: bool) -> dict[str, object]:
+    return {
+        "delay_minutes": delay_minutes,
+        "no_delay": no_delay,
+        "platform_attempts": {},
+    }
+
+
+def _wait_for_next_platform_post(
+    platform: str,
+    delay_state: dict[str, object] | None,
+) -> None:
+    if not delay_state or delay_state["no_delay"]:
+        return
+
+    platform_attempts = delay_state["platform_attempts"]
+    assert isinstance(platform_attempts, dict)
+    previous_attempts = int(platform_attempts.get(platform, 0))
+    if previous_attempts == 0:
+        return
+
+    total_seconds = int(delay_state["delay_minutes"]) * 60
+    if total_seconds <= 0:
+        return
+
+    remaining_seconds = total_seconds
+    while remaining_seconds > 0:
+        print(f"Next {platform} post in {remaining_seconds} seconds.")
+        sleep_seconds = min(30, remaining_seconds)
+        time.sleep(sleep_seconds)
+        remaining_seconds -= sleep_seconds
+
+
+def _mark_platform_attempt(platform: str, delay_state: dict[str, object] | None) -> None:
+    if not delay_state:
+        return
+
+    platform_attempts = delay_state["platform_attempts"]
+    assert isinstance(platform_attempts, dict)
+    platform_attempts[platform] = int(platform_attempts.get(platform, 0)) + 1
 
 
 def _print_prompt(content: Content) -> None:
@@ -349,11 +432,11 @@ def register_images_cmd(slug: str):
 
 
 # ---------------------------------------------------------------------------
-# morning-briefing
+# report
 # ---------------------------------------------------------------------------
 
-@cli.command("morning-briefing")
-def morning_briefing_cmd():
+@cli.command("report")
+def report_cmd():
     """Generate and send the daily morning briefing."""
     _init()
     try:
@@ -364,6 +447,72 @@ def morning_briefing_cmd():
     except Exception as exc:
         console.print(f"[red]Briefing failed:[/red] {exc}")
         sys.exit(1)
+
+
+@cli.command("briefing-diagnose")
+def briefing_diagnose_cmd():
+    """Diagnose why Yesterday's Performance shows zeros."""
+    from datetime import date, timedelta
+
+    _init()
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    posts = db.list_recent_posts(days=2)
+    enabled_analytics = config.enabled_platforms("analytics")
+
+    table = Table(title="Yesterday's Performance Diagnostic")
+    table.add_column("Check", style="cyan")
+    table.add_column("Result", style="white")
+    table.add_row("Today (local)", str(date.today()))
+    table.add_row("Yesterday (filter target)", yesterday)
+    table.add_row("Posts in last 2 days", str(len(posts)))
+    table.add_row("Analytics platforms enabled", ", ".join(enabled_analytics) or "(none)")
+    table.add_row("", "")
+
+    with db._connect() as conn:
+        metric_count = conn.execute("SELECT COUNT(*) FROM metrics").fetchone()[0]
+    table.add_row("Total metrics in DB", str(metric_count))
+
+    # Per-post breakdown
+    with_metrics = 0
+    with_content = 0
+    matching_yesterday = 0
+    for post in posts:
+        if post.id and db.latest_metrics_for_post(post.id):
+            with_metrics += 1
+        if post.content_id and db.get_content(post.content_id):
+            with_content += 1
+        pub = post.published_at[:10] if post.published_at else None
+        if pub == yesterday:
+            m = db.latest_metrics_for_post(post.id) if post.id else None
+            c = db.get_content(post.content_id) if post.content_id else None
+            if m and c:
+                matching_yesterday += 1
+
+    table.add_row("Posts with metrics", f"{with_metrics} / {len(posts)}")
+    table.add_row("Posts with content", f"{with_content} / {len(posts)}")
+    table.add_row("Posts matching yesterday + metrics + content", str(matching_yesterday))
+
+    console.print(table)
+
+    if matching_yesterday == 0:
+        console.print()
+        if len(posts) == 0:
+            console.print("[yellow]No posts in last 2 days.[/yellow] Post content first.")
+        elif with_metrics == 0:
+            console.print(
+                "[yellow]No metrics for any recent post.[/yellow] Run [bold]pull-analytics[/bold] "
+                "and ensure analytics platforms are configured."
+            )
+        elif not enabled_analytics:
+            console.print(
+                "[yellow]No analytics platforms configured.[/yellow] Add credentials for "
+                "YouTube, Instagram, TikTok, or X in config.yaml."
+            )
+        else:
+            console.print(
+                "[yellow]No posts from yesterday have metrics.[/yellow] "
+                "Run [bold]pull-analytics[/bold] before report."
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -418,9 +567,10 @@ def _run_auto(count: int, should_post: bool):
 
     recommendation = bandit.recommend(total_slots=count)
     queued_runs: list[tuple[Product, str, str]] = []
-    for index, alloc in enumerate(recommendation.allocations):
+    starting_product_index = random.randrange(len(products))
+    for alloc in recommendation.allocations:
         for _ in range(alloc.count):
-            product = products[len(queued_runs) % len(products)]
+            product = products[(starting_product_index + len(queued_runs)) % len(products)]
             queued_runs.append((product, alloc.theme, alloc.hook_type))
 
     summary = Table(title="Global Bandit Allocation")
@@ -436,7 +586,8 @@ def _run_auto(count: int, should_post: bool):
     for product, theme, hook_type in queued_runs:
         grouped_runs.setdefault(product.sku, []).append((theme, hook_type))
 
-    for product in products:
+    ordered_products = products[starting_product_index:] + products[:starting_product_index]
+    for product in ordered_products:
         product_runs = grouped_runs.get(product.sku, [])
         if not product_runs:
             continue
@@ -711,7 +862,7 @@ def post_due_cmd():
     _init()
     _post_due()
 
-@cli.command("post")
+@cli.command("post", context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
 @click.option("--today", is_flag=True, help="Post all approved content from the last 24 hours immediately")
 @click.option(
     "--content-id",
@@ -719,9 +870,12 @@ def post_due_cmd():
     multiple=True,
     help="Row number(s) from preview (e.g. --content-id 1 --content-id 2)",
 )
-def post_cmd(today: bool, content_ids: tuple[str, ...]):
-    """Post content to all platforms."""
+@click.pass_context
+def post_cmd(ctx: click.Context, today: bool, content_ids: tuple[str, ...]):
+    """Post content to all platforms. Supports `--delay-XXX` and `--nodelay`."""
     _init()
+    delay_minutes, no_delay = _parse_post_delay_args(list(ctx.args))
+    delay_state = _build_post_delay_state(delay_minutes, no_delay)
 
     if not today and not content_ids:
         console.print("[red]Provide either --today or --content-id (one or more).[/red]")
@@ -730,7 +884,7 @@ def post_cmd(today: bool, content_ids: tuple[str, ...]):
     if content_ids:
         any_failed = False
         for cid in content_ids:
-            if not _post_single(cid):
+            if not _post_single(cid, delay_state=delay_state):
                 any_failed = True
         if any_failed:
             sys.exit(1)
@@ -741,7 +895,7 @@ def post_cmd(today: bool, content_ids: tuple[str, ...]):
             return
         any_failed = False
         for content in items:
-            if not _post_single(content.id):
+            if not _post_single(content.id, delay_state=delay_state):
                 any_failed = True
         if any_failed:
             sys.exit(1)
@@ -788,7 +942,7 @@ def _schedule_last_24h():
     console.print(f"\n[green]Scheduled {total}[/green] payloads across {len(items)} approved items.")
 
 
-def _post_single(content_id: str) -> bool:
+def _post_single(content_id: str, delay_state: dict[str, object] | None = None) -> bool:
     content = _resolve_content(content_id)
     if not content:
         console.print(f"[red]Content {content_id} not found.[/red]")
@@ -814,6 +968,7 @@ def _post_single(content_id: str) -> bool:
                 )
                 skipped += 1
                 continue
+            _wait_for_next_platform_post(payload.platform, delay_state)
             try:
                 post = _post_platform_payload(payload, content, product)
                 if payload.id is not None:
@@ -826,6 +981,8 @@ def _post_single(content_id: str) -> bool:
                 if payload.id is not None:
                     db.update_platform_payload_status(payload.id, "failed", str(exc))
                 console.print(f"  [red]✗[/red] Failed to post to {payload.platform}: {exc}")
+            finally:
+                _mark_platform_attempt(payload.platform, delay_state)
         console.print(
             f"\n[green]Posted {posted}[/green] payloads for {content.id[:12]}. "
             f"[yellow]Skipped {skipped}[/yellow]."
@@ -837,7 +994,7 @@ def _post_single(content_id: str) -> bool:
         "[yellow]No persisted payloads found; falling back to reconstructed post metadata.[/yellow]"
     )
     console.print(Panel(f"Posting [bold]{content.id}[/bold]", style="blue"))
-    _post_content_to_all(content, product, captions, hashtags)
+    _post_content_to_all(content, product, captions, hashtags, delay_state=delay_state)
     return True
 
 
@@ -929,11 +1086,69 @@ def _load_post_metadata(content: Content) -> tuple[dict[str, str], list[str]]:
 # pull-analytics
 # ---------------------------------------------------------------------------
 
+@cli.command("diagnose-instagram-sync")
+def diagnose_instagram_sync_cmd():
+    """Inspect Google Sheet rows and show how they map to local Instagram posts."""
+    _init()
+    try:
+        diagnostic = inspect_instagram_post_ids_from_sheet()
+    except Exception as exc:
+        console.print(f"[red]Instagram sync diagnose failed:[/red] {exc}")
+        sys.exit(1)
+
+    console.print(
+        "[green]Instagram ID sync diagnostic:[/green] "
+        f"{diagnostic.rows_considered} eligible rows from {diagnostic.rows_read} sheet rows, "
+        f"{sum(1 for row in diagnostic.row_results if row.status == 'matched')} matched, "
+        f"{sum(1 for row in diagnostic.row_results if row.status == 'already_synced')} already synced, "
+        f"{sum(1 for row in diagnostic.row_results if row.status == 'no_match')} unmatched."
+    )
+
+    table = Table(title="Instagram Sheet Sync Diagnostic")
+    table.add_column("Row", justify="right")
+    table.add_column("Status", style="cyan")
+    table.add_column("Match")
+    table.add_column("Local Row", justify="right")
+    table.add_column("Local ID Before")
+    table.add_column("Sheet IG ID")
+    table.add_column("Content ID")
+    table.add_column("Handoff ID")
+    table.add_column("Detail")
+
+    for row in diagnostic.row_results:
+        table.add_row(
+            str(row.row_number),
+            row.status,
+            row.matched_by,
+            str(row.local_post_row_id or ""),
+            row.local_post_id_before,
+            row.instagram_post_id,
+            row.content_id,
+            row.handoff_id,
+            row.detail,
+        )
+
+    console.print(table)
+
+
 @cli.command("pull-analytics")
 def pull_analytics_cmd():
     """Pull analytics from all platforms and update bandit model."""
     _init()
-    total_pulled = 0
+    platforms_with_metrics = 0
+    total_metric_rows = 0
+
+    try:
+        sheet_sync = sync_instagram_post_ids_from_sheet()
+        if sheet_sync.rows_read:
+            console.print(
+                "[green]Instagram ID sync:[/green] "
+                f"{sheet_sync.rows_updated}/{sheet_sync.rows_considered} eligible rows updated "
+                f"from {sheet_sync.rows_read} sheet rows."
+            )
+    except Exception as exc:
+        console.print(f"[yellow]Instagram ID sync skipped:[/yellow] {exc}")
+
     enabled = config.enabled_platforms("analytics")
     if not enabled:
         console.print(
@@ -946,23 +1161,31 @@ def pull_analytics_cmd():
         puller_cls = PULLERS[name]
         try:
             puller = puller_cls()
-            puller.pull()
-            console.print(f"  [green]✓[/green] {name}")
-            total_pulled += 1
+            pulled_rows = puller.pull()
+            total_metric_rows += pulled_rows
+            if pulled_rows > 0:
+                console.print(f"  [green]OK[/green] {name} ({pulled_rows} metrics)")
+                platforms_with_metrics += 1
+            else:
+                console.print(f"  [yellow]![/yellow] {name}: no metric rows saved")
         except Exception as exc:
-            console.print(f"  [red]✗[/red] {name}: {exc}")
+            console.print(f"  [red]ERROR[/red] {name}: {exc}")
 
     updated = bandit.update_from_metrics()
-    console.print(f"\n[green]{total_pulled}[/green] platforms pulled, [green]{updated}[/green] bandit arms updated.")
+    console.print(
+        f"\n[green]{platforms_with_metrics}[/green] platforms returned metrics, "
+        f"[green]{total_metric_rows}[/green] metric rows saved, "
+        f"[green]{updated}[/green] bandit arms updated."
+    )
 
 
 # ---------------------------------------------------------------------------
-# report
+# report-product
 # ---------------------------------------------------------------------------
 
-@cli.command()
+@cli.command("report-product")
 @click.option("--product", "slug", required=True, help="Product SKU")
-def report(slug: str):
+def report_product(slug: str):
     """Show performance report for a product."""
     _init()
 

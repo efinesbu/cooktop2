@@ -58,7 +58,11 @@ class InstagramPoster(BasePoster):
         full_caption = f"{caption}\n\n{' '.join(f'#{h}' for h in hashtags)}"
 
         if self._use_make_bridge:
-            result = bridge_video_to_make(video_path, full_caption)
+            result = bridge_video_to_make(
+                video_path,
+                full_caption,
+                platform=self.platform,
+            )
             handoff_id = f"make:{result.object_key}"
             logger.info("Handed Instagram payload to Make bridge: %s", handoff_id)
             return handoff_id

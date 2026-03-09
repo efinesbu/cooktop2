@@ -114,8 +114,9 @@ def test_generate_briefing_includes_7day_trends_and_creative_insights(monkeypatc
 
     briefing = morning_briefing.generate_briefing()
 
+    assert "POSTS PUBLISHED YESTERDAY" in briefing
     assert "7-DAY PERFORMANCE" in briefing
-    assert "Window: 2026-03-02 to 2026-03-08" in briefing
+    assert "Window: 2026-03-03 to 2026-03-09" in briefing
     assert "Posts tracked: 4 │ Avg/post: 1125 views │ Engagement: 5.1%" in briefing
     assert "Avg watch-through rate: 32.5%" in briefing
     assert "Vs prior 7 days: views ↓25% │ engagement ↓22% │ posts +2" in briefing
@@ -127,6 +128,53 @@ def test_generate_briefing_includes_7day_trends_and_creative_insights(monkeypatc
     assert "7-day views down 25% vs prior week" in briefing
     assert "7-day engagement down 22% vs prior week" in briefing
     assert "Retest routine/quick_tip creative (7-day engagement 1.1%)" in briefing
+
+
+def test_generate_briefing_includes_today_in_rolling_7day_window(monkeypatch) -> None:
+    products = [Product(sku="serum-a", name="Serum A")]
+    _stub_common_dependencies(monkeypatch, products)
+
+    posts = [
+        Post(id=21, content_id="c21", platform="instagram", published_at="2026-03-09 09:00:00"),
+    ]
+    contents = {
+        "c21": Content(id="c21", product_sku="serum-a", theme="benefit", hook_type="question"),
+    }
+    metrics = {
+        21: Metric(
+            post_id=21,
+            platform="instagram",
+            views=700,
+            likes=70,
+            comments=0,
+            shares=0,
+            saves=0,
+            watch_through_rate=0.35,
+        ),
+    }
+
+    def fake_list_recent_posts(days: int = 30) -> list[Post]:
+        cutoff = FakeDate.today() - timedelta(days=days)
+        return [
+            post for post in posts
+            if real_date.fromisoformat(post.published_at[:10]) >= cutoff
+        ]
+
+    monkeypatch.setattr(morning_briefing.db, "list_recent_posts", fake_list_recent_posts)
+    monkeypatch.setattr(morning_briefing.db, "latest_metrics_for_post", lambda post_id: metrics.get(post_id))
+    monkeypatch.setattr(morning_briefing.db, "get_content", lambda content_id: contents.get(content_id))
+    monkeypatch.setattr(
+        morning_briefing.db,
+        "get_product",
+        lambda sku: products[0] if sku == "serum-a" else None,
+    )
+
+    briefing = morning_briefing.generate_briefing()
+
+    assert "No posts published yesterday with metrics." in briefing
+    assert "Window: 2026-03-03 to 2026-03-09" in briefing
+    assert "Posts tracked: 1 │ Avg/post: 700 views │ Engagement: 10.0%" in briefing
+    assert "Most viewed product: Serum A — 700 views across 1 post" in briefing
 
 
 def test_generate_briefing_handles_sparse_7day_data(monkeypatch) -> None:
@@ -170,7 +218,16 @@ def test_generate_briefing_handles_sparse_7day_data(monkeypatch) -> None:
 
     briefing = morning_briefing.generate_briefing()
 
+    assert "POSTS PUBLISHED YESTERDAY" in briefing
     assert "Vs prior 7 days: not enough historical data yet." in briefing
     assert "Need more repeated posts to compare creative combos confidently." in briefing
     assert "Current leader: benefit/question — 10.0% engagement (1 post)" in briefing
     assert "No urgent actions. Systems nominal." in briefing
+
+
+def test_ascii_safe_text_replaces_unicode_markers() -> None:
+    text = "Views │ likes — trend ↓10% • note ◆ arm ✓ done ⚠"
+
+    converted = morning_briefing._ascii_safe_text(text)
+
+    assert converted == "Views | likes - trend down 10% * note * arm OK done WARNING"

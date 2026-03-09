@@ -510,6 +510,15 @@ def get_post(post_id: int) -> Post | None:
     return _row_to_post(row) if row else None
 
 
+def find_post_by_platform_remote_id(platform: str, remote_post_id: str) -> Post | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM posts WHERE platform=? AND post_id=? ORDER BY id DESC LIMIT 1",
+            (platform, remote_post_id),
+        ).fetchone()
+    return _row_to_post(row) if row else None
+
+
 def list_posts_for_content(content_id: str) -> list[Post]:
     with _connect() as conn:
         rows = conn.execute(
@@ -525,6 +534,59 @@ def list_recent_posts(days: int = 30) -> list[Post]:
             (f"-{days} days",),
         ).fetchall()
     return [_row_to_post(r) for r in rows]
+
+
+def sync_instagram_post_id(
+    instagram_post_id: str,
+    *,
+    handoff_id: str | None = None,
+    content_id: str | None = None,
+) -> int:
+    instagram_post_id = instagram_post_id.strip()
+    if not instagram_post_id:
+        return 0
+
+    with _connect() as conn:
+        target_row: sqlite3.Row | None = None
+
+        if handoff_id:
+            target_row = conn.execute(
+                """SELECT id, post_id
+                   FROM posts
+                   WHERE platform='instagram' AND post_id=?""",
+                (handoff_id,),
+            ).fetchone()
+
+        if target_row is None and content_id:
+            rows = conn.execute(
+                """SELECT id, post_id
+                   FROM posts
+                   WHERE platform='instagram' AND content_id=?
+                   ORDER BY id DESC""",
+                (content_id,),
+            ).fetchall()
+            exact_match = next(
+                (row for row in rows if (row["post_id"] or "").strip() == instagram_post_id),
+                None,
+            )
+            if exact_match is not None:
+                return 0
+
+            make_rows = [row for row in rows if (row["post_id"] or "").startswith("make:")]
+            if len(make_rows) == 1:
+                target_row = make_rows[0]
+
+        if target_row is None:
+            return 0
+
+        if (target_row["post_id"] or "").strip() == instagram_post_id:
+            return 0
+
+        conn.execute(
+            "UPDATE posts SET post_id=? WHERE id=?",
+            (instagram_post_id, target_row["id"]),
+        )
+        return 1
 
 
 def _row_to_post(row: sqlite3.Row) -> Post:

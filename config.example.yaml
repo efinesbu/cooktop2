@@ -72,6 +72,15 @@ make_bridge:
     secret_access_key: "YOUR_CLOUDFLARE_R2_SECRET_ACCESS_KEY"
     bucket_name: "your-r2-bucket-name"
 
+instagram_sync:
+  spreadsheet_id: "1xqShI6fSYiIlYIlJI-nE9GvuNPH6qM-1F4h_vEfjrf4"
+  worksheet_gid: "0"
+  # Optional for non-public sheets:
+  # worksheet_name: "Sheet1"
+  # credentials_file: "google_sheets_service_account.json"
+  # Optional override if you want to paste the full published CSV URL:
+  # public_csv_url: "https://docs.google.com/spreadsheets/d/.../export?format=csv&gid=0"
+
 gcs:
   bucket_name: "velura-video-archive"
   credentials_file: "gcs_service_account.json"

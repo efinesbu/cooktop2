@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import smtplib
+import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -302,9 +303,9 @@ def generate_briefing() -> str:
     lines.append(f"  VELURA MORNING BRIEFING \u2014 {today.isoformat()}")
     lines.append("=" * 52)
 
-    # ── Section 1: Yesterday's Performance ─────────────────────────────────
+    # ── Section 1: Posts Published Yesterday ───────────────────────────────
 
-    heading("YESTERDAY'S PERFORMANCE")
+    heading("POSTS PUBLISHED YESTERDAY")
     performances, platform_totals = _gather_yesterday_performance()
     yesterday_summary = _summarize_performance(performances)
 
@@ -337,7 +338,7 @@ def generate_briefing() -> str:
                     f" \u2014 {p.engagement_rate:.1%} engagement ({p.metrics.views:,} views)"
                 )
     else:
-        lines.append("No post data available for yesterday.")
+        lines.append("No posts published yesterday with metrics.")
 
     lines.append("")
     lines.append("Platform Breakdown:")
@@ -360,10 +361,10 @@ def generate_briefing() -> str:
     # ── Section 2: 7-Day Performance ───────────────────────────────────────
 
     heading("7-DAY PERFORMANCE")
-    current_start = today - timedelta(days=7)
-    current_end = today - timedelta(days=1)
-    prior_start = today - timedelta(days=14)
-    prior_end = today - timedelta(days=8)
+    current_start = today - timedelta(days=6)
+    current_end = today
+    prior_start = today - timedelta(days=13)
+    prior_end = today - timedelta(days=7)
 
     recent_performances = _gather_recent_performance(days=15)
     current_window = _filter_performance_window(recent_performances, current_start, current_end)
@@ -383,6 +384,40 @@ def generate_briefing() -> str:
     )
     if current_summary.avg_watch_through_rate is not None:
         lines.append(f"Avg watch-through rate: {current_summary.avg_watch_through_rate:.1%}")
+
+    if current_window:
+        ranked = sorted(current_window, key=lambda p: p.engagement_rate, reverse=True)
+        lines.append("")
+        lines.append("Top Performers:")
+        for i, p in enumerate(ranked[:3], 1):
+            lines.append(
+                f"  {i}. [{p.product_name}] {p.theme}/{p.hook_type} on {p.post.platform}"
+                f" \u2014 {p.engagement_rate:.1%} engagement ({p.metrics.views:,} views)"
+            )
+        if len(ranked) > 3:
+            worst_start = max(3, len(ranked) - 3)
+            worst = ranked[worst_start:]
+            lines.append("")
+            lines.append("Worst Performers:")
+            for i, p in enumerate(worst, 1):
+                lines.append(
+                    f"  {i}. [{p.product_name}] {p.theme}/{p.hook_type} on {p.post.platform}"
+                    f" \u2014 {p.engagement_rate:.1%} engagement ({p.metrics.views:,} views)"
+                )
+
+    lines.append("")
+    lines.append("Platform Breakdown:")
+    for plat in PLATFORMS:
+        t = current_summary.platform_totals.get(plat, {})
+        v = t.get("views", 0)
+        lk = t.get("likes", 0)
+        sh = t.get("shares", 0)
+        cm = t.get("comments", 0)
+        label = plat_labels.get(plat, plat)
+        lines.append(
+            f"  {label:>10}: {v:>8,} views \u2502 {lk:>6,} likes \u2502 "
+            f"{sh:>6,} shares \u2502 {cm:>6,} comments"
+        )
 
     if prior_window:
         views_change = _pct_change(current_summary.total_views, prior_summary.total_views)
@@ -629,6 +664,10 @@ def display_briefing(briefing: str) -> None:
     from rich.panel import Panel
     from rich.text import Text
 
+    if not _supports_unicode_output():
+        print(_ascii_safe_text(briefing))
+        return
+
     console = Console()
 
     section_styles = {
@@ -686,6 +725,37 @@ def display_briefing(briefing: str) -> None:
         ))
 
     console.print()
+
+
+def _supports_unicode_output() -> bool:
+    encoding = getattr(sys.stdout, "encoding", None) or ""
+    if not encoding:
+        return True
+    try:
+        "│".encode(encoding)
+    except UnicodeEncodeError:
+        return False
+    except LookupError:
+        return False
+    return True
+
+
+def _ascii_safe_text(text: str) -> str:
+    replacements = {
+        "│": "|",
+        "─": "-",
+        "—": "-",
+        "•": "*",
+        "◆": "*",
+        "◇": "*",
+        "✓": "OK",
+        "⚠": "WARNING",
+        "↑": "up ",
+        "↓": "down ",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text
 
 
 def email_briefing(briefing: str) -> None:
