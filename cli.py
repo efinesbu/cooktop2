@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 import sys
@@ -25,6 +26,7 @@ from src.prompt_generator import generate_content
 from src.video_generator import generate_video
 
 console = Console()
+PARALLEL_GENERATION_THRESHOLD = 10
 
 POSTERS = {
     "youtube": YouTubePoster,
@@ -174,6 +176,34 @@ def _format_strategy_label(theme: str | None, hook_type: str | None) -> str:
     return " / ".join(parts) if parts else "prompt-selected"
 
 
+def _run_generation_job(
+    job: tuple[Product, str | None, str | None],
+    should_post: bool,
+) -> Optional[Content]:
+    product, theme, hook_type = job
+    return _generate_single(product, theme, hook_type, should_post)
+
+
+def _generate_batch(
+    jobs: list[tuple[Product, str | None, str | None]],
+    should_post: bool,
+    requested_count: int,
+) -> int:
+    if not jobs:
+        return 0
+
+    if requested_count < PARALLEL_GENERATION_THRESHOLD and len(jobs) > 1:
+        max_workers = min(len(jobs), requested_count)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = executor.map(
+                lambda job: _run_generation_job(job, should_post),
+                jobs,
+            )
+            return sum(1 for result in results if result)
+
+    return sum(1 for product, theme, hook_type in jobs if _generate_single(product, theme, hook_type, should_post))
+
+
 def _generate_single(product: Product, theme: str | None, hook_type: str | None,
                      should_post: bool) -> Optional[Content]:
     spent, budget, within = check_budget()
@@ -185,22 +215,22 @@ def _generate_single(product: Product, theme: str | None, hook_type: str | None,
 
     images = db.list_product_images(product.sku)
     if not images:
-        console.print(f"[yellow]No images registered for {product.sku}, continuing anyway.[/yellow]")
+        console.print(f"[yellow]{product.sku}: no images registered, continuing anyway.[/yellow]")
 
-    console.print(f"  Generating prompt … ({_format_strategy_label(theme, hook_type)})")
+    console.print(f"  {product.sku}: generating prompt … ({_format_strategy_label(theme, hook_type)})")
     content, extras = generate_content(product, theme, hook_type, images)
     _print_prompt(content)
     captions: dict[str, str] = extras["platform_captions"]
     hashtags: list[str] = extras["hashtags"]
 
-    console.print("  Generating starting image …")
+    console.print(f"  {product.sku}: generating starting image …")
     starting_image_path = generate_starting_image(content, product)
 
-    console.print("  Generating video …")
+    console.print(f"  {product.sku}: generating video …")
     generate_video(content, starting_image_path, product)
 
     db.update_last_content_date(product.sku)
-    console.print(f"  [green]✓[/green] Content [bold]{content.id}[/bold] created")
+    console.print(f"  [green]✓[/green] {product.sku}: content [bold]{content.id}[/bold] created")
 
     if should_post:
         _post_content_to_all(content, product, captions, hashtags)
@@ -401,7 +431,7 @@ def _run_auto(count: int, should_post: bool):
         summary.add_row(alloc.theme, alloc.hook_type, str(alloc.count))
     console.print(summary)
 
-    total = 0
+    jobs: list[tuple[Product, str | None, str | None]] = []
     grouped_runs: dict[str, list[tuple[str, str]]] = {}
     for product, theme, hook_type in queued_runs:
         grouped_runs.setdefault(product.sku, []).append((theme, hook_type))
@@ -411,10 +441,9 @@ def _run_auto(count: int, should_post: bool):
         if not product_runs:
             continue
         console.print(Panel(f"[bold]{product.name}[/bold] ({product.sku})", style="blue"))
-        for theme, hook_type in product_runs:
-            result = _generate_single(product, theme, hook_type, should_post)
-            if result:
-                total += 1
+        jobs.extend((product, theme, hook_type) for theme, hook_type in product_runs)
+
+    total = _generate_batch(jobs, should_post, requested_count=count)
 
     piece = "piece" if total == 1 else "pieces"
     console.print(f"\n[green]{total}[/green] {piece} of content generated ({len(products)} products eligible).")
@@ -427,7 +456,7 @@ def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
         console.print("[red]Provide at least one --product or use --auto.[/red]")
         sys.exit(1)
 
-    total = 0
+    jobs: list[tuple[Product, str | None, str | None]] = []
     for slug in slugs:
         product = db.get_product(slug)
         if not product:
@@ -443,10 +472,9 @@ def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
                     strategy_pairs.append((alloc.theme, alloc.hook_type))
         else:
             strategy_pairs = _manual_strategy_runs(themes, hooks, count, rotate_theme_hook)
-        for theme, hook in strategy_pairs:
-            result = _generate_single(product, theme, hook, should_post)
-            if result:
-                total += 1
+        jobs.extend((product, theme, hook) for theme, hook in strategy_pairs)
+
+    total = _generate_batch(jobs, should_post, requested_count=count)
 
     console.print(f"\n[green]{total}[/green] pieces of content generated.")
 
