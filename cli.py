@@ -132,9 +132,13 @@ def _wait_for_next_platform_post(
     if previous_attempts == 0:
         return
 
-    total_seconds = int(delay_state["delay_minutes"]) * 60
-    if total_seconds <= 0:
+    base_seconds = int(delay_state["delay_minutes"]) * 60
+    if base_seconds <= 0:
         return
+
+    # Apply ±20% random variance to each delay between same-platform posts
+    variance = random.uniform(0.8, 1.2)
+    total_seconds = max(1, int(base_seconds * variance))
 
     remaining_seconds = total_seconds
     while remaining_seconds > 0:
@@ -798,6 +802,21 @@ def approve(content_ids: tuple[str, ...]):
             f"[green]Approved[/green] row(s) {ids_str}. "
             f"Next step: run `python cli.py schedule --content-id {' --content-id '.join(approved)}`."
         )
+
+
+@cli.command("approve-all")
+def approve_all_cmd():
+    """Set all pending content to approved status."""
+    _init()
+    count = db.approve_all_pending_content()
+    if count == 0:
+        console.print("[yellow]No pending content to approve.[/yellow]")
+        return
+    piece = "item" if count == 1 else "items"
+    console.print(
+        f"[green]Approved {count}[/green] {piece}. "
+        "Next step: run `python cli.py schedule --today` or schedule by content-id."
+    )
 
 
 @cli.command()

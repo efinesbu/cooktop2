@@ -337,6 +337,20 @@ def approve_content(content_id: str) -> None:
         )
 
 
+def approve_all_pending_content() -> int:
+    """Set all content with review_status='pending' to 'approved'. Returns count updated."""
+    with _connect() as conn:
+        cur = conn.execute(
+            """UPDATE content
+               SET approved=1,
+                   review_status='approved',
+                   approved_at=datetime('now'),
+                   rejected_at=NULL
+               WHERE review_status='pending'"""
+        )
+        return cur.rowcount
+
+
 def reject_content(content_id: str, notes: str | None = None) -> None:
     with _connect() as conn:
         conn.execute(

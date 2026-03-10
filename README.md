@@ -75,7 +75,7 @@ python cli.py sync-products
 | `report-product --product SLUG` | Product performance report |
 | `archive` | Archive old videos to GCS |
 
-For immediate posting with `post`, Velura now waits 5 minutes between the second and later posts on the same platform during that command. Use `--delay-XXX` with `XXX` from `0` to `999` to override the wait, for example `python cli.py post --today --delay-15`. Use `--nodelay` to keep the old behavior and post everything back-to-back. During each wait, the CLI prints a progress line every 30 seconds so you know when the next same-platform post will start.
+For immediate posting with `post`, Velura now waits 5 minutes between the second and later posts on the same platform during that command. Each delay has a random ±20% variance (e.g. 4–6 minutes for the default 5-minute wait) so repeated posts are less predictable. Use `--delay-XXX` with `XXX` from `0` to `999` to override the base wait, for example `python cli.py post --today --delay-15`. Use `--nodelay` to keep the old behavior and post everything back-to-back. During each wait, the CLI prints a progress line every 30 seconds so you know when the next same-platform post will start.
 
 ## Architecture
 

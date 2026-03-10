@@ -364,6 +364,8 @@ def test_post_command_delays_repeated_platform_posts(
         sleep_calls.append(seconds)
 
     monkeypatch.setattr(cli_module.time, "sleep", fake_sleep)
+    # Disable variance so test assertions on exact delay remain deterministic
+    monkeypatch.setattr(cli_module.random, "uniform", lambda a, b: 1.0)
     monkeypatch.setitem(cli_module.POSTERS, "youtube", FakeYouTubePoster)
 
     runner = CliRunner()
