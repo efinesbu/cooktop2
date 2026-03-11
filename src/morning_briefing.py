@@ -11,6 +11,11 @@ from typing import NamedTuple
 
 from src import bandit, config, db
 from src.cost_tracker import check_budget
+from src.organic_evaluation import (
+    classify_winners_middles_losers,
+    format_cohort_label,
+    gather_cohort_performances,
+)
 from src.models import Metric, Post, Product, PLATFORMS
 
 logger = logging.getLogger(__name__)
@@ -518,6 +523,63 @@ def generate_briefing() -> str:
     else:
         lines.append("No 7-day creative data available yet.")
 
+    # ── Section 3b: Organic Evaluation (12-Creative Matrix) ───────────────────
+
+    heading("ORGANIC EVALUATION (12-CREATIVE MATRIX)")
+    cohort_perfs = gather_cohort_performances(
+        days=15,
+        start_on=current_start,
+        end_on=current_end,
+    )
+    rank_by = str(config.get("bandit.ranking_objective", "engagement_rate"))
+    if rank_by not in ("engagement_rate", "views", "composite", "revenue", "sessions", "purchases"):
+        rank_by = "engagement_rate"
+    winners, middles, losers = classify_winners_middles_losers(
+        cohort_perfs,
+        winner_pct=0.25,
+        loser_pct=0.25,
+        rank_by=rank_by,
+    )
+
+    if cohort_perfs:
+        lines.append(
+            f"Cohorts: {len(cohort_perfs)} (product × platform × format × hook × CTA)"
+        )
+        lines.append(f"Ranked by {rank_by}. Top 25% = winners, bottom 25% = losers.")
+        lines.append("")
+        total_revenue = sum(p.revenue for p in cohort_perfs)
+        if total_revenue > 0:
+            lines.append(f"Commerce (7d): ${total_revenue:,.2f} revenue across {sum(p.purchases for p in cohort_perfs)} purchases")
+        if winners:
+            lines.append("")
+            lines.append("Winners (repeat or promote):")
+            for p in winners[:5]:
+                wtr = f" WTR {p.avg_watch_through_rate:.0%}" if p.avg_watch_through_rate else ""
+                commerce = f" ${p.revenue:.0f}" if p.revenue > 0 else ""
+                lines.append(
+                    f"  \u2713 {format_cohort_label(p)}"
+                    f" \u2014 {p.engagement_rate:.1%} ({p.total_views:,} views{wtr}{commerce})"
+                )
+        if middles:
+            lines.append("")
+            lines.append("Middle (consider remixing):")
+            for p in middles[:3]:
+                lines.append(
+                    f"  \u25cb {format_cohort_label(p)}"
+                    f" \u2014 {p.engagement_rate:.1%} ({p.total_views:,} views)"
+                )
+        if losers:
+            lines.append("")
+            lines.append("Losers (retire or refresh):")
+            for p in losers[:5]:
+                lines.append(
+                    f"  \u2717 {format_cohort_label(p)}"
+                    f" \u2014 {p.engagement_rate:.1%} ({p.total_views:,} views)"
+                )
+    else:
+        lines.append("No cohort data in the 7-day window yet.")
+        lines.append("Publish creatives across the matrix to see winner/middle/loser labels.")
+
     # ── Section 4: Bandit Recommendations ──────────────────────────────────
 
     heading("BANDIT RECOMMENDATIONS")
@@ -674,6 +736,7 @@ def display_briefing(briefing: str) -> None:
         "YESTERDAY'S PERFORMANCE": "bright_cyan",
         "7-DAY PERFORMANCE": "cyan",
         "CREATIVE INSIGHTS": "bright_blue",
+        "ORGANIC EVALUATION (12-CREATIVE MATRIX)": "bright_blue",
         "BANDIT RECOMMENDATIONS": "bright_magenta",
         "PRODUCT HEALTH": "bright_yellow",
         "BUDGET": "bright_green",

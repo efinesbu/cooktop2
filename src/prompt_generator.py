@@ -9,8 +9,11 @@ from typing import Any
 
 from src import config, db
 from src.creative_strategy import whitelist_prompt_lines
-from src.models import Content, Cost, HOOK_TYPES, PlatformPayload, Product, ProductImage, THEMES
-from src.utm import build_full_utm_link
+from src.models import (
+    Content, Cost, CTA_TYPES, CREATIVE_FORMATS, HOOK_TYPES,
+    PlatformPayload, Product, ProductImage, PROOF_TYPES, SCRIPT_STYLES, THEMES,
+)
+from src.utm import build_attribution_data
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +46,18 @@ RESPOND WITH ONLY valid JSON matching this exact schema — no markdown fences, 
   "theme": "string — chosen from allowed themes in the user message",
   "hook_type": "string — chosen from allowed hook types in the user message",
   "hook_text": "string — short opening hook line for overlay/caption fallback",
+  "creative_format": "string — must be 'ai_video_15s' for this generation",
+  "cta_type": "string — chosen from: see_product, shop_now",
+  "cta_text": "string — the exact CTA phrase used in scene_2_script (e.g. 'try me today', 'shop now')",
+  "problem_angle": "string — one-line description of the problem/angle if theme is problem_solution, else null",
+  "proof_type": "string — chosen from: test_result, testimonial, before_after, ingredient, none",
+  "script_style": "string — chosen from: conversational, direct, storytelling, tip_based",
   "starting_image_prompt": "string — must describe a cinematic 3D closeup of an anthropomorphic target product standing on a luxury bathroom counter. Include a high-quality Pixar-style face with large expressive eyes and an articulated mouth, soft focus luxury bathroom background, volumetric lighting, octane render, unreal engine 5, 4k, and the brand 'velura' in brown writing using font style Cormorant Garamond, Georgia, Times New Roman, serif. Add 1-2 sentences of variation-specific visual detail.",
   "scene_1_desc": "string — 7.5-second shot description that starts with a strong hook and focuses on expression plus minimal, slow movements. accurate lipsync with the voiceover script.",
   "scene_2_desc": "string — 7.5-second shot description that starts with 'HARD CUT' and moves to a new angle with subtle product demo visuals. accurate lipsync with the voiceover script.",
   "scene_1_script": "string — 15 words, first person, simple vocabulary.",
   "scene_2_script": "string — 15 words, first person, FTC-compliant benefits, ending with a call to action.",
-    "platform_captions": {
+  "platform_captions": {
     "youtube": "string — YouTube Shorts caption (max 100 chars, keyword-rich, must end with 'Link in bio')",
     "instagram": "string — Instagram Reels caption (conversational, emoji-friendly, 1-2 sentences)",
     "tiktok": "string — TikTok caption (trendy, casual, max 150 chars)",
@@ -60,6 +69,10 @@ RESPOND WITH ONLY valid JSON matching this exact schema — no markdown fences, 
 RULES:
 - `theme` must exactly match one allowed theme from the user message.
 - `hook_type` must exactly match one allowed hook type from the user message.
+- `creative_format` must be exactly 'ai_video_15s'.
+- `cta_type` must be one of: see_product, shop_now.
+- `proof_type` must be one of: test_result, testimonial, before_after, ingredient, none.
+- `script_style` must be one of: conversational, direct, storytelling, tip_based.
 - Voiceover scripts must sound natural when spoken aloud.
 - `scene_1_script` must be 10-20 words.
 - `scene_2_script` must be 10-20 words.
@@ -68,12 +81,47 @@ RULES:
 - Keep the total video pacing to 15 seconds.
 """
 
+_SIMPLIFIED_SYSTEM_PROMPT = """\
+You are an expert creative director for cosmetic advertising.
+
+TARGET PRODUCT: provided in the user message.
+
+CORE DIRECTIVE
+Generate exactly 1 unique creative variation for the target product. Output a short hook and platform captions for a slideshow or image-motion format (no AI video generation).
+- Pick a `theme` and `hook_type` from the allowed whitelist unless locked.
+- Return a concise `hook_text` that captures the opening hook.
+- No medical or health claims. Use only approved softeners: "appears to", "feels like", "helps skin look".
+
+RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
+
+{
+  "theme": "string — from allowed themes",
+  "hook_type": "string — from allowed hook types",
+  "hook_text": "string — short opening hook line",
+  "creative_format": "string — must match the locked format in user message",
+  "cta_type": "string — see_product or shop_now",
+  "cta_text": "string — CTA phrase (e.g. 'try me today', 'shop now')",
+  "problem_angle": "string or null",
+  "proof_type": "string — test_result, testimonial, before_after, ingredient, none",
+  "script_style": "string — conversational, direct, storytelling, tip_based",
+  "platform_captions": {
+    "youtube": "string — max 100 chars, end with 'Link in bio'",
+    "instagram": "string — conversational, emoji-friendly",
+    "tiktok": "string — trendy, max 150 chars",
+    "x": "string — max 280 chars"
+  },
+  "hashtags": ["list", "of", "hashtags", "without #"]
+}
+"""
+
 
 def _build_user_message(
     product: Product,
     theme: str | None,
     hook_type: str | None,
     product_images: list[ProductImage],
+    research_summary: str | None = None,
+    creative_format: str | None = None,
 ) -> str:
     theme_ids = [theme] if theme else None
     hook_ids = [hook_type] if hook_type else None
@@ -83,12 +131,14 @@ def _build_user_message(
         f"Category: {product.category or 'general'}",
         f"Price: ${product.price:.2f}" if product.price else "Price: not set",
     ]
-    if theme or hook_type:
+    if theme or hook_type or creative_format:
         lines.append("Locked creative constraints:")
         if theme:
             lines.append(f"  - Theme must be: {theme}")
         if hook_type:
             lines.append(f"  - Hook type must be: {hook_type}")
+        if creative_format:
+            lines.append(f"  - Creative format must be: {creative_format}")
     else:
         lines.append("Creative selection task:")
         lines.append("  - Choose the strongest theme and hook type from the whitelist below.")
@@ -100,6 +150,10 @@ def _build_user_message(
         ]
         lines.append("Available product images:")
         lines.extend(img_descriptions)
+    if research_summary and research_summary.strip():
+        lines.append("")
+        lines.append("RESEARCH INSIGHT (use to inform your creative choices):")
+        lines.append(research_summary.strip())
     return "\n".join(lines)
 
 
@@ -108,6 +162,7 @@ def generate_content(
     theme: str | None,
     hook_type: str | None,
     product_images: list[ProductImage],
+    creative_format: str | None = None,
 ) -> tuple[Content, dict]:
     """Call OpenAI to generate a structured content script for a 15-second video ad.
 
@@ -124,8 +179,23 @@ def generate_content(
     openai_module = _load_openai_module()
     client = openai_module.OpenAI(api_key=api_key)
 
-    user_msg = _build_user_message(product, theme, hook_type, product_images)
+    # Phase 3: inject research snapshot for reuse across generation cycles
+    fmt = creative_format or "ai_video_15s"
+    snapshot = db.get_best_matching_snapshot(
+        product_sku=product.sku,
+        platform=None,
+        creative_format=fmt,
+    )
+    research_summary = snapshot.summary if snapshot else None
+    user_msg = _build_user_message(
+        product, theme, hook_type, product_images,
+        research_summary=research_summary,
+        creative_format=creative_format,
+    )
     content_id = uuid.uuid4().hex[:16]
+
+    use_simplified = fmt in ("slideshow_15s", "image_motion_15s")
+    system_prompt = _SIMPLIFIED_SYSTEM_PROMPT if use_simplified else _SYSTEM_PROMPT
 
     response = _call_with_retries(
         client,
@@ -133,9 +203,12 @@ def generate_content(
         model,
         user_msg,
         max_attempts=3,
+        system_prompt=system_prompt,
     )
 
-    parsed = _parse_response(response, theme=theme, hook_type=hook_type)
+    parsed = _parse_response(
+        response, theme=theme, hook_type=hook_type, creative_format=creative_format
+    )
 
     content = Content(
         id=content_id,
@@ -143,11 +216,18 @@ def generate_content(
         theme=parsed["theme"],
         hook_type=parsed["hook_type"],
         hook_text=parsed["hook_text"],
-        starting_image_prompt=parsed["starting_image_prompt"],
-        scene_1_desc=parsed["scene_1_desc"],
-        scene_2_desc=parsed["scene_2_desc"],
-        scene_1_script=parsed["scene_1_script"],
-        scene_2_script=parsed["scene_2_script"],
+        creative_format=parsed.get("creative_format") or creative_format or "ai_video_15s",
+        cta_type=parsed.get("cta_type", "see_product"),
+        cta_text=parsed.get("cta_text"),
+        problem_angle=parsed.get("problem_angle"),
+        proof_type=parsed.get("proof_type"),
+        script_style=parsed.get("script_style"),
+        research_snapshot_id=snapshot.id if snapshot else None,
+        starting_image_prompt=parsed.get("starting_image_prompt"),
+        scene_1_desc=parsed.get("scene_1_desc"),
+        scene_2_desc=parsed.get("scene_2_desc"),
+        scene_1_script=parsed.get("scene_1_script"),
+        scene_2_script=parsed.get("scene_2_script"),
     )
     db.insert_content(content)
 
@@ -161,14 +241,21 @@ def generate_content(
             platform_captions["youtube"] = "Link in bio"
     hashtags = parsed.get("hashtags", [])
     hashtag_csv = ",".join(tag.strip().lstrip("#") for tag in hashtags if tag.strip())
-    utm_url = build_full_utm_link(content, product)
+    
     for platform in config.enabled_platforms("posting"):
+        attr_data = build_attribution_data(content, product, platform)
         payload = PlatformPayload(
             content_id=content.id,
             platform=platform,
             caption=platform_captions.get(platform, content.hook_text or product.name),
             hashtags=hashtag_csv,
-            utm_url=utm_url,
+            utm_url=attr_data["utm_url"],
+            destination_url=attr_data["destination_url"],
+            utm_source=attr_data["utm_source"],
+            utm_medium=attr_data["utm_medium"],
+            utm_campaign=attr_data["utm_campaign"],
+            utm_content=attr_data["utm_content"],
+            link_mode=attr_data["link_mode"],
         )
         payload.id = db.upsert_platform_payload(payload)
 
@@ -208,8 +295,10 @@ def _call_with_retries(
     model: str,
     user_msg: str,
     max_attempts: int = 3,
+    system_prompt: str | None = None,
 ) -> Any:
     delay = 2.0
+    prompt = system_prompt or _SYSTEM_PROMPT
     for attempt in range(1, max_attempts + 1):
         try:
             return client.chat.completions.create(
@@ -217,7 +306,7 @@ def _call_with_retries(
                 max_completion_tokens=1500,
                 response_format={"type": "json_object"},
                 messages=[
-                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "system", "content": prompt},
                     {"role": "user", "content": user_msg},
                 ],
             )
@@ -237,6 +326,7 @@ def _parse_response(
     response: Any,
     theme: str | None = None,
     hook_type: str | None = None,
+    creative_format: str | None = None,
 ) -> dict:
     raw = _response_text(response)
     if raw.startswith("```"):
@@ -248,13 +338,19 @@ def _parse_response(
     except json.JSONDecodeError as exc:
         raise ValueError(f"OpenAI returned invalid JSON: {exc}\n\nRaw response:\n{raw}") from exc
 
+    use_simplified = creative_format in ("slideshow_15s", "image_motion_15s")
     required = [
         "theme", "hook_type", "hook_text",
-        "starting_image_prompt",
-        "scene_1_desc", "scene_2_desc",
-        "scene_1_script", "scene_2_script",
+        "creative_format", "cta_type", "cta_text",
+        "problem_angle", "proof_type", "script_style",
         "platform_captions", "hashtags",
     ]
+    if not use_simplified:
+        required.extend([
+            "starting_image_prompt",
+            "scene_1_desc", "scene_2_desc",
+            "scene_1_script", "scene_2_script",
+        ])
     missing = [k for k in required if k not in data]
     if missing:
         raise ValueError(f"OpenAI response missing required fields: {missing}")
@@ -308,6 +404,34 @@ def _validate_response_shape(
     if not isinstance(data["hashtags"], list):
         raise ValueError("OpenAI response field `hashtags` must be a list.")
 
+    # Phase 2: metadata validation
+    creative_format = (data.get("creative_format") or "").strip()
+    if creative_format and creative_format not in CREATIVE_FORMATS:
+        raise ValueError(
+            f"OpenAI response creative_format '{creative_format}' not in whitelist. "
+            f"Allowed: {', '.join(CREATIVE_FORMATS)}"
+        )
+    cta_type_val = (data.get("cta_type") or "").strip()
+    if cta_type_val and cta_type_val not in CTA_TYPES:
+        raise ValueError(
+            f"OpenAI response cta_type '{cta_type_val}' not in whitelist. "
+            f"Allowed: {', '.join(CTA_TYPES)}"
+        )
+    proof_type_val = data.get("proof_type")
+    if proof_type_val is not None and str(proof_type_val).strip():
+        if str(proof_type_val).strip() not in PROOF_TYPES:
+            raise ValueError(
+                f"OpenAI response proof_type '{proof_type_val}' not in whitelist. "
+                f"Allowed: {', '.join(PROOF_TYPES)}"
+            )
+    script_style_val = data.get("script_style")
+    if script_style_val is not None and str(script_style_val).strip():
+        if str(script_style_val).strip() not in SCRIPT_STYLES:
+            raise ValueError(
+                f"OpenAI response script_style '{script_style_val}' not in whitelist. "
+                f"Allowed: {', '.join(SCRIPT_STYLES)}"
+            )
+
 
 def _response_text(response: Any) -> str:
     choice = response.choices[0]
@@ -316,3 +440,122 @@ def _response_text(response: Any) -> str:
     if not raw.strip():
         raise ValueError("OpenAI returned an empty response.")
     return raw.strip()
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: Paid variant caption generation
+# ---------------------------------------------------------------------------
+
+_PAID_VARIANT_SYSTEM_PROMPT = """\
+You are an expert creative director for cosmetic ad copy.
+
+TASK: Generate N ad-safe caption variants for a proven organic winner. Each variant must:
+- Preserve the core concept and product message
+- Vary the CTA (see_product vs shop_now), opening hook, or caption tone
+- Stay FTC-compliant; no medical or health claims
+- Use only approved softeners: "appears to", "feels like", "helps skin look"
+
+RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
+
+{
+  "variants": [
+    {
+      "hook_text": "string — short opening hook, can differ from original",
+      "cta_type": "string — see_product or shop_now",
+      "cta_text": "string — CTA phrase (e.g. 'try me today', 'shop now')",
+      "platform_captions": {
+        "youtube": "string — max 100 chars, end with 'Link in bio'",
+        "instagram": "string — conversational, emoji-friendly",
+        "tiktok": "string — trendy, max 150 chars",
+        "x": "string — max 280 chars"
+      },
+      "hashtags": ["list", "of", "hashtags", "without #"]
+    }
+  ]
+}
+
+RULES:
+- Each variant must be distinctly different (vary CTA, hook, or caption style).
+- cta_type must be one of: see_product, shop_now.
+- All platform_captions keys (youtube, instagram, tiktok, x) required per variant.
+"""
+
+
+def generate_paid_variant_captions(
+    content: Content,
+    product: Product,
+    variant_count: int,
+) -> list[dict[str, Any]]:
+    """Generate N ad-safe caption variants for a proven organic winner.
+
+    Returns a list of dicts with hook_text, cta_type, cta_text, platform_captions, hashtags.
+    Preserves core concept; varies CTA, hook, or caption style.
+    """
+    api_key = config.get("openai.api_key")
+    if not api_key:
+        raise ValueError(
+            "Missing `openai.api_key` in config.yaml. "
+            "Copy config.example.yaml to config.yaml and add your OpenAI credentials."
+        )
+
+    model = config.get("openai.model", "gpt-4.1-mini")
+    openai_module = _load_openai_module()
+    client = openai_module.OpenAI(api_key=api_key)
+
+    user_msg = (
+        f"Product: {product.name}\n"
+        f"SKU: {product.sku}\n\n"
+        f"Original winning creative:\n"
+        f"- Theme: {content.theme}\n"
+        f"- Hook type: {content.hook_type}\n"
+        f"- Hook text: {content.hook_text or '(none)'}\n"
+        f"- CTA: {content.cta_type} / {content.cta_text or '(none)'}\n\n"
+        f"Generate exactly {variant_count} ad-safe variants. Each must vary CTA, opening hook, or caption tone "
+        "while preserving the core concept."
+
+    )
+
+    response = _call_with_retries(
+        client,
+        openai_module,
+        model,
+        user_msg,
+        max_attempts=3,
+        system_prompt=_PAID_VARIANT_SYSTEM_PROMPT,
+    )
+
+    raw = _response_text(response)
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[1]
+        if raw.endswith("```"):
+            raw = raw[: raw.rfind("```")]
+    data = json.loads(raw)
+
+    variants = data.get("variants", [])
+    if not isinstance(variants, list) or len(variants) < 1:
+        raise ValueError("OpenAI response must contain a non-empty 'variants' array.")
+
+    required_keys = {"hook_text", "cta_type", "cta_text", "platform_captions", "hashtags"}
+    result = []
+    for i, v in enumerate(variants[:variant_count]):
+        if not isinstance(v, dict):
+            continue
+        missing = required_keys - set(v.keys())
+        if missing:
+            logger.warning("Variant %d missing keys %s, skipping", i + 1, missing)
+            continue
+        caps = v.get("platform_captions", {})
+        if not isinstance(caps, dict):
+            continue
+        for plat in ("youtube", "instagram", "tiktok", "x"):
+            if plat not in caps:
+                caps[plat] = v.get("hook_text", "")
+        if caps.get("youtube") and not caps["youtube"].rstrip().lower().endswith("link in bio"):
+            caps["youtube"] = f"{caps['youtube'].rstrip()}\n\nLink in bio"
+        v["platform_captions"] = caps
+        v["cta_type"] = (v.get("cta_type") or "see_product").strip()
+        if v["cta_type"] not in CTA_TYPES:
+            v["cta_type"] = "see_product"
+        result.append(v)
+
+    return result

@@ -26,13 +26,16 @@ sys.modules.setdefault(
 )
 sys.modules.setdefault(
     "src.prompt_generator",
-    types.SimpleNamespace(generate_content=lambda *args, **kwargs: (None, {})),
+    types.SimpleNamespace(
+        generate_content=lambda *args, **kwargs: (None, {}),
+        generate_paid_variant_captions=lambda *args, **kwargs: [],
+    ),
 )
 import cli as cli_module
 from src.models import BanditRecommendation, Product, ThemeHookAllocation
 
 
-def test_run_cli_rejects_rotation_with_auto() -> None:
+def test_run_cli_rejects_rotation_with_auto(tmp_db) -> None:
     runner = CliRunner()
 
     result = runner.invoke(cli_module.cli, ["run", "--auto", "--rotate-theme-hook"])
@@ -75,7 +78,7 @@ def test_run_manual_uses_bandit_when_no_theme_or_hook(monkeypatch) -> None:
 
     calls: list[tuple[str | None, str | None]] = []
 
-    def fake_generate_single(product, theme, hook_type, should_post):
+    def fake_generate_single(product, theme, hook_type, should_post, creative_format=None):
         calls.append((theme, hook_type))
         return object()
 
@@ -95,7 +98,7 @@ def test_run_manual_supports_partial_overrides(monkeypatch) -> None:
 
     calls: list[tuple[str | None, str | None]] = []
 
-    def fake_generate_single(product, theme, hook_type, should_post):
+    def fake_generate_single(product, theme, hook_type, should_post, creative_format=None):
         calls.append((theme, hook_type))
         return object()
 
@@ -116,7 +119,7 @@ def test_run_manual_repeats_same_locked_pair_without_rotation(monkeypatch) -> No
 
     calls: list[tuple[str | None, str | None]] = []
 
-    def fake_generate_single(product, theme, hook_type, should_post):
+    def fake_generate_single(product, theme, hook_type, should_post, creative_format=None):
         calls.append((theme, hook_type))
         return object()
 
@@ -158,7 +161,7 @@ def test_run_manual_parallelizes_generation_when_count_below_threshold(monkeypat
             for item in iterable:
                 yield fn(item)
 
-    def fake_generate_single(product, theme, hook_type, should_post):
+    def fake_generate_single(product, theme, hook_type, should_post, creative_format=None):
         calls.append((theme, hook_type))
         return object()
 
@@ -186,7 +189,7 @@ def test_run_manual_stays_serial_at_parallel_threshold(monkeypatch) -> None:
 
     calls: list[tuple[str | None, str | None]] = []
 
-    def fake_generate_single(product, theme, hook_type, should_post):
+    def fake_generate_single(product, theme, hook_type, should_post, creative_format=None):
         calls.append((theme, hook_type))
         return object()
 
@@ -217,7 +220,7 @@ def test_run_manual_rotates_theme_and_hook_when_enabled(monkeypatch) -> None:
 
     calls: list[tuple[str | None, str | None]] = []
 
-    def fake_generate_single(product, theme, hook_type, should_post):
+    def fake_generate_single(product, theme, hook_type, should_post, creative_format=None):
         calls.append((theme, hook_type))
         return object()
 
@@ -277,7 +280,7 @@ def test_run_auto_parallelizes_across_products_below_threshold(monkeypatch) -> N
             for item in iterable:
                 yield fn(item)
 
-    def fake_generate_single(product, theme, hook_type, should_post):
+    def fake_generate_single(product, theme, hook_type, should_post, creative_format=None):
         calls.append((product.sku, theme, hook_type))
         return object()
 
@@ -313,7 +316,7 @@ def test_run_auto_uses_global_allocation_and_round_robin_product_split(monkeypat
 
     calls: list[tuple[str, str, str]] = []
 
-    def fake_generate_single(product, theme, hook_type, should_post):
+    def fake_generate_single(product, theme, hook_type, should_post, creative_format=None):
         calls.append((product.sku, theme, hook_type))
         return object()
 
@@ -346,7 +349,7 @@ def test_run_auto_randomizes_round_robin_starting_product(monkeypatch) -> None:
 
     calls: list[tuple[str, str, str]] = []
 
-    def fake_generate_single(product, theme, hook_type, should_post):
+    def fake_generate_single(product, theme, hook_type, should_post, creative_format=None):
         calls.append((product.sku, theme, hook_type))
         return object()
 

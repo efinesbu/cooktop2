@@ -34,3 +34,6 @@ desktop.ini
 # Velura data (stored in ~/.velura/)
 videos/
 product-images/
+
+# Debug
+argv_debug.txt

@@ -72,6 +72,8 @@ python cli.py sync-products
 | `post --today` | Immediately post approved content from the last 24 hours; repeated posts on the same platform wait 5 minutes by default |
 | `post --content-id ID` | Manually post a specific content piece; add `--delay-XXX` to change the same-platform wait or `--nodelay` to post everything immediately |
 | `pull-analytics` | Pull metrics from all platforms |
+| `commerce-ingest PATH` | Ingest commerce facts (sessions, purchases, revenue) from CSV for revenue-aware ranking |
+| `paid-seed-clone --content-id ID [--variants N]` | Clone an organic winner into 3–5 ad-safe variants for paid promotion |
 | `report-product --product SLUG` | Product performance report |
 | `archive` | Archive old videos to GCS |
 
@@ -113,6 +115,35 @@ Starter shared bandit arms:
 - `curiosity__question`
 - `benefit__visual_surprise`
 
+### Commerce and Revenue-Aware Ranking
+
+Velura can optimize for commercial value (sessions, purchases, revenue) in addition to engagement:
+
+1. **Ingest commerce facts** — Export orders from Shopify with UTM attribution (utm_content = content_id, utm_source = platform). Aggregate by (content_id, platform, event_date) and produce a CSV with columns: `content_id`, `platform`, `event_date`, `sessions`, `add_to_cart`, `checkout_started`, `purchases`, `revenue`. Run:
+   ```bash
+   python cli.py commerce-ingest path/to/commerce.csv
+   ```
+
+2. **Set ranking objective** — In `config.yaml`, set `bandit.ranking_objective` to `engagement_rate` (default), `views`, `revenue`, `sessions`, or `purchases`. The morning briefing and bandit updates use this objective; when commerce data is sparse, the bandit falls back to engagement.
+
+3. **Reporting** — The organic evaluation section in the morning briefing shows commerce totals when available and ranks cohorts by the configured objective.
+
+### Paid Promotion Path (Organic → Paid)
+
+Velura supports a lightweight handoff from organic winners to paid ad variants:
+
+1. **Identify winners** — Use the morning briefing or `report-product` to find top-performing creatives (engagement, sessions, or revenue).
+
+2. **Clone for paid** — Run:
+   ```bash
+   python cli.py paid-seed-clone --content-id <winner-id> --variants 5
+   ```
+   This creates 3–5 ad-safe variants by varying CTA, opening hook, and platform captions while preserving the winning core concept and video asset. Lineage is stored (`source_content_id`) for attribution.
+
+3. **Review and hand off** — Preview with `preview --last-24h`, approve variants, then manually upload to Meta Ads, Google Ads, or your ad platform. Same product page destination; evaluate CTR, CPC, add-to-cart, and purchase rate.
+
+This is a manual or semi-manual handoff, not a full paid automation system.
+
 ## Project Structure
 
 ```
@@ -148,7 +179,7 @@ Copy `config.example.yaml` to `config.yaml` and fill in:
 
 - **Site URL** — public storefront base URL used to build product links and UTMs
 - **Platforms** — optional `platforms.enabled` list to limit the workflow to only the platforms you are ready to test, e.g. `["youtube"]`
-- **Shopify** — optional store URL + Admin API token if you want automatic product sync
+- **Shopify** — optional store URL + Client ID + Client Secret if you want automatic product sync
 - **OpenAI** — API key + model for script generation
 - **Gemini** — Google AI API key, optional `gemini.aspect_ratio` (default `9:16` for vertical short-form)
 - **xAI** — Video generation API key, optional `xai.model` (default `grok-imagine-video`), optional `xai.resolution`/`xai.aspect_ratio` (default `9:16` for vertical short-form), and polling controls via `xai.poll_interval_seconds` and `xai.poll_timeout_seconds`
@@ -307,6 +338,42 @@ For the full runbook, see `tiktok-demo/README.md`.
 - **Product images:** `~/.velura/product-images/{product-slug}/`
 
 On Windows, `~` resolves to `%USERPROFILE%`.
+
+## Restore Points
+
+Before making significant changes, create a restore point so you can return to the current state if something goes wrong.
+
+### Create a restore point
+
+```bash
+# Tag the current commit (recommended)
+git tag backup-before-changes-YYYY-MM-DD -m "Restore point: current state before future changes"
+
+# Optional: also create a branch
+git branch backup/current-state
+```
+
+### Return to a restore point
+
+```bash
+# Option A: Reset current branch to the tagged state (discards newer commits)
+git reset --hard backup-before-changes-YYYY-MM-DD
+
+# Option B: Switch to the backup branch
+git checkout backup/current-state
+
+# Option C: Create a new branch from the backup
+git checkout -b recovery backup-before-changes-YYYY-MM-DD
+```
+
+### Push restore points to remote
+
+Tags and branches are local until pushed. To back them up on the remote:
+
+```bash
+git push origin backup-before-changes-YYYY-MM-DD
+git push origin backup/current-state
+```
 
 ## Testing
 

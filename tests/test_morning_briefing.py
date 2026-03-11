@@ -128,6 +128,8 @@ def test_generate_briefing_includes_7day_trends_and_creative_insights(monkeypatc
     assert "7-day views down 25% vs prior week" in briefing
     assert "7-day engagement down 22% vs prior week" in briefing
     assert "Retest routine/quick_tip creative (7-day engagement 1.1%)" in briefing
+    assert "ORGANIC EVALUATION (12-CREATIVE MATRIX)" in briefing
+    assert "Winners (repeat or promote):" in briefing or "Middle (consider remixing):" in briefing or "Losers (retire or refresh):" in briefing
 
 
 def test_generate_briefing_includes_today_in_rolling_7day_window(monkeypatch) -> None:

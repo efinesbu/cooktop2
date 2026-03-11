@@ -40,7 +40,16 @@ CREATE TABLE IF NOT EXISTS content (
     review_notes          TEXT,
     approved_at           TEXT,
     rejected_at           TEXT,
-    created_at            TEXT DEFAULT (datetime('now'))
+    created_at            TEXT DEFAULT (datetime('now')),
+    creative_format       TEXT DEFAULT 'ai_video_15s',
+    cta_type              TEXT DEFAULT 'see_product',
+    cta_text              TEXT,
+    problem_angle         TEXT,
+    proof_type            TEXT,
+    script_style          TEXT,
+    research_snapshot_id  TEXT,
+    asset_manifest_json   TEXT,
+    source_content_id     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS platform_payloads (
@@ -50,6 +59,12 @@ CREATE TABLE IF NOT EXISTS platform_payloads (
     caption         TEXT,
     hashtags        TEXT,
     utm_url         TEXT,
+    destination_url TEXT,
+    utm_source      TEXT,
+    utm_medium      TEXT,
+    utm_campaign    TEXT,
+    utm_content     TEXT,
+    link_mode       TEXT DEFAULT 'direct',
     publish_at      TEXT,
     status          TEXT NOT NULL DEFAULT 'pending',
     last_error      TEXT,
@@ -66,6 +81,12 @@ CREATE TABLE IF NOT EXISTS posts (
     caption         TEXT,
     hashtags        TEXT,
     utm_url         TEXT,
+    destination_url TEXT,
+    utm_source      TEXT,
+    utm_medium      TEXT,
+    utm_campaign    TEXT,
+    utm_content     TEXT,
+    link_mode       TEXT DEFAULT 'direct',
     published_at    TEXT DEFAULT (datetime('now'))
 );
 
@@ -129,3 +150,42 @@ CREATE INDEX IF NOT EXISTS idx_bandit_obs_arm     ON bandit_observations(arm_key
 CREATE INDEX IF NOT EXISTS idx_bandit_obs_product ON bandit_observations(product_sku);
 CREATE INDEX IF NOT EXISTS idx_costs_content      ON costs(content_id);
 CREATE INDEX IF NOT EXISTS idx_product_images_sku ON product_images(product_sku);
+
+-- Phase 3: Research memory for prompt injection
+CREATE TABLE IF NOT EXISTS research_snapshots (
+    id              TEXT PRIMARY KEY,
+    product_sku     TEXT,
+    platform        TEXT,
+    creative_format TEXT,
+    summary         TEXT NOT NULL,
+    source_type     TEXT DEFAULT 'manual',
+    created_at      TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_research_product   ON research_snapshots(product_sku);
+CREATE INDEX IF NOT EXISTS idx_research_platform  ON research_snapshots(platform);
+CREATE INDEX IF NOT EXISTS idx_research_format    ON research_snapshots(creative_format);
+CREATE INDEX IF NOT EXISTS idx_research_created   ON research_snapshots(created_at);
+
+-- Phase 6: Commerce facts for revenue-aware ranking (sessions, purchases, revenue)
+-- Attribution via content_id (utm_content) and platform (utm_source).
+-- Events arrive on different cadence than social metrics; prefer separate table.
+CREATE TABLE IF NOT EXISTS commerce_facts (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    content_id           TEXT NOT NULL REFERENCES content(id),
+    platform             TEXT NOT NULL,
+    event_date           TEXT NOT NULL,
+    sessions             INTEGER DEFAULT 0,
+    add_to_cart          INTEGER DEFAULT 0,
+    checkout_started     INTEGER DEFAULT 0,
+    purchases            INTEGER DEFAULT 0,
+    revenue              REAL DEFAULT 0,
+    source               TEXT DEFAULT 'shopify_import',
+    ingested_at          TEXT DEFAULT (datetime('now')),
+    UNIQUE (content_id, platform, event_date)
+);
+CREATE INDEX IF NOT EXISTS idx_commerce_content   ON commerce_facts(content_id);
+CREATE INDEX IF NOT EXISTS idx_commerce_date      ON commerce_facts(event_date);
+CREATE INDEX IF NOT EXISTS idx_commerce_platform  ON commerce_facts(platform);
+
+-- Phase 7: lineage from paid variant to organic winner
+-- idx_content_source created in _run_migrations after source_content_id is added

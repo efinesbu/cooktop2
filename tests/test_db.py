@@ -4,7 +4,10 @@ from datetime import date
 from pathlib import Path
 
 from src import db
-from src.models import BanditArm, BanditObservation, Content, Cost, Metric, PlatformPayload, Post, Product
+from src.models import (
+    BanditArm, BanditObservation, Content, Cost, Metric, PlatformPayload, Post,
+    Product, ResearchSnapshot,
+)
 
 
 def test_init_db(tmp_db: Path) -> None:
@@ -13,7 +16,7 @@ def test_init_db(tmp_db: Path) -> None:
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()
     table_names = {r["name"] for r in rows}
-    for expected in ("products", "content", "posts", "metrics", "bandit_state", "costs"):
+    for expected in ("products", "content", "posts", "metrics", "bandit_state", "costs", "research_snapshots"):
         assert expected in table_names
 
 
@@ -79,6 +82,37 @@ def test_insert_and_get_content(
     assert fetched.hook_type == "bold_claim"
     assert fetched.hook_text == "You won't believe this!"
     assert fetched.review_status == "pending"
+    assert fetched.creative_format == "ai_video_15s"
+    assert fetched.cta_type == "see_product"
+
+
+def test_insert_and_get_content_with_phase2_metadata(
+    db_with_product: Path, sample_product: Product
+) -> None:
+    """Phase 2: metadata fields round-trip correctly."""
+    content = Content(
+        id="meta-001",
+        product_sku=sample_product.sku,
+        theme="problem_solution",
+        hook_type="relatable_pain",
+        hook_text="Tired of dull skin?",
+        creative_format="ai_video_15s",
+        cta_type="shop_now",
+        cta_text="Try me today",
+        problem_angle="dull skin visibility",
+        proof_type="ingredient",
+        script_style="conversational",
+    )
+    db.insert_content(content)
+
+    fetched = db.get_content("meta-001")
+    assert fetched is not None
+    assert fetched.creative_format == "ai_video_15s"
+    assert fetched.cta_type == "shop_now"
+    assert fetched.cta_text == "Try me today"
+    assert fetched.problem_angle == "dull skin visibility"
+    assert fetched.proof_type == "ingredient"
+    assert fetched.script_style == "conversational"
 
 
 def test_list_content_today_uses_sqlite_local_date(
@@ -287,3 +321,110 @@ def test_bandit_migration_preserves_legacy_tables(tmp_db: Path) -> None:
         observation_columns = set(db._table_columns(conn, "bandit_observations"))
         assert {"arm_key", "alpha", "beta"}.issubset(bandit_state_columns)
         assert {"content_id", "arm_key", "aggregated_engagement_rate"}.issubset(observation_columns)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Research Snapshots
+# ---------------------------------------------------------------------------
+
+def test_insert_and_get_research_snapshot(tmp_db: Path) -> None:
+    snap = ResearchSnapshot(
+        id="rs-001",
+        product_sku="moisturizer",
+        platform="instagram",
+        creative_format="ai_video_15s",
+        summary="Instagram users respond well to before/after framing.",
+        source_type="manual",
+    )
+    db.insert_research_snapshot(snap)
+
+    fetched = db.get_research_snapshot("rs-001")
+    assert fetched is not None
+    assert fetched.id == "rs-001"
+    assert fetched.product_sku == "moisturizer"
+    assert fetched.platform == "instagram"
+    assert fetched.creative_format == "ai_video_15s"
+    assert fetched.summary == "Instagram users respond well to before/after framing."
+    assert fetched.source_type == "manual"
+    assert fetched.created_at is not None
+
+
+def test_get_best_matching_snapshot_precedence(
+    db_with_product: Path, sample_product: Product
+) -> None:
+    """Product+platform+format beats product-only; generic (NULL) matches any."""
+    db.insert_research_snapshot(ResearchSnapshot(
+        id="generic",
+        product_sku=None,
+        platform=None,
+        creative_format=None,
+        summary="Generic insight for all.",
+        source_type="manual",
+    ))
+    db.insert_research_snapshot(ResearchSnapshot(
+        id="product-only",
+        product_sku=sample_product.sku,
+        platform=None,
+        creative_format=None,
+        summary="Product-specific insight.",
+        source_type="manual",
+    ))
+    db.insert_research_snapshot(ResearchSnapshot(
+        id="product-format",
+        product_sku=sample_product.sku,
+        platform=None,
+        creative_format="ai_video_15s",
+        summary="Product + format insight.",
+        source_type="manual",
+    ))
+
+    best = db.get_best_matching_snapshot(
+        product_sku=sample_product.sku,
+        platform=None,
+        creative_format="ai_video_15s",
+    )
+    assert best is not None
+    assert best.id == "product-format"
+    assert "Product + format" in best.summary
+
+
+def test_get_best_matching_snapshot_returns_none_when_empty(tmp_db: Path) -> None:
+    best = db.get_best_matching_snapshot(
+        product_sku="nonexistent",
+        platform=None,
+        creative_format="ai_video_15s",
+    )
+    assert best is None
+
+
+def test_list_research_snapshots(
+    db_with_product: Path, sample_product: Product
+) -> None:
+    db.insert_research_snapshot(ResearchSnapshot(
+        id="rs-1",
+        product_sku=sample_product.sku,
+        summary="First",
+        source_type="manual",
+    ))
+    db.insert_research_snapshot(ResearchSnapshot(
+        id="rs-2",
+        product_sku=sample_product.sku,
+        summary="Second",
+        source_type="manual",
+    ))
+    db.insert_research_snapshot(ResearchSnapshot(
+        id="rs-3",
+        product_sku="other-product",
+        summary="Other",
+        source_type="manual",
+    ))
+
+    # Filter by product: includes product-specific and generic (NULL) snapshots
+    by_product = db.list_research_snapshots(product_sku=sample_product.sku, limit=10)
+    ids = {s.id for s in by_product}
+    assert "rs-1" in ids
+    assert "rs-2" in ids
+    assert "rs-3" not in ids
+
+    all_snapshots = db.list_research_snapshots(limit=10)
+    assert len(all_snapshots) >= 3

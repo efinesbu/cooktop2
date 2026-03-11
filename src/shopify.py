@@ -18,15 +18,30 @@ _PRODUCTS_LIMIT = 250
 
 def _build_client() -> httpx.Client:
     store_url = config.get("shopify.store_url", "").rstrip("/")
-    token = config.get("shopify.admin_api_token", "")
-    if not store_url or not token:
+    client_id = config.get("shopify.client_id", "")
+    client_secret = config.get("shopify.client_secret", "")
+    
+    if not store_url or not client_id or not client_secret:
         raise RuntimeError(
-            "shopify.store_url and shopify.admin_api_token must be set in config.yaml"
+            "shopify.store_url, shopify.client_id, and shopify.client_secret must be set in config.yaml"
         )
+        
+    token_url = f"{store_url}/admin/oauth/access_token"
+    payload = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }
+    with httpx.Client(timeout=30.0, follow_redirects=True) as temp_client:
+        resp = temp_client.post(token_url, json=payload)
+        resp.raise_for_status()
+        token = resp.json()["access_token"]
+
     return httpx.Client(
         base_url=f"{store_url}/admin/api/{_API_VERSION}",
         headers={"X-Shopify-Access-Token": token},
         timeout=30.0,
+        follow_redirects=True,
     )
 
 

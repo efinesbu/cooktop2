@@ -124,6 +124,12 @@ PLATFORMS = ["youtube", "instagram", "tiktok", "x"]
 
 GENERATION_STEPS = ["prompt_gen", "image_gen", "video_gen"]
 
+# Phase 2: creative metadata for reporting and learning
+CREATIVE_FORMATS = ["ai_video_15s", "slideshow_15s", "image_motion_15s"]
+CTA_TYPES = ["see_product", "shop_now"]
+PROOF_TYPES = ["test_result", "testimonial", "before_after", "ingredient", "none"]
+SCRIPT_STYLES = ["conversational", "direct", "storytelling", "tip_based"]
+
 IMAGE_TYPES = ["hero", "lifestyle", "detail"]
 
 REVIEW_STATUSES = ["pending", "approved", "rejected", "posted", "partial_failure"]
@@ -177,6 +183,17 @@ class Content:
     approved_at: Optional[str] = None
     rejected_at: Optional[str] = None
     created_at: Optional[str] = None
+    # Phase 2: first-class metadata for reporting and learning
+    creative_format: str = "ai_video_15s"
+    cta_type: str = "see_product"
+    cta_text: Optional[str] = None
+    problem_angle: Optional[str] = None
+    proof_type: Optional[str] = None
+    script_style: Optional[str] = None
+    research_snapshot_id: Optional[str] = None
+    asset_manifest_json: Optional[str] = None
+    # Phase 7: lineage from paid variant back to organic winner
+    source_content_id: Optional[str] = None
 
 
 @dataclass
@@ -187,6 +204,12 @@ class PlatformPayload:
     caption: Optional[str] = None
     hashtags: Optional[str] = None
     utm_url: Optional[str] = None
+    destination_url: Optional[str] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_content: Optional[str] = None
+    link_mode: str = "direct"
     publish_at: Optional[str] = None
     status: str = "pending"
     last_error: Optional[str] = None
@@ -203,6 +226,12 @@ class Post:
     caption: Optional[str] = None
     hashtags: Optional[str] = None
     utm_url: Optional[str] = None
+    destination_url: Optional[str] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_content: Optional[str] = None
+    link_mode: str = "direct"
     published_at: Optional[str] = None
 
 
@@ -219,6 +248,22 @@ class Metric:
     watch_through_rate: Optional[float] = None
     avg_watch_time: Optional[float] = None
     pulled_at: Optional[str] = None
+
+
+@dataclass
+class CommerceFact:
+    """Phase 6: Attribution-linked commerce events (sessions, purchases, revenue)."""
+    id: Optional[int] = None
+    content_id: str = ""
+    platform: str = ""
+    event_date: str = ""
+    sessions: int = 0
+    add_to_cart: int = 0
+    checkout_started: int = 0
+    purchases: int = 0
+    revenue: float = 0.0
+    source: str = "shopify_import"
+    ingested_at: Optional[str] = None
 
 
 @dataclass
@@ -252,6 +297,18 @@ class Cost:
     api_provider: str = ""
     tokens_or_units: Optional[int] = None
     cost_usd: Optional[float] = None
+    created_at: Optional[str] = None
+
+
+@dataclass
+class ResearchSnapshot:
+    """Stored research insight for prompt injection. Matched by product, platform, format."""
+    id: str = ""
+    product_sku: Optional[str] = None
+    platform: Optional[str] = None
+    creative_format: Optional[str] = None
+    summary: str = ""
+    source_type: str = "manual"  # manual, creatives, comments, platform_notes
     created_at: Optional[str] = None
 
 

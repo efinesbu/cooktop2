@@ -17,12 +17,14 @@ from rich.table import Table
 from src import bandit, config, db, storage
 from src.analytics import PULLERS
 from src.cost_tracker import check_budget, content_cost_summary
-from src.image_generator import generate_starting_image
 from src.instagram_sheet_sync import (
     inspect_instagram_post_ids_from_sheet,
     sync_instagram_post_ids_from_sheet,
 )
-from src.models import Content, HOOK_TYPES, PLATFORMS, PlatformPayload, Post, Product, THEMES
+from src.models import (
+    Content, CREATIVE_FORMATS, HOOK_TYPES, PLATFORMS, PlatformPayload, Post,
+    Product, ResearchSnapshot, THEMES,
+)
 from src.morning_briefing import display_briefing, email_briefing, generate_briefing
 from src.posters.instagram import InstagramPoster
 from src.posters.tiktok import TikTokPoster
@@ -30,7 +32,7 @@ from src.posters.x import XPoster
 from src.posters.youtube import YouTubePoster
 from src.product_images import register_images
 from src.prompt_generator import generate_content
-from src.video_generator import generate_video
+from src.renderers import render_media
 
 console = Console()
 PARALLEL_GENERATION_THRESHOLD = 10
@@ -249,6 +251,12 @@ def _post_platform_payload(payload: PlatformPayload, content: Content, product: 
         caption=payload.caption,
         hashtags=",".join(hashtags),
         utm_url=payload.utm_url,
+        destination_url=payload.destination_url,
+        utm_source=payload.utm_source,
+        utm_medium=payload.utm_medium,
+        utm_campaign=payload.utm_campaign,
+        utm_content=payload.utm_content,
+        link_mode=payload.link_mode,
     )
     post.id = db.insert_post(post)
     return post
@@ -266,15 +274,17 @@ def _format_strategy_label(theme: str | None, hook_type: str | None) -> str:
 def _run_generation_job(
     job: tuple[Product, str | None, str | None],
     should_post: bool,
+    creative_format: str | None = None,
 ) -> Optional[Content]:
     product, theme, hook_type = job
-    return _generate_single(product, theme, hook_type, should_post)
+    return _generate_single(product, theme, hook_type, should_post, creative_format)
 
 
 def _generate_batch(
     jobs: list[tuple[Product, str | None, str | None]],
     should_post: bool,
     requested_count: int,
+    creative_format: str | None = None,
 ) -> int:
     if not jobs:
         return 0
@@ -283,16 +293,19 @@ def _generate_batch(
         max_workers = min(len(jobs), requested_count)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             results = executor.map(
-                lambda job: _run_generation_job(job, should_post),
+                lambda job: _run_generation_job(job, should_post, creative_format),
                 jobs,
             )
             return sum(1 for result in results if result)
 
-    return sum(1 for product, theme, hook_type in jobs if _generate_single(product, theme, hook_type, should_post))
+    return sum(
+        1 for product, theme, hook_type in jobs
+        if _generate_single(product, theme, hook_type, should_post, creative_format)
+    )
 
 
 def _generate_single(product: Product, theme: str | None, hook_type: str | None,
-                     should_post: bool) -> Optional[Content]:
+                     should_post: bool, creative_format: str | None = None) -> Optional[Content]:
     spent, budget, within = check_budget()
     if not within:
         console.print(
@@ -305,16 +318,13 @@ def _generate_single(product: Product, theme: str | None, hook_type: str | None,
         console.print(f"[yellow]{product.sku}: no images registered, continuing anyway.[/yellow]")
 
     console.print(f"  {product.sku}: generating prompt … ({_format_strategy_label(theme, hook_type)})")
-    content, extras = generate_content(product, theme, hook_type, images)
+    content, extras = generate_content(product, theme, hook_type, images, creative_format)
     _print_prompt(content)
     captions: dict[str, str] = extras["platform_captions"]
     hashtags: list[str] = extras["hashtags"]
 
-    console.print(f"  {product.sku}: generating starting image …")
-    starting_image_path = generate_starting_image(content, product)
-
-    console.print(f"  {product.sku}: generating video …")
-    generate_video(content, starting_image_path, product)
+    console.print(f"  {product.sku}: rendering media ({content.creative_format}) …")
+    render_media(content, product, images)
 
     db.update_last_content_date(product.sku)
     console.print(f"  [green]✓[/green] {product.sku}: content [bold]{content.id}[/bold] created")
@@ -342,7 +352,7 @@ def cli():
 def sync_products_cmd():
     """Sync product catalog from Shopify if configured."""
     _init()
-    if not config.get("shopify.store_url") or not config.get("shopify.admin_api_token"):
+    if not config.get("shopify.store_url") or not config.get("shopify.client_id") or not config.get("shopify.client_secret"):
         console.print(
             "[yellow]Shopify sync is not configured.[/yellow] "
             "Use `python cli.py add-product --sku <sku> --name <name>` for manual catalog setup."
@@ -368,8 +378,8 @@ def sync_products_cmd():
             p.sku,
             p.name,
             f"${p.price:.2f}" if p.price else "—",
-            "✓" if p.active else "✗",
-            "✓" if p.generation_ready else "✗",
+            "Y" if p.active else "N",
+            "Y" if p.generation_ready else "N",
         )
     console.print(table)
     console.print(f"\n[green]{len(products)}[/green] products synced.")
@@ -433,6 +443,163 @@ def register_images_cmd(slug: str):
         table.add_row(str(img.id or "—"), img.image_type, img.file_path)
     console.print(table)
     console.print(f"\n[green]{len(images)}[/green] images registered.")
+
+
+# ---------------------------------------------------------------------------
+# research (Phase 3: Research Memory)
+# ---------------------------------------------------------------------------
+
+@cli.command("research-add")
+@click.option("--product", "product_sku", default=None, help="Product SKU (optional, for product-specific insight)")
+@click.option("--platform", type=click.Choice(["youtube", "instagram", "tiktok", "x"]), default=None, help="Platform (optional)")
+@click.option("--format", "creative_format", type=click.Choice(CREATIVE_FORMATS), default=None, help="Creative format (optional)")
+@click.option("--source", "source_type", default="manual", help="Source type: manual, creatives, comments, platform_notes")
+@click.option("--summary", required=True, help="Research summary text to inject into prompts")
+def research_add_cmd(
+    product_sku: str | None,
+    platform: str | None,
+    creative_format: str | None,
+    source_type: str,
+    summary: str,
+):
+    """Create a research snapshot for prompt injection."""
+    _init()
+    import uuid
+    snap = ResearchSnapshot(
+        id=uuid.uuid4().hex[:16],
+        product_sku=product_sku,
+        platform=platform,
+        creative_format=creative_format,
+        summary=summary.strip(),
+        source_type=source_type,
+    )
+    db.insert_research_snapshot(snap)
+    scope = []
+    if product_sku:
+        scope.append(f"product={product_sku}")
+    if platform:
+        scope.append(f"platform={platform}")
+    if creative_format:
+        scope.append(f"format={creative_format}")
+    scope_str = ", ".join(scope) if scope else "all products/platforms/formats"
+    console.print(
+        f"[green]Created[/green] research snapshot [bold]{snap.id}[/bold] "
+        f"({scope_str}). It will be injected into matching generation prompts."
+    )
+
+
+@cli.command("research-list")
+@click.option("--product", "product_sku", default=None, help="Filter by product SKU")
+@click.option("--platform", type=click.Choice(["youtube", "instagram", "tiktok", "x"]), default=None, help="Filter by platform")
+@click.option("--format", "creative_format", type=click.Choice(CREATIVE_FORMATS), default=None, help="Filter by creative format")
+@click.option("--limit", default=20, help="Max snapshots to show")
+def research_list_cmd(
+    product_sku: str | None,
+    platform: str | None,
+    creative_format: str | None,
+    limit: int,
+):
+    """List research snapshots."""
+    _init()
+    snapshots = db.list_research_snapshots(
+        product_sku=product_sku,
+        platform=platform,
+        creative_format=creative_format,
+        limit=limit,
+    )
+    if not snapshots:
+        console.print("[yellow]No research snapshots found.[/yellow]")
+        return
+
+    table = Table(title="Research Snapshots")
+    table.add_column("ID", style="cyan", max_width=12)
+    table.add_column("Product")
+    table.add_column("Platform")
+    table.add_column("Format")
+    table.add_column("Source")
+    table.add_column("Summary", max_width=50, overflow="ellipsis")
+    for s in snapshots:
+        table.add_row(
+            s.id,
+            s.product_sku or "—",
+            s.platform or "—",
+            s.creative_format or "—",
+            s.source_type,
+            (s.summary[:47] + "...") if len(s.summary) > 50 else s.summary,
+        )
+    console.print(table)
+    console.print(f"\n[green]{len(snapshots)}[/green] snapshot(s).")
+
+
+@cli.command("paid-seed-clone")
+@click.option(
+    "--content-id",
+    "content_id",
+    required=True,
+    help="Content ID of organic winner (row number from preview or full ID)",
+)
+@click.option("--variants", default=5, help="Number of ad-safe variants to generate (3–5)", show_default=True)
+def paid_seed_clone_cmd(content_id: str, variants: int):
+    """Clone an organic winner into ad-safe variants for paid promotion.
+
+    Creates 3–5 variants by varying CTA, opening hook, and captions while
+    preserving the winning core concept and video asset. Lineage is stored
+    (source_content_id) for attribution. Manual handoff to ad platforms.
+    """
+    _init()
+    if variants < 1 or variants > 10:
+        console.print("[red]--variants must be between 1 and 10.[/red]")
+        sys.exit(1)
+
+    content = _resolve_content(content_id, use_last_24h=True)
+    if not content:
+        console.print(f"[red]Content {content_id} not found.[/red]")
+        sys.exit(1)
+
+    from src.paid_variant import clone_for_paid
+
+    try:
+        created = clone_for_paid(content.id, variant_count=variants)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        sys.exit(1)
+
+    console.print(
+        f"[green]Created {len(created)}[/green] paid variant(s) from [bold]{content.id[:12]}[/bold]. "
+        "Review with `preview --last-24h`, then approve and schedule as usual."
+    )
+    table = Table(title="Paid Variants")
+    table.add_column("ID", style="cyan", max_width=12)
+    table.add_column("Hook")
+    table.add_column("CTA")
+    for c in created:
+        table.add_row(
+            c.id[:12],
+            (c.hook_text or "")[:40] + ("..." if len(c.hook_text or "") > 40 else ""),
+            f"{c.cta_type} / {c.cta_text or '—'}",
+        )
+    console.print(table)
+
+
+@cli.command("commerce-ingest")
+@click.argument("csv_path", type=click.Path(exists=True, path_type=Path))
+@click.option("--source", default="shopify_import", help="Source label for ingested rows")
+def commerce_ingest_cmd(csv_path: Path, source: str):
+    """Ingest commerce facts (sessions, purchases, revenue) from CSV.
+
+    CSV must have: content_id, platform, event_date.
+    Optional: sessions, add_to_cart, checkout_started, purchases, revenue.
+    Produce from Shopify order export by parsing UTM (utm_content=content_id, utm_source=platform).
+    """
+    _init()
+    from src.commerce_ingest import ingest_commerce_csv
+
+    try:
+        inserted, skipped = ingest_commerce_csv(csv_path, source=source)
+        console.print(f"[green]Upserted {inserted}[/green] commerce fact(s), skipped {skipped}.")
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -528,6 +695,13 @@ def briefing_diagnose_cmd():
 @click.option("--product", "slugs", multiple=True, help="Product SKU (repeatable)")
 @click.option("--theme", "themes", multiple=True, type=click.Choice(THEMES), help="Theme (repeatable)")
 @click.option("--hook", "hooks", multiple=True, type=click.Choice(HOOK_TYPES), help="Hook type (repeatable)")
+@click.option(
+    "--format",
+    "creative_format",
+    type=click.Choice(CREATIVE_FORMATS),
+    default=None,
+    help="Creative format (ai_video_15s, slideshow_15s, image_motion_15s). Default: ai_video_15s.",
+)
 @click.option("--count", default=8, show_default=True, help="Total clips across all products in --auto mode")
 @click.option(
     "--rotate-theme-hook",
@@ -536,7 +710,8 @@ def briefing_diagnose_cmd():
 )
 @click.option("--post", "should_post", is_flag=True, help="Deprecated: use preview, approve, schedule, and post-due")
 def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
-        hooks: tuple[str, ...], count: int, rotate_theme_hook: bool, should_post: bool):
+        hooks: tuple[str, ...], creative_format: str | None, count: int,
+        rotate_theme_hook: bool, should_post: bool):
     """Generate content — manually or via bandit recommendations."""
     _init()
 
@@ -554,12 +729,12 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
         sys.exit(1)
 
     if auto_mode:
-        _run_auto(count, should_post)
+        _run_auto(count, should_post, creative_format)
     else:
-        _run_manual(slugs, themes, hooks, count, should_post, rotate_theme_hook=rotate_theme_hook)
+        _run_manual(slugs, themes, hooks, count, should_post, creative_format, rotate_theme_hook)
 
 
-def _run_auto(count: int, should_post: bool):
+def _run_auto(count: int, should_post: bool, creative_format: str | None = None):
     products = db.list_products(
         active_only=True,
         exclude_excluded=True,
@@ -598,7 +773,7 @@ def _run_auto(count: int, should_post: bool):
         console.print(Panel(f"[bold]{product.name}[/bold] ({product.sku})", style="blue"))
         jobs.extend((product, theme, hook_type) for theme, hook_type in product_runs)
 
-    total = _generate_batch(jobs, should_post, requested_count=count)
+    total = _generate_batch(jobs, should_post, requested_count=count, creative_format=creative_format)
 
     piece = "piece" if total == 1 else "pieces"
     console.print(f"\n[green]{total}[/green] {piece} of content generated ({len(products)} products eligible).")
@@ -606,7 +781,7 @@ def _run_auto(count: int, should_post: bool):
 
 def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
                 hooks: tuple[str, ...], count: int, should_post: bool,
-                rotate_theme_hook: bool = False):
+                creative_format: str | None = None, rotate_theme_hook: bool = False):
     if not slugs:
         console.print("[red]Provide at least one --product or use --auto.[/red]")
         sys.exit(1)
@@ -629,7 +804,7 @@ def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
             strategy_pairs = _manual_strategy_runs(themes, hooks, count, rotate_theme_hook)
         jobs.extend((product, theme, hook) for theme, hook in strategy_pairs)
 
-    total = _generate_batch(jobs, should_post, requested_count=count)
+    total = _generate_batch(jobs, should_post, requested_count=count, creative_format=creative_format)
 
     console.print(f"\n[green]{total}[/green] pieces of content generated.")
 
@@ -1104,6 +1279,35 @@ def _load_post_metadata(content: Content) -> tuple[dict[str, str], list[str]]:
 # ---------------------------------------------------------------------------
 # pull-analytics
 # ---------------------------------------------------------------------------
+
+@cli.command("sync-instagram-ids")
+@click.argument("mappings", nargs=-1, required=True)
+def sync_instagram_ids_cmd(mappings: tuple[str, ...]):
+    """Update posts.post_id from handoff IDs to Instagram media IDs.
+
+    Each mapping is handoff_id:ig_id (e.g. make:videos/foo.mp4:DVl619ikQzM).
+    Extract ig_id from the reel URL: instagram.com/reel/SHORTCODE -> SHORTCODE.
+    """
+    _init()
+    updated = 0
+    for pair in mappings:
+        if ":" not in pair:
+            console.print(f"[yellow]Skipping invalid mapping:[/yellow] {pair}")
+            continue
+        # handoff_id contains colons (e.g. make:videos/foo.mp4), ig_id is after last colon
+        last_colon = pair.rfind(":")
+        handoff_id = pair[:last_colon].strip()
+        ig_id = pair[last_colon + 1 :].strip()
+        handoff_id = handoff_id.strip()
+        ig_id = ig_id.strip()
+        n = db.sync_instagram_post_id(ig_id, handoff_id=handoff_id)
+        if n:
+            updated += 1
+            console.print(f"  [green]OK[/green] {handoff_id} -> {ig_id}")
+        else:
+            console.print(f"  [yellow]![/yellow] No match for {handoff_id}")
+    console.print(f"\n[green]{updated}[/green] post(s) updated.")
+
 
 @cli.command("diagnose-instagram-sync")
 def diagnose_instagram_sync_cmd():

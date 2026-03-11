@@ -178,9 +178,22 @@ def _allocate_remaining_slots(
         extra_allocations[chosen.arm_key] += 1
 
 
+def _ranking_objective() -> str:
+    """Return configured ranking objective, validated against supported values."""
+    obj = str(config.get("bandit.ranking_objective", "engagement_rate")).strip().lower()
+    supported = {"engagement_rate", "views", "revenue", "sessions", "purchases"}
+    return obj if obj in supported else "engagement_rate"
+
+
 def update_from_metrics() -> int:
+    """Update bandit arms from post metrics and commerce facts.
+
+    Uses ranking_objective from config: engagement_rate (default), views,
+    revenue, sessions, purchases. Falls back to engagement when commerce
+    data is sparse.
+    """
     posts = db.list_recent_posts(days=30)
-    creative_metrics: dict[str, dict[str, str | int]] = {}
+    creative_metrics: dict[str, dict] = {}
 
     for post in posts:
         if post.id is None:
@@ -200,6 +213,9 @@ def update_from_metrics() -> int:
                 "hook_type": content.hook_type,
                 "views": 0,
                 "engagements": 0,
+                "sessions": 0,
+                "purchases": 0,
+                "revenue": 0.0,
             },
         )
         aggregate["views"] = int(aggregate["views"]) + metrics.views
@@ -207,13 +223,38 @@ def update_from_metrics() -> int:
             metrics.likes + metrics.comments + metrics.shares + metrics.saves
         )
 
+        # Phase 6: aggregate commerce per content (across platforms for this post)
+        commerce = db.aggregate_commerce_for_content(
+            content.id, days=30, platform=post.platform
+        )
+        aggregate["sessions"] += commerce["sessions"]
+        aggregate["purchases"] += commerce["purchases"]
+        aggregate["revenue"] += commerce["revenue"]
+
+    objective = _ranking_objective()
+    updated = 0
+
     creative_rates = [
         int(item["engagements"]) / max(int(item["views"]), 1)
         for item in creative_metrics.values()
     ]
-    global_median = median(creative_rates) if creative_rates else 0.0
+    engagement_median = median(creative_rates) if creative_rates else 0.0
 
-    updated = 0
+    if objective in ("revenue", "sessions", "purchases"):
+        commerce_scores = []
+        for agg in creative_metrics.values():
+            if objective == "revenue":
+                commerce_scores.append(float(agg["revenue"]))
+            elif objective == "sessions":
+                commerce_scores.append(int(agg["sessions"]))
+            else:
+                commerce_scores.append(int(agg["purchases"]))
+        commerce_median = median(commerce_scores) if commerce_scores else 0.0
+        has_commerce = any(s > 0 for s in commerce_scores)
+    else:
+        commerce_median = 0.0
+        has_commerce = False
+
     for content_id, aggregate in creative_metrics.items():
         if db.has_bandit_observation_for_content(content_id):
             continue
@@ -224,7 +265,23 @@ def update_from_metrics() -> int:
             continue
 
         rate = int(aggregate["engagements"]) / max(int(aggregate["views"]), 1)
-        success = rate > global_median
+
+        if objective == "revenue" and has_commerce:
+            score = float(aggregate["revenue"])
+            success = score > commerce_median
+        elif objective == "sessions" and has_commerce:
+            score = int(aggregate["sessions"])
+            success = score > commerce_median
+        elif objective == "purchases" and has_commerce:
+            score = int(aggregate["purchases"])
+            success = score > commerce_median
+        elif objective == "views":
+            score = int(aggregate["views"])
+            views_median = median([int(a["views"]) for a in creative_metrics.values()])
+            success = score > views_median
+        else:
+            success = rate > engagement_median
+
         db.increment_bandit(key, success)
         db.insert_bandit_observation(
             BanditObservation(

@@ -13,11 +13,11 @@ def test_build_utm_url() -> None:
         theme="benefit",
         hook_type="bold_claim",
     )
-    url = utm.build_utm_url("https://store.com/products/widget-pro", content)
+    url = utm.build_utm_url("https://store.com/products/widget-pro", content, "youtube")
 
     assert url.startswith("https://store.com/products/widget-pro?")
-    assert "utm_source=widget-pro" in url
-    assert "utm_medium=reel" in url
+    assert "utm_source=youtube" in url
+    assert "utm_medium=social" in url
     assert "utm_campaign=benefit_bold_claim" in url
     assert "utm_content=c-001" in url
 
@@ -29,16 +29,16 @@ def test_parse_utm_params() -> None:
         theme="urgency",
         hook_type="question",
     )
-    original = utm.build_utm_url("https://example.com/products/roundtrip", content)
+    original = utm.build_utm_url("https://example.com/products/roundtrip", content, "instagram")
     parsed = utm.parse_utm_params(original)
 
-    assert parsed["utm_source"] == "roundtrip"
-    assert parsed["utm_medium"] == "reel"
+    assert parsed["utm_source"] == "instagram"
+    assert parsed["utm_medium"] == "bio"
     assert parsed["utm_campaign"] == "urgency_question"
     assert parsed["utm_content"] == "c-rt"
 
 
-def test_build_full_utm_link() -> None:
+def test_build_attribution_data_direct() -> None:
     content = Content(
         id="c-002",
         product_sku="serum-x",
@@ -51,15 +51,15 @@ def test_build_full_utm_link() -> None:
         "src.config._config",
         {"site_url": "https://veluraesthetics.com"},
     ):
-        link = utm.build_full_utm_link(content, product)
+        data = utm.build_attribution_data(content, product, "youtube")
 
-    assert "veluraesthetics.com/products/serum-x" in link
-    assert "utm_source=serum-x" in link
-    assert "utm_campaign=curiosity_question" in link
-    assert "utm_content=c-002" in link
+    assert "veluraesthetics.com/products/serum-x" in data["destination_url"]
+    assert data["link_mode"] == "direct"
+    assert "utm_source=youtube" in data["utm_url"]
+    assert "utm_campaign=curiosity_question" in data["utm_url"]
 
 
-def test_build_full_utm_link_prefers_product_url() -> None:
+def test_build_attribution_data_redirect() -> None:
     content = Content(
         id="c-003",
         product_sku="eye-cream",
@@ -73,7 +73,10 @@ def test_build_full_utm_link_prefers_product_url() -> None:
     )
 
     with patch("src.config._config", {"site_url": "https://fallback.example.com"}):
-        link = utm.build_full_utm_link(content, product)
+        data = utm.build_attribution_data(content, product, "instagram")
 
-    assert "veluraesthetics.com/products/eye-cream-special" in link
-    assert "utm_source=eye-cream" in link
+    assert data["destination_url"] == "https://fallback.example.com/go/ig"
+    assert data["link_mode"] == "redirect"
+    assert data["utm_url"] == ""
+    assert data["utm_source"] == "instagram"
+    assert data["utm_medium"] == "bio"

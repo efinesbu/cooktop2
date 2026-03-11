@@ -9,7 +9,7 @@ from typing import Any, Callable, TypeVar
 
 from src import config, db
 from src.models import Content, Post, Product
-from src.utm import build_full_utm_link
+from src.utm import build_attribution_data
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ class BasePoster(ABC):
         hashtags: list[str],
     ) -> Post:
         """Full workflow: build UTM link, format caption, upload, persist to DB."""
-        utm_url = build_full_utm_link(content, product)
+        attr_data = build_attribution_data(content, product, self.platform)
         caption = captions.get(self.platform, "")
 
         if not content.video_local_path:
@@ -94,7 +94,13 @@ class BasePoster(ABC):
             post_id=post_id,
             caption=caption,
             hashtags=",".join(hashtags),
-            utm_url=utm_url,
+            utm_url=attr_data["utm_url"],
+            destination_url=attr_data["destination_url"],
+            utm_source=attr_data["utm_source"],
+            utm_medium=attr_data["utm_medium"],
+            utm_campaign=attr_data["utm_campaign"],
+            utm_content=attr_data["utm_content"],
+            link_mode=attr_data["link_mode"],
         )
         post.id = db.insert_post(post)
         return post

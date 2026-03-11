@@ -34,7 +34,10 @@ sys.modules.setdefault(
 )
 sys.modules.setdefault(
     "src.prompt_generator",
-    types.SimpleNamespace(generate_content=lambda *args, **kwargs: (None, {})),
+    types.SimpleNamespace(
+        generate_content=lambda *args, **kwargs: (None, {}),
+        generate_paid_variant_captions=lambda *args, **kwargs: [],
+    ),
 )
 sys.modules.setdefault(
     "src.posters.youtube",
@@ -130,6 +133,12 @@ def test_approve_schedule_and_post_due(
             caption="Launch caption",
             hashtags="launch,velura",
             utm_url="https://example.com/products/serum-x?utm_content=content-123",
+            destination_url="https://example.com/products/serum-x",
+            utm_source="youtube",
+            utm_medium="social",
+            utm_campaign="benefit_question",
+            utm_content="content-123",
+            link_mode="direct",
         )
     )
 
@@ -157,6 +166,8 @@ def test_approve_schedule_and_post_due(
     assert len(posts) == 1
     assert posts[0].platform == "youtube"
     assert posts[0].caption == "Launch caption"
+    assert posts[0].link_mode == "direct"
+    assert posts[0].destination_url == "https://example.com/products/serum-x"
 
 
 def test_schedule_and_post_due_skip_disabled_platform_payloads(

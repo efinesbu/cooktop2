@@ -142,3 +142,35 @@ def test_update_from_metrics_aggregates_by_creative_and_uses_latest_metric_per_p
 
     assert db.has_bandit_observation_for_content("content-c") is True
     assert db.has_bandit_observation_for_content("content-d") is True
+
+
+def test_update_from_metrics_falls_back_to_engagement_when_no_commerce(monkeypatch, tmp_db: Path) -> None:
+    """When ranking_objective is revenue but no commerce data, uses engagement."""
+    monkeypatch.setattr("src.bandit._ranking_objective", lambda: "revenue")
+    db.upsert_product(Product(sku="serum-z", name="Serum Z"))
+    bandit.initialize_arms()
+
+    _create_post_with_metric(
+        product_sku="serum-z",
+        content_id="content-e",
+        theme="problem_solution",
+        hook_type="relatable_pain",
+        views=100,
+        likes=50,
+    )
+    _create_post_with_metric(
+        product_sku="serum-z",
+        content_id="content-f",
+        theme="benefit",
+        hook_type="bold_claim",
+        views=100,
+        likes=5,
+    )
+
+    updated = bandit.update_from_metrics()
+    assert updated == 2
+
+    winning_arm = db.get_bandit_arm(bandit.arm_key("problem_solution", "relatable_pain"))
+    losing_arm = db.get_bandit_arm(bandit.arm_key("benefit", "bold_claim"))
+    assert winning_arm is not None and winning_arm.alpha == 2.0
+    assert losing_arm is not None and losing_arm.beta == 2.0

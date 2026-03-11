@@ -11,7 +11,8 @@ platforms:
 
 shopify:
   store_url: ""
-  admin_api_token: ""
+  client_id: ""
+  client_secret: ""
 
 openai:
   api_key: "sk-proj-XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
@@ -112,6 +113,9 @@ bandit:
   min_top_k: 3
   allocation_ceiling: 0.7
   expand_after_creatives: 40
+  # Phase 6: ranking objective for organic evaluation and bandit updates
+  # engagement_rate (default), views, composite, revenue, sessions, purchases
+  ranking_objective: engagement_rate
   starter_arms:
     - "problem_solution__relatable_pain"
     - "benefit__bold_claim"
