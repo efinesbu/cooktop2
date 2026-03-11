@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS bandit_observations (
 CREATE TABLE IF NOT EXISTS costs (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     content_id      TEXT NOT NULL REFERENCES content(id),
-    step            TEXT NOT NULL CHECK(step IN ('prompt_gen', 'image_gen', 'video_gen')),
+    step            TEXT NOT NULL,
     api_provider    TEXT NOT NULL,
     tokens_or_units INTEGER,
     cost_usd        REAL,

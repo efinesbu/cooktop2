@@ -460,6 +460,182 @@ def test_post_command_rejects_delay_above_999_minutes(tmp_db: Path) -> None:
     assert "Use --delay-XXX with XXX between 0 and 999." in result.output
 
 
+def test_quiet_hours_waits_before_first_post(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """When run during 10pm–8am EST, first post is delayed until 8am (±0–5 min)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    client_secrets = tmp_path / "youtube_client_secrets.json"
+    client_secrets.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "platforms": {"enabled": ["youtube"]},
+            "youtube": {"client_secrets_file": str(client_secrets)},
+            "data_root": str(tmp_path / "velura-data"),
+        },
+    )
+
+    product = Product(sku="serum-quiet", name="Serum Quiet")
+    db.upsert_product(product)
+    video_path = tmp_path / "clip-quiet.mp4"
+    video_path.write_bytes(b"video")
+    _seed_approved_youtube_content("content-quiet-1", product, video_path)
+
+    # Simulate 12:34am ET
+    eastern = ZoneInfo("America/New_York")
+    fake_now = datetime(2025, 3, 11, 0, 34, 0, tzinfo=eastern)
+    sleep_calls: list[float] = []
+
+    class FakeDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz == eastern:
+                return fake_now
+            return datetime.now(tz=tz)
+
+    def fake_sleep(secs: float) -> None:
+        sleep_calls.append(secs)
+
+    monkeypatch.setattr(cli_module, "datetime", FakeDatetime)
+    monkeypatch.setattr(cli_module.time, "sleep", fake_sleep)
+    monkeypatch.setattr(cli_module.random, "randint", lambda a, b: 0)  # 8am exactly
+    monkeypatch.setitem(cli_module.POSTERS, "youtube", FakeYouTubePoster)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        ["post", "--content-id", "content-quiet-1"],
+    )
+
+    assert result.exit_code == 0
+    assert "Quiet hours (10pm–8am EST)" in result.output
+    # 12:34am to 8am = 7h26m = 26760 seconds (sleep is called in 60s chunks)
+    assert sum(sleep_calls) > 26000
+    assert db.get_platform_payload("content-quiet-1", "youtube").status == "posted"
+
+
+def test_quiet_hours_skipped_when_in_post_window(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """When run during 8am–10pm EST, no wait before posting."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    client_secrets = tmp_path / "youtube_client_secrets.json"
+    client_secrets.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "platforms": {"enabled": ["youtube"]},
+            "youtube": {"client_secrets_file": str(client_secrets)},
+            "data_root": str(tmp_path / "velura-data"),
+        },
+    )
+
+    product = Product(sku="serum-day", name="Serum Day")
+    db.upsert_product(product)
+    video_path = tmp_path / "clip-day.mp4"
+    video_path.write_bytes(b"video")
+    _seed_approved_youtube_content("content-day-1", product, video_path)
+
+    # Simulate 2pm ET (in post window)
+    eastern = ZoneInfo("America/New_York")
+    fake_now = datetime(2025, 3, 11, 14, 0, 0, tzinfo=eastern)
+    sleep_calls: list[float] = []
+
+    class FakeDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz == eastern:
+                return fake_now
+            return datetime.now(tz=tz)
+
+    def fake_sleep(secs: float) -> None:
+        sleep_calls.append(secs)
+
+    monkeypatch.setattr(cli_module, "datetime", FakeDatetime)
+    monkeypatch.setattr(cli_module.time, "sleep", fake_sleep)
+    monkeypatch.setitem(cli_module.POSTERS, "youtube", FakeYouTubePoster)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        ["post", "--content-id", "content-day-1"],
+    )
+
+    assert result.exit_code == 0
+    assert "Quiet hours" not in result.output
+    assert not any(s > 60 for s in sleep_calls)  # No long quiet-hours wait
+    assert db.get_platform_payload("content-day-1", "youtube").status == "posted"
+
+
+def test_quiet_hours_pauses_mid_run_at_10pm(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """When delay would extend past 10pm, pause at 10pm and resume at 8am."""
+    client_secrets = tmp_path / "youtube_client_secrets.json"
+    client_secrets.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "platforms": {"enabled": ["youtube"]},
+            "youtube": {"client_secrets_file": str(client_secrets)},
+            "data_root": str(tmp_path / "velura-data"),
+        },
+    )
+
+    product = Product(sku="serum-mid", name="Serum Mid")
+    db.upsert_product(product)
+    video_path = tmp_path / "clip-mid.mp4"
+    video_path.write_bytes(b"video")
+    _seed_approved_youtube_content("content-mid-1", product, video_path)
+    _seed_approved_youtube_content("content-mid-2", product, video_path)
+
+    # Simulate entering quiet hours after first sleep in delay loop
+    call_count = [0]
+
+    def fake_is_quiet_hours() -> bool:
+        call_count[0] += 1
+        # Call 1: start of post_cmd (_wait_until_post_window_start) - not quiet.
+        # Call 2: first check in delay loop - not quiet. Call 3: after first sleep - quiet.
+        return call_count[0] >= 3
+
+    def mock_wait(*, allow_quiet_hours: bool = False) -> None:
+        pass  # No-op; we just verify we hit the pause path
+
+    monkeypatch.setattr(cli_module, "_is_quiet_hours_est", fake_is_quiet_hours)
+    monkeypatch.setattr(cli_module, "_wait_until_post_window_start", mock_wait)
+    monkeypatch.setattr(cli_module.random, "uniform", lambda a, b: 1.0)
+    monkeypatch.setitem(cli_module.POSTERS, "youtube", FakeYouTubePoster)
+
+    sleep_calls: list[float] = []
+
+    def fake_sleep(secs: float) -> None:
+        sleep_calls.append(secs)
+
+    monkeypatch.setattr(cli_module.time, "sleep", fake_sleep)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        ["post", "--content-id", "content-mid-1", "--content-id", "content-mid-2", "--delay-999"],
+    )
+
+    assert result.exit_code == 0
+    assert "Pausing until 8am ET before next post" in result.output
+    assert db.get_platform_payload("content-mid-1", "youtube").status == "posted"
+    assert db.get_platform_payload("content-mid-2", "youtube").status == "posted"
+
+
 def test_add_product_command_saves_manual_catalog_entry(
     tmp_db: Path,
     monkeypatch,

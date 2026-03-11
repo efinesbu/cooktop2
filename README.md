@@ -49,6 +49,51 @@ python cli.py sync-products
 8:00 PM   pull-analytics (cron)
 ```
 
+## 12-Creative Matrix Launch
+
+For a controlled first-wave test: **2 products × 3 formats × 2 themes = 12 creatives**. Use this when launching a new product pair (e.g. moisturizer + eye cream).
+
+### Prerequisites
+
+```bash
+# Add products (repeat --product for each; use your real URLs)
+python cli.py add-product --sku moisturizer --name "Embrace Collagen Moisturizer" --url https://veluraesthetics.com/moisturizer
+python cli.py add-product --sku eye-cream --name "Eye Cream" --url https://veluraesthetics.com/products/eye-cream
+
+# Place images in ~/.velura/product-images/{sku}/ then register
+python cli.py register-images --product moisturizer
+python cli.py register-images --product eye-cream
+```
+
+### Generate exactly 12 creatives
+
+**CLI syntax:** Repeat `--product`, `--theme`, and `--hook` for each value. Run each format command **once** (running twice produces duplicates).
+
+```bash
+# AI video (4 clips: 2 products × 2 theme/hook pairs)
+python cli.py run --product moisturizer --product eye-cream --theme problem_solution --theme benefit --hook relatable_pain --hook bold_claim --rotate-theme-hook --count 2 --format ai_video_15s
+
+# Slideshow (4 clips)
+python cli.py run --product moisturizer --product eye-cream --theme problem_solution --theme benefit --hook relatable_pain --hook bold_claim --rotate-theme-hook --count 2 --format slideshow_15s
+
+# Image motion (4 clips)
+python cli.py run --product moisturizer --product eye-cream --theme problem_solution --theme benefit --hook relatable_pain --hook bold_claim --rotate-theme-hook --count 2 --format image_motion_15s
+```
+
+**Result:** 12 creatives total (6 per product). Then: `preview --today` → `approve` → `schedule --today` → `post-due` or `post --today`.
+
+### Bandit-driven alternative
+
+To let the bandit choose theme/hook pairs instead of locking them:
+
+```bash
+python cli.py run --product moisturizer --product eye-cream --count 4 --format ai_video_15s
+python cli.py run --product moisturizer --product eye-cream --count 4 --format slideshow_15s
+python cli.py run --product moisturizer --product eye-cream --count 4 --format image_motion_15s
+```
+
+This yields 12 creatives with bandit-recommended strategies (may include `curiosity`, `visual_surprise`, etc.).
+
 ## CLI Commands
 
 | Command | Purpose |
@@ -60,10 +105,11 @@ python cli.py sync-products
 | `run --auto --count N` | Generate N total clips across eligible products using the shared bandit allocation |
 | `run --product SLUG --count N` | Generate N clips using shared bandit theme/hook recommendations (starter arms) |
 | `run --product SLUG --theme T --hook H --count N` | Generate with manual strategy overrides |
-| `run --product SLUG --theme T... --hook H... --count N --rotate-theme-hook` | Cycle through provided manual theme/hook overrides once per clip |
+| `run --product SLUG --product SLUG2 --theme T --theme T2 --hook H --hook H2 --count N --rotate-theme-hook` | Cycle through provided theme/hook pairs; repeat `--product`, `--theme`, `--hook` for each value |
 | `exclude --product SLUG --reason "..."` | Exclude product from generation |
 | `include --product SLUG` | Re-include excluded product |
 | `preview --today` | Review today's generated content |
+| `preview --last-24h` | Review generated content in past 24hrs |
 | `approve --content-id ID` | Approve generated content for scheduling/posting |
 | `reject --content-id ID --reason "..."` | Reject generated content with review notes |
 | `schedule --today` | Schedule approved content using staggered platform offsets |
@@ -77,7 +123,9 @@ python cli.py sync-products
 | `report-product --product SLUG` | Product performance report |
 | `archive` | Archive old videos to GCS |
 
-For immediate posting with `post`, Velura now waits 5 minutes between the second and later posts on the same platform during that command. Each delay has a random ±20% variance (e.g. 4–6 minutes for the default 5-minute wait) so repeated posts are less predictable. Use `--delay-XXX` with `XXX` from `0` to `999` to override the base wait, for example `python cli.py post --today --delay-15`. Use `--nodelay` to keep the old behavior and post everything back-to-back. During each wait, the CLI prints a progress line every 30 seconds so you know when the next same-platform post will start.
+For immediate posting with `post`, Velura now waits 5 minutes between the second and later posts on the same platform during that command. Each delay has a random ±20% variance (e.g. 4–6 minutes for the default 5-minute wait) so repeated posts are less predictable. Use `--delay-XXX` with `XXX` from `0` to `999` to override the base wait, for example `python cli.py post --today --delay-15`. Use `--nodelay` to keep the old behavior and post everything back-to-back. During each wait, the CLI prints a progress line every 30 seconds (or every 15 minutes when the delay is over 15 minutes) so you know when the next same-platform post will start.
+
+**Quiet hours:** Velura never posts between 10pm and 8am Eastern Time. If you run `post --today` or `post --content-id` during that window, the first post is delayed until 8am ET (±0–5 minutes random). Subsequent same-platform posts then follow the normal `--delay-XXX` interval (e.g. with `--delay-120`, the second post is ~120 minutes after the first, ±20%). If a long run (e.g. 100 posts with `--delay-999`) would extend past 10pm, the process pauses at 10pm and resumes at 8am ET (±0–5 min) the next day. The same restriction applies to `post-due`. Use `--allow-quiet-hours` to bypass quiet hours and post immediately during 10pm–8am EST (e.g. `post --today --allow-quiet-hours` or `post-due --allow-quiet-hours`).
 
 ## Architecture
 

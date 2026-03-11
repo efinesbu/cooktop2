@@ -8,6 +8,7 @@ import re
 import sys
 import time
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import click
 from rich.console import Console
@@ -44,6 +45,51 @@ POSTERS = {
     "x": XPoster,
 }
 POST_DELAY_PATTERN = re.compile(r"^--delay-(\d{1,3})$")
+
+# Posting quiet hours: never post between 10pm EST and 8am EST (Eastern Time)
+EASTERN = ZoneInfo("America/New_York")
+QUIET_START_HOUR = 22  # 10pm
+QUIET_END_HOUR = 8     # 8am
+
+
+def _is_quiet_hours_est() -> bool:
+    """True if current Eastern time is between 10pm and 8am (exclusive of 8am)."""
+    now_et = datetime.now(EASTERN)
+    hour = now_et.hour
+    if QUIET_START_HOUR <= hour or hour < QUIET_END_HOUR:
+        return True
+    return False
+
+
+def _wait_until_post_window_start(*, allow_quiet_hours: bool = False) -> None:
+    """If in quiet hours (10pm–8am EST), wait until 8am EST + random(0–5) minutes.
+    Pass allow_quiet_hours=True to skip the wait and post immediately."""
+    if allow_quiet_hours or not _is_quiet_hours_est():
+        return
+
+    now_et = datetime.now(EASTERN)
+    # Target: 8am today (or tomorrow if we're past midnight but before 8am)
+    target = now_et.replace(hour=QUIET_END_HOUR, minute=0, second=0, microsecond=0)
+    if now_et >= target:
+        target += timedelta(days=1)
+    # Add random 0–5 minutes
+    target += timedelta(minutes=random.randint(0, 5))
+
+    wait_seconds = (target - now_et).total_seconds()
+    if wait_seconds <= 0:
+        return
+
+    console.print(
+        f"[yellow]Quiet hours (10pm–8am EST). Waiting until {target.strftime('%I:%M %p')} ET before first post.[/yellow]"
+    )
+    print_interval = 900 if wait_seconds > 900 else 60
+    remaining = wait_seconds
+    while remaining > 0:
+        sleep_sec = min(print_interval, remaining)
+        time.sleep(sleep_sec)
+        remaining -= sleep_sec
+        if remaining > 0:
+            print(f"Posting window opens in {int(remaining)} seconds.")
 
 
 def _init():
@@ -113,11 +159,14 @@ def _parse_post_delay_args(extra_args: list[str]) -> tuple[int, bool]:
     return delay_minutes, no_delay
 
 
-def _build_post_delay_state(delay_minutes: int, no_delay: bool) -> dict[str, object]:
+def _build_post_delay_state(
+    delay_minutes: int, no_delay: bool, allow_quiet_hours: bool = False
+) -> dict[str, object]:
     return {
         "delay_minutes": delay_minutes,
         "no_delay": no_delay,
         "platform_attempts": {},
+        "allow_quiet_hours": allow_quiet_hours,
     }
 
 
@@ -127,6 +176,8 @@ def _wait_for_next_platform_post(
 ) -> None:
     if not delay_state or delay_state["no_delay"]:
         return
+
+    allow_quiet_hours = bool(delay_state.get("allow_quiet_hours", False))
 
     platform_attempts = delay_state["platform_attempts"]
     assert isinstance(platform_attempts, dict)
@@ -143,9 +194,18 @@ def _wait_for_next_platform_post(
     total_seconds = max(1, int(base_seconds * variance))
 
     remaining_seconds = total_seconds
+    # When delay > 15 min, print every 15 min; otherwise every 30 seconds
+    print_interval = 900 if total_seconds > 900 else 30
     while remaining_seconds > 0:
+        # If we've entered quiet hours (10pm–8am EST), pause and wait until 8am
+        if not allow_quiet_hours and _is_quiet_hours_est():
+            console.print(
+                "[yellow]Quiet hours (10pm–8am EST). Pausing until 8am ET before next post.[/yellow]"
+            )
+            _wait_until_post_window_start()
+            return
         print(f"Next {platform} post in {remaining_seconds} seconds.")
-        sleep_seconds = min(30, remaining_seconds)
+        sleep_seconds = min(print_interval, remaining_seconds)
         time.sleep(sleep_seconds)
         remaining_seconds -= sleep_seconds
 
@@ -1051,9 +1111,15 @@ def schedule(today: bool, content_ids: tuple[str, ...]):
 
 
 @cli.command("post-due")
-def post_due_cmd():
+@click.option(
+    "--allow-quiet-hours",
+    is_flag=True,
+    help="Allow posting between 10pm and 8am EST (bypass quiet hours)",
+)
+def post_due_cmd(allow_quiet_hours: bool):
     """Post all payloads that are due based on publish_at."""
     _init()
+    _wait_until_post_window_start(allow_quiet_hours=allow_quiet_hours)
     _post_due()
 
 @cli.command("post", context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
@@ -1064,16 +1130,23 @@ def post_due_cmd():
     multiple=True,
     help="Row number(s) from preview (e.g. --content-id 1 --content-id 2)",
 )
+@click.option(
+    "--allow-quiet-hours",
+    is_flag=True,
+    help="Allow posting between 10pm and 8am EST (bypass quiet hours)",
+)
 @click.pass_context
-def post_cmd(ctx: click.Context, today: bool, content_ids: tuple[str, ...]):
+def post_cmd(ctx: click.Context, today: bool, content_ids: tuple[str, ...], allow_quiet_hours: bool):
     """Post content to all platforms. Supports `--delay-XXX` and `--nodelay`."""
     _init()
     delay_minutes, no_delay = _parse_post_delay_args(list(ctx.args))
-    delay_state = _build_post_delay_state(delay_minutes, no_delay)
+    delay_state = _build_post_delay_state(delay_minutes, no_delay, allow_quiet_hours)
 
     if not today and not content_ids:
         console.print("[red]Provide either --today or --content-id (one or more).[/red]")
         sys.exit(1)
+
+    _wait_until_post_window_start(allow_quiet_hours=allow_quiet_hours)
 
     if content_ids:
         any_failed = False

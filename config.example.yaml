@@ -105,6 +105,10 @@ posting:
 
 data_root: "~/.velura"
 
+# Optional: override ffmpeg path (for slideshow_15s, image_motion_15s). Default: auto-detect from PATH.
+# ffmpeg:
+#   path: "C:/ffmpeg/bin/ffmpeg.exe"
+
 daily_budget_usd: 50.0
 
 # Shared bandit: used by run --auto and run --product SLUG (when no --theme/--hook)

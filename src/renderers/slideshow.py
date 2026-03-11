@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from src import config, db
 from src.models import Content, Cost, Product, ProductImage
 
 from .base import BaseRenderer
+from .ffmpeg_utils import find_ffmpeg
 from .registry import register_renderer
 
 logger = logging.getLogger(__name__)
@@ -21,16 +21,6 @@ TARGET_WIDTH = 720
 TARGET_HEIGHT = 1280  # 9:16 vertical
 MIN_SLIDES = 4
 MAX_SLIDES = 6
-
-
-def _ensure_ffmpeg() -> str:
-    ffmpeg = shutil.which("ffmpeg")
-    if not ffmpeg:
-        raise RuntimeError(
-            "ffmpeg is required for slideshow_15s. "
-            "Install it (e.g. apt install ffmpeg, brew install ffmpeg) and ensure it's on PATH."
-        )
-    return ffmpeg
 
 
 def _select_slideshow_images(
@@ -113,7 +103,7 @@ class SlideshowRenderer(BaseRenderer):
                 "`python cli.py register-images --product <sku>`."
             )
 
-        ffmpeg = _ensure_ffmpeg()
+        ffmpeg = find_ffmpeg()
         video_dir = config.videos_dir() / product.sku
         video_dir.mkdir(parents=True, exist_ok=True)
         video_path = video_dir / f"{content.id}.mp4"
