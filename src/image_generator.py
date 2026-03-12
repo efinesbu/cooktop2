@@ -93,6 +93,126 @@ def _build_contents(
     return [image_part, prompt]
 
 
+def generate_frame_images_for_plan(
+    content: Content,
+    product: Product,
+    plan: dict,
+    output_dir: Path | None = None,
+) -> list[Path]:
+    """Generate 3–5 frame images from an image_plan using Gemini.
+
+    Reference rules: hero (always), brand-kit (always), models (lifestyle frames only).
+    Saves to output_dir/{content_id}_frame_{i}.png. Returns list of paths.
+    """
+    api_key = config.get("gemini.api_key")
+    if not api_key:
+        raise ValueError(
+            "Missing `gemini.api_key` in config.yaml for image_motion_15s generation."
+        )
+    model_name = config.get("gemini.model", "gemini-2.0-flash")
+    aspect_ratio = config.get("gemini.aspect_ratio", "9:16")
+    client = genai.Client(api_key=api_key)
+
+    frames = plan.get("frames", [])
+    if not frames:
+        raise ValueError("image_plan has no frames")
+
+    out_dir = output_dir or (config.videos_dir() / product.sku)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    hero_path = _first_hero_image_path(product)
+    brand_paths = _brand_reference_paths()
+    model_paths = _model_reference_paths()
+
+    LIFESTYLE_ROLES = {"lifestyle_portrait", "lifestyle_in_use"}
+    result_paths: list[Path] = []
+    for i, frame in enumerate(frames):
+        role = (frame.get("role") or "").strip()
+        is_lifestyle = role in LIFESTYLE_ROLES
+        ref_paths = _collect_reference_paths(
+            hero_path, brand_paths, model_paths, is_lifestyle
+        )
+        prompt = frame.get("image_prompt") or ""
+        if not prompt.strip():
+            raise ValueError(f"Frame {i} has no image_prompt")
+        if hero_path:
+            prompt += (
+                f"\n\nUse the attached reference image of the product '{product.name}' "
+                "to match its real appearance, colors, and branding as closely as possible."
+            )
+        contents = _build_contents_multi(ref_paths, prompt)
+        image_bytes = _generate_with_retries(
+            client, model_name, contents, aspect_ratio, max_attempts=3
+        )
+        out_path = out_dir / f"{content.id}_frame_{i}.png"
+        out_path.write_bytes(image_bytes)
+        result_paths.append(out_path)
+        logger.info("Saved frame %d to %s", i, out_path)
+
+    db.insert_cost(Cost(
+        content_id=content.id,
+        step="image_gen",
+        api_provider="gemini",
+        tokens_or_units=len(frames),
+        cost_usd=0.0,
+    ))
+    return result_paths
+
+
+def _brand_reference_paths() -> list[Path]:
+    """Return brand-kit reference image paths (up to 3)."""
+    brand_dir = config.brand_dir()
+    if not brand_dir.exists():
+        return []
+    paths = sorted(brand_dir.glob("*"))[:3]
+    return [p for p in paths if p.is_file() and p.suffix.lower() in _IMAGE_MIME]
+
+
+def _model_reference_paths() -> list[Path]:
+    """Return human-model reference image paths (up to 2)."""
+    models_dir = config.models_dir()
+    if not models_dir.exists():
+        return []
+    paths = sorted(models_dir.glob("*"))[:2]
+    return [p for p in paths if p.is_file() and p.suffix.lower() in _IMAGE_MIME]
+
+
+def _collect_reference_paths(
+    hero_path: Path | None,
+    brand_paths: list[Path],
+    model_paths: list[Path],
+    include_models: bool,
+) -> list[Path]:
+    """Collect reference paths: hero + brand + (models if include_models)."""
+    out: list[Path] = []
+    if hero_path and hero_path.is_file():
+        out.append(hero_path)
+    for p in brand_paths:
+        if p.is_file():
+            out.append(p)
+    if include_models:
+        for p in model_paths:
+            if p.is_file():
+                out.append(p)
+    return out
+
+
+def _build_contents_multi(
+    reference_paths: list[Path],
+    prompt: str,
+) -> list[types.Part] | str:
+    """Build Gemini contents: reference images + text prompt."""
+    if not reference_paths:
+        return prompt
+    parts: list[types.Part] = []
+    for p in reference_paths:
+        image_bytes = p.read_bytes()
+        mime = _mime_type_for_path(p)
+        parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime))
+    parts.append(types.Part.from_text(text=prompt))
+    return parts
+
+
 def _generate_with_retries(
     client: genai.Client,
     model: str,

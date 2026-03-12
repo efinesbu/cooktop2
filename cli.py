@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -238,6 +239,14 @@ def _print_prompt(content: Content) -> None:
         lines.append(f"[bold]Scene 2 (visual):[/bold] {content.scene_2_desc}")
     if content.scene_2_script:
         lines.append(f"[bold]Scene 2 (voiceover):[/bold] {content.scene_2_script}")
+    if content.creative_format == "image_motion_15s" and content.asset_manifest_json:
+        try:
+            manifest = json.loads(content.asset_manifest_json)
+            plan = manifest.get("image_plan") if isinstance(manifest, dict) else None
+            if plan and isinstance(plan, dict) and plan.get("strategy_summary"):
+                lines.append(f"[bold]Overall scene:[/bold] {plan['strategy_summary']}")
+        except json.JSONDecodeError:
+            pass
     if lines:
         console.print(Panel("\n".join(lines), title="Generated prompt", border_style="dim"))
 
@@ -760,7 +769,7 @@ def briefing_diagnose_cmd():
     "creative_format",
     type=click.Choice(CREATIVE_FORMATS),
     default=None,
-    help="Creative format (ai_video_15s, slideshow_15s, image_motion_15s). Default: ai_video_15s.",
+    help="Creative format (ai_video_15s, image_motion_15s). Default: ai_video_15s.",
 )
 @click.option("--count", default=8, show_default=True, help="Total clips across all products in --auto mode")
 @click.option(
@@ -1052,6 +1061,19 @@ def approve_all_cmd():
         f"[green]Approved {count}[/green] {piece}. "
         "Next step: run `python cli.py schedule --today` or schedule by content-id."
     )
+
+
+@cli.command("reject-all-approved")
+@click.option("--reason", default=None, help="Optional reason for rejection")
+def reject_all_approved_cmd(reason: str | None):
+    """Set all approved content to rejected status."""
+    _init()
+    count = db.reject_all_approved_content(notes=reason)
+    if count == 0:
+        console.print("[yellow]No approved content to reject.[/yellow]")
+        return
+    piece = "item" if count == 1 else "items"
+    console.print(f"[yellow]Rejected {count}[/yellow] {piece}.")
 
 
 @cli.command()

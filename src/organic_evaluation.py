@@ -221,3 +221,51 @@ def format_cohort_label(p: CohortPerformance) -> str:
     return (
         f"{p.product_name}/{p.platform}/{p.creative_format}/{p.theme}/{p.hook_type}"
     )
+
+
+def get_image_motion_performance_summary(
+    product_sku: str,
+    days: int = 30,
+    rank_by: Literal[
+        "engagement_rate", "views", "composite",
+        "revenue", "sessions", "purchases",
+    ] = "engagement_rate",
+) -> tuple[str, str]:
+    """Product-first then global historical performance summary for image_motion_15s.
+
+    Returns (summary_text, rationale) for the image-motion planner.
+    rationale indicates source: "product_winners", "global_winners", or "default".
+    """
+    performances = gather_cohort_performances(days=days)
+    image_motion = [p for p in performances if p.creative_format == "image_motion_15s"]
+    if not image_motion:
+        return (
+            "Use a balanced mix of hero and lifestyle frames. Default style_family: realistic_cinematic. "
+            "Vary at most 1–2 axes per creative. Require at least 1 hero-led frame.",
+            "default",
+        )
+
+    product_specific = [p for p in image_motion if p.product_sku == product_sku]
+    candidates = product_specific if product_specific else image_motion
+    rationale = "product_winners" if product_specific else "global_winners"
+
+    winners, _, _ = classify_winners_middles_losers(
+        candidates, winner_pct=0.25, loser_pct=0.25, rank_by=rank_by
+    )
+    if not winners:
+        return (
+            "Use a balanced mix of hero and lifestyle frames. Default style_family: realistic_cinematic.",
+            rationale,
+        )
+
+    parts = []
+    for w in winners[:3]:  # Top 3 winning cohorts
+        parts.append(
+            f"{w.theme}/{w.hook_type}: engagement {w.engagement_rate:.2%}, "
+            f"{w.total_views} views, {w.post_count} posts"
+        )
+    summary = (
+        "Historical winners for image_motion_15s: " + "; ".join(parts) + ". "
+        "Bias your style/role mix toward these themes and hooks when planning frames."
+    )
+    return summary, rationale

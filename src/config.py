@@ -137,6 +137,16 @@ def product_images_dir() -> Path:
     return data_root() / "product-images"
 
 
+def brand_dir() -> Path:
+    """Brand-kit reference images for image_motion_15s Gemini generation."""
+    return data_root() / "brand"
+
+
+def models_dir() -> Path:
+    """Human-model reference images for lifestyle frames in image_motion_15s."""
+    return data_root() / "models"
+
+
 def db_path() -> Path:
     return Path("db/velura.db")
 

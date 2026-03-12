@@ -488,6 +488,22 @@ def reject_content(content_id: str, notes: str | None = None) -> None:
         )
 
 
+def reject_all_approved_content(notes: str | None = None) -> int:
+    """Set all content with review_status='approved' to 'rejected'. Returns count updated."""
+    with _connect() as conn:
+        cur = conn.execute(
+            """UPDATE content
+               SET approved=0,
+                   review_status='rejected',
+                   review_notes=?,
+                   approved_at=NULL,
+                   rejected_at=datetime('now')
+               WHERE review_status='approved'""",
+            (notes,),
+        )
+        return cur.rowcount
+
+
 def update_content_video_path(content_id: str, path: str) -> None:
     with _connect() as conn:
         conn.execute(

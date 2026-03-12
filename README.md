@@ -49,9 +49,9 @@ python cli.py sync-products
 8:00 PM   pull-analytics (cron)
 ```
 
-## 12-Creative Matrix Launch
+## 8-Creative Matrix Launch
 
-For a controlled first-wave test: **2 products × 3 formats × 2 themes = 12 creatives**. Use this when launching a new product pair (e.g. moisturizer + eye cream).
+For a controlled first-wave test: **2 products × 2 formats × 2 themes = 8 creatives**. Use this when launching a new product pair (e.g. moisturizer + eye cream).
 
 ### Prerequisites
 
@@ -65,7 +65,7 @@ python cli.py register-images --product moisturizer
 python cli.py register-images --product eye-cream
 ```
 
-### Generate exactly 12 creatives
+### Generate exactly 8 creatives
 
 **CLI syntax:** Repeat `--product`, `--theme`, and `--hook` for each value. Run each format command **once** (running twice produces duplicates).
 
@@ -73,14 +73,11 @@ python cli.py register-images --product eye-cream
 # AI video (4 clips: 2 products × 2 theme/hook pairs)
 python cli.py run --product moisturizer --product eye-cream --theme problem_solution --theme benefit --hook relatable_pain --hook bold_claim --rotate-theme-hook --count 2 --format ai_video_15s
 
-# Slideshow (4 clips)
-python cli.py run --product moisturizer --product eye-cream --theme problem_solution --theme benefit --hook relatable_pain --hook bold_claim --rotate-theme-hook --count 2 --format slideshow_15s
-
 # Image motion (4 clips)
 python cli.py run --product moisturizer --product eye-cream --theme problem_solution --theme benefit --hook relatable_pain --hook bold_claim --rotate-theme-hook --count 2 --format image_motion_15s
 ```
 
-**Result:** 12 creatives total (6 per product). Then: `preview --today` → `approve` → `schedule --today` → `post-due` or `post --today`.
+**Result:** 8 creatives total (4 per product). Then: `preview --today` → `approve` → `schedule --today` → `post-due` or `post --today`.
 
 ### Bandit-driven alternative
 
@@ -88,11 +85,10 @@ To let the bandit choose theme/hook pairs instead of locking them:
 
 ```bash
 python cli.py run --product moisturizer --product eye-cream --count 4 --format ai_video_15s
-python cli.py run --product moisturizer --product eye-cream --count 4 --format slideshow_15s
 python cli.py run --product moisturizer --product eye-cream --count 4 --format image_motion_15s
 ```
 
-This yields 12 creatives with bandit-recommended strategies (may include `curiosity`, `visual_surprise`, etc.).
+This yields 8 creatives with bandit-recommended strategies (may include `curiosity`, `visual_surprise`, etc.).
 
 ## CLI Commands
 
@@ -384,6 +380,7 @@ For the full runbook, see `tiktok-demo/README.md`.
 - **Database:** `db/velura.db` (SQLite, auto-created)
 - **Videos:** `~/.velura/videos/{product-sku}/{content-id}.mp4`
 - **Product images:** `~/.velura/product-images/{product-slug}/`
+- **image_motion_15s reference folders:** `~/.velura/brand/` (brand-kit images, always used), `~/.velura/models/` (human-model images for lifestyle frames only)
 
 On Windows, `~` resolves to `%USERPROFILE%`.
 

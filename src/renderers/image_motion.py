@@ -1,4 +1,4 @@
-"""Image motion 15s renderer: pans, zooms, and timing on product images."""
+"""Image motion 15s renderer: Gemini-generated frames or product images with pans and zooms."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from src import config, db
+from src.image_generator import generate_frame_images_for_plan
 from src.models import Content, Cost, Product, ProductImage
 
 from .base import BaseRenderer
@@ -43,13 +44,12 @@ def _render_single_image_zoompan(
     ffmpeg: str,
     image_path: Path,
     output_path: Path,
-    duration_sec: int = TARGET_DURATION_SECONDS,
+    duration_sec: float | int = TARGET_DURATION_SECONDS,
 ) -> None:
     """Render one image with a slow zoom-in using ffmpeg zoompan filter."""
     # zoompan: zoom in over duration; z=1.1 means 10% zoom over the clip
-    # 15s at 30fps = 450 frames
     fps = 30
-    total_frames = duration_sec * fps
+    total_frames = int(duration_sec * fps)
     zoom_expr = f"zoompan=z='min(1.1,1+0.1*on/{total_frames})':d=1:s={TARGET_WIDTH}x{TARGET_HEIGHT}:fps={fps}"
     cmd = [
         ffmpeg,
@@ -57,7 +57,7 @@ def _render_single_image_zoompan(
         "-loop", "1",
         "-i", str(image_path),
         "-vf", zoom_expr,
-        "-t", str(duration_sec),
+        "-t", str(float(duration_sec)),
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
         str(output_path),
@@ -70,20 +70,29 @@ def _render_multi_image_concatenated(
     image_paths: list[Path],
     output_path: Path,
     duration_sec: int = TARGET_DURATION_SECONDS,
+    per_frame_durations: list[float] | None = None,
 ) -> None:
-    """Render multiple images as a sequence with zoompan on each."""
+    """Render multiple images as a sequence with zoompan on each.
+
+    If per_frame_durations is provided, use those (in seconds) instead of equal split.
+    """
     if len(image_paths) == 1:
         _render_single_image_zoompan(ffmpeg, image_paths[0], output_path, duration_sec)
         return
 
-    per_image_sec = duration_sec / len(image_paths)
+    if per_frame_durations and len(per_frame_durations) == len(image_paths):
+        durations = per_frame_durations
+    else:
+        per_image_sec = duration_sec / len(image_paths)
+        durations = [per_image_sec] * len(image_paths)
+
     tmp_dir = output_path.parent / f"_tmp_{output_path.stem}"
     tmp_dir.mkdir(exist_ok=True)
     try:
         segments: list[Path] = []
-        for i, img in enumerate(image_paths):
+        for i, (img, dur) in enumerate(zip(image_paths, durations)):
             seg = tmp_dir / f"seg_{i}.mp4"
-            _render_single_image_zoompan(ffmpeg, img, seg, int(per_image_sec))
+            _render_single_image_zoompan(ffmpeg, img, seg, int(dur) if dur == int(dur) else dur)
             segments.append(seg)
 
         concat_file = tmp_dir / "concat.txt"
@@ -104,9 +113,21 @@ def _render_multi_image_concatenated(
         tmp_dir.rmdir()
 
 
+def _parse_image_plan_from_manifest(content: Content) -> dict | None:
+    """Extract image_plan from content.asset_manifest_json if present."""
+    raw = content.asset_manifest_json
+    if not raw or not raw.strip():
+        return None
+    try:
+        data = json.loads(raw)
+        return data.get("image_plan") if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
 @register_renderer
 class ImageMotionRenderer(BaseRenderer):
-    """Renders image_motion_15s from product images with pans and zooms."""
+    """Renders image_motion_15s from Gemini-generated frames or product images with pans and zooms."""
 
     format_id = "image_motion_15s"
 
@@ -116,26 +137,52 @@ class ImageMotionRenderer(BaseRenderer):
         product: Product,
         images: list[ProductImage],
     ) -> Path:
-        source_paths = _select_source_images(images, product.sku)
-        if not source_paths:
-            raise ValueError(
-                f"No product images found for {product.sku}. "
-                "Register images with `python cli.py register-images --product <sku>`."
-            )
-
         ffmpeg = find_ffmpeg()
         video_dir = config.videos_dir() / product.sku
         video_dir.mkdir(parents=True, exist_ok=True)
         video_path = video_dir / f"{content.id}.mp4"
 
-        _render_multi_image_concatenated(ffmpeg, source_paths, video_path, TARGET_DURATION_SECONDS)
-
-        manifest = {
-            "source_images": [str(p) for p in source_paths],
-            "format": "image_motion_15s",
-        }
-        db.update_content_video_path(content.id, str(video_path))
-        db.update_content_asset_manifest(content.id, json.dumps(manifest))
+        plan = _parse_image_plan_from_manifest(content)
+        if plan and plan.get("frames"):
+            source_paths = generate_frame_images_for_plan(
+                content, product, plan, output_dir=video_dir
+            )
+            frames = plan.get("frames", [])
+            per_frame_durations = [
+                float(f.get("duration_seconds", 1.5)) for f in frames[: len(source_paths)]
+            ]
+            total_duration = sum(per_frame_durations)
+            _render_multi_image_concatenated(
+                ffmpeg,
+                source_paths,
+                video_path,
+                duration_sec=int(total_duration),
+                per_frame_durations=per_frame_durations,
+            )
+            manifest_raw = content.asset_manifest_json or "{}"
+            manifest = json.loads(manifest_raw) if manifest_raw else {}
+            manifest["format"] = "image_motion_15s"
+            manifest["generated_frame_paths"] = [str(p) for p in source_paths]
+            manifest["total_duration_seconds"] = total_duration
+            db.update_content_video_path(content.id, str(video_path))
+            db.update_content_asset_manifest(content.id, json.dumps(manifest))
+        else:
+            source_paths = _select_source_images(images, product.sku)
+            if not source_paths:
+                raise ValueError(
+                    f"No product images found for {product.sku}. "
+                    "Register images with `python cli.py register-images --product <sku>`, "
+                    "or ensure image_plan is persisted in asset_manifest_json."
+                )
+            _render_multi_image_concatenated(
+                ffmpeg, source_paths, video_path, TARGET_DURATION_SECONDS
+            )
+            manifest = {
+                "source_images": [str(p) for p in source_paths],
+                "format": "image_motion_15s",
+            }
+            db.update_content_video_path(content.id, str(video_path))
+            db.update_content_asset_manifest(content.id, json.dumps(manifest))
 
         db.insert_cost(Cost(
             content_id=content.id,

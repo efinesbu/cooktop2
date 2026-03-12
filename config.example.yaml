@@ -105,7 +105,12 @@ posting:
 
 data_root: "~/.velura"
 
-# Optional: override ffmpeg path (for slideshow_15s, image_motion_15s). Default: auto-detect from PATH.
+# image_motion_15s: reference folders for Gemini-generated frames
+# - brand/: brand-kit images (always attached)
+# - models/: human-model images (for lifestyle frames only)
+# Paths: {data_root}/brand/, {data_root}/models/
+
+# Optional: override ffmpeg path (for image_motion_15s). Default: auto-detect from PATH.
 # ffmpeg:
 #   path: "C:/ffmpeg/bin/ffmpeg.exe"
 

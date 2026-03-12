@@ -57,7 +57,6 @@ def _register_builtin_renderers() -> None:
         return
     from . import ai_video  # noqa: F401  # registers on import
     from . import image_motion  # noqa: F401
-    from . import slideshow  # noqa: F401
 
 
 # Lazy init on first get_renderer or render_media call

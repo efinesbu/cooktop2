@@ -9,6 +9,7 @@ from typing import Any
 
 from src import config, db
 from src.creative_strategy import whitelist_prompt_lines
+from src.organic_evaluation import get_image_motion_performance_summary
 from src.models import (
     Content, Cost, CTA_TYPES, CREATIVE_FORMATS, HOOK_TYPES,
     PlatformPayload, Product, ProductImage, PROOF_TYPES, SCRIPT_STYLES, THEMES,
@@ -114,6 +115,74 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
 }
 """
 
+_IMAGE_MOTION_SYSTEM_PROMPT = """\
+You are an expert creative director for cosmetic image-motion ads.
+
+TARGET PRODUCT: provided in the user message.
+
+CORE DIRECTIVE
+Generate exactly 1 unique creative for image_motion_15s: a 3–5 frame vertical (9:16) image sequence.
+- Pick theme and hook_type from the allowed whitelist unless locked.
+- Return hook_text, platform_captions, hashtags.
+- Also return an image_plan: a structured multi-frame plan for Gemini to generate 3–5 images.
+
+CONTROLLED VARIETY (use this vocabulary; vary at most 1–2 axes per creative):
+- style_family: anamorphic, realistic_cinematic
+- frame_role: hero_macro, hero_tabletop, texture_detail, lifestyle_portrait, lifestyle_in_use
+- lighting: golden_window_light, soft_diffused_daylight, clean_studio_backlight
+- camera_distance: macro_closeup, closeup, medium_shot
+
+PLANNER RULES:
+- Require at least 1 hero-led frame (hero_macro, hero_tabletop, or texture_detail) in every sequence.
+- Allow lifestyle frames (lifestyle_portrait, lifestyle_in_use) only when model reference assets exist (check user message).
+- total_duration_seconds must be <= 15; shorter clips are allowed (e.g. 9–12 seconds).
+- Each frame duration_seconds: 1.5–2.0.
+- Bias style/role mix from PERFORMANCE_SUMMARY when provided.
+
+RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
+
+{
+  "theme": "string — from allowed themes",
+  "hook_type": "string — from allowed hook types",
+  "hook_text": "string — short opening hook line",
+  "creative_format": "image_motion_15s",
+  "cta_type": "string — see_product or shop_now",
+  "cta_text": "string — CTA phrase",
+  "problem_angle": "string or null",
+  "proof_type": "string — test_result, testimonial, before_after, ingredient, none",
+  "script_style": "string — conversational, direct, storytelling, tip_based",
+  "platform_captions": {
+    "youtube": "string — max 100 chars, end with 'Link in bio'",
+    "instagram": "string — conversational, emoji-friendly",
+    "tiktok": "string — trendy, max 150 chars",
+    "x": "string — max 280 chars"
+  },
+  "hashtags": ["list", "of", "hashtags", "without #"],
+  "image_plan": {
+    "strategy_summary": "string — one-line creative strategy for this sequence",
+    "total_duration_seconds": number — sum of frame durations, <= 15,
+    "performance_rationale": "string — product_winners, global_winners, or default",
+    "frames": [
+      {
+        "role": "string — hero_macro | hero_tabletop | texture_detail | lifestyle_portrait | lifestyle_in_use",
+        "duration_seconds": number — 1.5 to 2.0,
+        "style_family": "string — anamorphic | realistic_cinematic",
+        "lighting": "string — golden_window_light | soft_diffused_daylight | clean_studio_backlight",
+        "camera_distance": "string — macro_closeup | closeup | medium_shot",
+        "image_prompt": "string — exact prompt for Gemini to generate this frame; include product name, style, lighting, composition"
+      }
+    ]
+  }
+}
+"""
+
+
+def _has_model_reference_assets() -> bool:
+    """True if human-model reference images exist for lifestyle frames."""
+    models_dir = config.data_root() / "models"
+    if not models_dir.exists():
+        return False
+    return any(models_dir.iterdir())
 
 def _build_user_message(
     product: Product,
@@ -122,6 +191,7 @@ def _build_user_message(
     product_images: list[ProductImage],
     research_summary: str | None = None,
     creative_format: str | None = None,
+    performance_summary: str | None = None,
 ) -> str:
     theme_ids = [theme] if theme else None
     hook_ids = [hook_type] if hook_type else None
@@ -154,6 +224,14 @@ def _build_user_message(
         lines.append("")
         lines.append("RESEARCH INSIGHT (use to inform your creative choices):")
         lines.append(research_summary.strip())
+    if performance_summary and performance_summary.strip():
+        lines.append("")
+        lines.append("PERFORMANCE_SUMMARY (bias your image_plan toward these):")
+        lines.append(performance_summary.strip())
+    if creative_format == "image_motion_15s":
+        has_models = _has_model_reference_assets()
+        lines.append("")
+        lines.append(f"Model reference assets for lifestyle frames: {'available' if has_models else 'not configured'}")
     return "\n".join(lines)
 
 
@@ -187,15 +265,28 @@ def generate_content(
         creative_format=fmt,
     )
     research_summary = snapshot.summary if snapshot else None
+    performance_summary = None
+    performance_rationale = "default"
+    if fmt == "image_motion_15s":
+        rank_by = str(config.get("bandit.ranking_objective", "engagement_rate"))
+        if rank_by not in ("engagement_rate", "views", "composite", "revenue", "sessions", "purchases"):
+            rank_by = "engagement_rate"
+        performance_summary, performance_rationale = get_image_motion_performance_summary(
+            product.sku, rank_by=rank_by
+        )
     user_msg = _build_user_message(
         product, theme, hook_type, product_images,
         research_summary=research_summary,
         creative_format=creative_format,
+        performance_summary=performance_summary,
     )
     content_id = uuid.uuid4().hex[:16]
 
-    use_simplified = fmt in ("slideshow_15s", "image_motion_15s")
-    system_prompt = _SIMPLIFIED_SYSTEM_PROMPT if use_simplified else _SYSTEM_PROMPT
+    use_image_motion = fmt == "image_motion_15s"
+    system_prompt = (
+        _IMAGE_MOTION_SYSTEM_PROMPT if use_image_motion else
+        (_SIMPLIFIED_SYSTEM_PROMPT if fmt != "ai_video_15s" else _SYSTEM_PROMPT)
+    )
 
     response = _call_with_retries(
         client,
@@ -209,6 +300,23 @@ def generate_content(
     parsed = _parse_response(
         response, theme=theme, hook_type=hook_type, creative_format=creative_format
     )
+
+    asset_manifest_json = None
+    if fmt == "image_motion_15s" and "image_plan" in parsed:
+        plan = parsed["image_plan"]
+        if not isinstance(plan, dict):
+            raise ValueError("OpenAI response image_plan must be an object")
+        frames = plan.get("frames", [])
+        if not isinstance(frames, list) or len(frames) < 3 or len(frames) > 5:
+            raise ValueError("image_plan.frames must have 3–5 entries")
+        total = plan.get("total_duration_seconds", 0)
+        if not isinstance(total, (int, float)) or total > 15:
+            raise ValueError("image_plan.total_duration_seconds must be <= 15")
+        plan["performance_rationale"] = plan.get("performance_rationale", performance_rationale)
+        asset_manifest_json = json.dumps({
+            "format": "image_motion_15s",
+            "image_plan": plan,
+        })
 
     content = Content(
         id=content_id,
@@ -228,6 +336,7 @@ def generate_content(
         scene_2_desc=parsed.get("scene_2_desc"),
         scene_1_script=parsed.get("scene_1_script"),
         scene_2_script=parsed.get("scene_2_script"),
+        asset_manifest_json=asset_manifest_json,
     )
     db.insert_content(content)
 
@@ -338,14 +447,16 @@ def _parse_response(
     except json.JSONDecodeError as exc:
         raise ValueError(f"OpenAI returned invalid JSON: {exc}\n\nRaw response:\n{raw}") from exc
 
-    use_simplified = creative_format in ("slideshow_15s", "image_motion_15s")
+    use_image_motion = creative_format == "image_motion_15s"
     required = [
         "theme", "hook_type", "hook_text",
         "creative_format", "cta_type", "cta_text",
         "problem_angle", "proof_type", "script_style",
         "platform_captions", "hashtags",
     ]
-    if not use_simplified:
+    if use_image_motion:
+        required.append("image_plan")
+    if not use_image_motion:
         required.extend([
             "starting_image_prompt",
             "scene_1_desc", "scene_2_desc",

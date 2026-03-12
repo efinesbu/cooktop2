@@ -444,3 +444,122 @@ def test_generate_content_injects_research_and_persists_snapshot_id(
     fetched = db.get_content(content.id)
     assert fetched is not None
     assert fetched.research_snapshot_id == "rs-inject-test"
+
+
+def test_generate_content_image_motion_15s_persists_image_plan(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """image_motion_15s returns image_plan and persists it in asset_manifest_json."""
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    response_payload = {
+        "theme": "benefit",
+        "hook_type": "question",
+        "hook_text": "Want fresher skin?",
+        "creative_format": "image_motion_15s",
+        "cta_type": "see_product",
+        "cta_text": "try me",
+        "problem_angle": None,
+        "proof_type": "ingredient",
+        "script_style": "conversational",
+        "platform_captions": {
+            "youtube": "Glow faster",
+            "instagram": "Meet your shortcut.",
+            "tiktok": "POV: your skin",
+            "x": "Serum X makes tired skin look camera-ready.",
+        },
+        "hashtags": ["skincare", "glow"],
+        "image_plan": {
+            "strategy_summary": "Hero-led sequence with texture detail",
+            "total_duration_seconds": 9.0,
+            "performance_rationale": "default",
+            "frames": [
+                {
+                    "role": "hero_macro",
+                    "duration_seconds": 1.5,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "golden_window_light",
+                    "camera_distance": "macro_closeup",
+                    "image_prompt": "Close-up of Serum X bottle with golden light.",
+                },
+                {
+                    "role": "hero_tabletop",
+                    "duration_seconds": 2.0,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "soft_diffused_daylight",
+                    "camera_distance": "closeup",
+                    "image_prompt": "Serum X on bathroom counter.",
+                },
+                {
+                    "role": "texture_detail",
+                    "duration_seconds": 1.5,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "clean_studio_backlight",
+                    "camera_distance": "macro_closeup",
+                    "image_prompt": "Texture detail of Serum X.",
+                },
+            ],
+        },
+    }
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=json.dumps(response_payload))
+                    )
+                ],
+                usage=SimpleNamespace(prompt_tokens=100, completion_tokens=150),
+            )
+
+    class FakeOpenAIClient:
+        def __init__(self, api_key: str) -> None:
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    fake_openai = SimpleNamespace(
+        OpenAI=FakeOpenAIClient,
+        APIConnectionError=Exception,
+        RateLimitError=Exception,
+        APIStatusError=Exception,
+    )
+
+    client_secrets = tmp_path / "youtube_client_secrets.json"
+    client_secrets.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "openai": {"api_key": "test-openai-key", "model": "gpt-4.1-mini"},
+            "site_url": "https://example.com",
+            "platforms": {"enabled": ["youtube"]},
+            "youtube": {"client_secrets_file": str(client_secrets)},
+            "bandit": {"ranking_objective": "engagement_rate"},
+        },
+    )
+    monkeypatch.setattr("src.config.load_dotenv", lambda: None)
+    monkeypatch.setattr(prompt_generator, "_load_openai_module", lambda: fake_openai)
+
+    product = Product(sku="serum-x", name="Serum X", product_url="https://example.com/products/serum-x")
+    db.upsert_product(product)
+
+    content, _ = prompt_generator.generate_content(
+        product=product,
+        theme="benefit",
+        hook_type="question",
+        product_images=[],
+        creative_format="image_motion_15s",
+    )
+
+    assert content.creative_format == "image_motion_15s"
+    assert content.asset_manifest_json is not None
+    manifest = json.loads(content.asset_manifest_json)
+    assert manifest["format"] == "image_motion_15s"
+    assert "image_plan" in manifest
+    plan = manifest["image_plan"]
+    assert len(plan["frames"]) == 3
+    assert plan["total_duration_seconds"] == 9.0
+    assert plan["frames"][0]["role"] == "hero_macro"

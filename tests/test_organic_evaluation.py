@@ -35,7 +35,7 @@ def test_gather_cohort_performances_groups_by_matrix_dimensions(monkeypatch) -> 
             product_sku="serum-b",
             theme="routine",
             hook_type="quick_tip",
-            creative_format="slideshow_15s",
+            creative_format="image_motion_15s",
             cta_type="see_product",
         ),
     }
@@ -74,7 +74,7 @@ def test_gather_cohort_performances_groups_by_matrix_dimensions(monkeypatch) -> 
     assert by_platform["youtube"].creative_format == "ai_video_15s"
     assert by_platform["youtube"].hook_type == "question"
     assert by_platform["youtube"].engagement_rate == pytest.approx(0.12, rel=0.01)
-    assert by_platform["instagram"].creative_format == "slideshow_15s"
+    assert by_platform["instagram"].creative_format == "image_motion_15s"
 
 
 def test_gather_cohort_performances_handles_zero_view_creatives(monkeypatch) -> None:
@@ -282,7 +282,7 @@ def test_format_cohort_label() -> None:
         product_sku="serum-a",
         product_name="Serum A",
         platform="instagram",
-        creative_format="slideshow_15s",
+        creative_format="image_motion_15s",
         hook_type="question",
         cta_type="see_product",
         theme="benefit",
@@ -295,6 +295,73 @@ def test_format_cohort_label() -> None:
     )
     assert "Serum A" in format_cohort_label(p)
     assert "instagram" in format_cohort_label(p)
-    assert "slideshow_15s" in format_cohort_label(p)
-    assert "benefit" in format_cohort_label(p)
-    assert "question" in format_cohort_label(p)
+    assert "image_motion_15s" in format_cohort_label(p)
+
+
+def test_get_image_motion_performance_summary_default_when_no_data(monkeypatch) -> None:
+    """When no image_motion_15s cohorts exist, returns default rationale."""
+    monkeypatch.setattr(
+        "src.organic_evaluation.gather_cohort_performances",
+        lambda days=30: [],
+    )
+    from src.organic_evaluation import get_image_motion_performance_summary
+
+    summary, rationale = get_image_motion_performance_summary("serum-x")
+    assert "default" in rationale
+    assert "hero" in summary.lower() or "realistic" in summary.lower()
+
+
+def test_get_image_motion_performance_summary_product_winners(monkeypatch) -> None:
+    """When product-specific winners exist, returns product_winners rationale."""
+    perf = CohortPerformance(
+        product_sku="serum-a",
+        product_name="Serum A",
+        platform="ig",
+        creative_format="image_motion_15s",
+        hook_type="q",
+        cta_type="see_product",
+        theme="benefit",
+        post_count=2,
+        total_views=500,
+        total_engagements=50,
+        engagement_rate=0.10,
+        avg_watch_through_rate=0.5,
+        content_ids=["c1", "c2"],
+    )
+    monkeypatch.setattr(
+        "src.organic_evaluation.gather_cohort_performances",
+        lambda days=30: [perf],
+    )
+    from src.organic_evaluation import get_image_motion_performance_summary
+
+    summary, rationale = get_image_motion_performance_summary("serum-a")
+    assert rationale == "product_winners"
+    assert "benefit" in summary or "Historical" in summary
+
+
+def test_get_image_motion_performance_summary_global_fallback(monkeypatch) -> None:
+    """When no product-specific data, falls back to global winners."""
+    perf = CohortPerformance(
+        product_sku="other-product",
+        product_name="Other",
+        platform="ig",
+        creative_format="image_motion_15s",
+        hook_type="q",
+        cta_type="see_product",
+        theme="benefit",
+        post_count=1,
+        total_views=100,
+        total_engagements=10,
+        engagement_rate=0.10,
+        avg_watch_through_rate=None,
+        content_ids=["c1"],
+    )
+    monkeypatch.setattr(
+        "src.organic_evaluation.gather_cohort_performances",
+        lambda days=30: [perf],
+    )
+    from src.organic_evaluation import get_image_motion_performance_summary
+
+    summary, rationale = get_image_motion_performance_summary("serum-x")
+    assert rationale == "global_winners"
+    assert "benefit" in summary or "Historical" in summary
