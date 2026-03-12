@@ -1013,7 +1013,6 @@ def preview(today: bool, last_24h: bool):
     table.add_column("Row", justify="right", style="dim")
     table.add_column("ID", style="cyan", max_width=12)
     table.add_column("Product")
-    table.add_column("Format", style="dim")
     table.add_column("Type", justify="center")
     table.add_column("Theme")
     table.add_column("Hook Type")
@@ -1027,7 +1026,6 @@ def preview(today: bool, last_24h: bool):
             str(i),
             c.id[:12],
             c.product_sku,
-            c.creative_format or "—",
             media_type,
             c.theme,
             c.hook_type,
