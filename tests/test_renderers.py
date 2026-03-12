@@ -26,6 +26,10 @@ def test_get_renderer_returns_renderer_for_all_builtin_formats() -> None:
     assert r is not None
     assert r.format_id == "ai_video_15s"
 
+    r = get_renderer("ai_video_flex_15s")
+    assert r is not None
+    assert r.format_id == "ai_video_flex_15s"
+
 
 def test_slideshow_15s_retired_from_creative_formats() -> None:
     """slideshow_15s is no longer in CREATIVE_FORMATS for new generation."""
@@ -34,6 +38,13 @@ def test_slideshow_15s_retired_from_creative_formats() -> None:
     assert "slideshow_15s" not in CREATIVE_FORMATS
     assert "image_motion_15s" in CREATIVE_FORMATS
     assert "ai_video_15s" in CREATIVE_FORMATS
+    assert "ai_video_flex_15s" in CREATIVE_FORMATS
+
+
+def test_get_renderer_returns_ai_video_flex_for_ai_video_flex_15s() -> None:
+    r = get_renderer("ai_video_flex_15s")
+    assert r is not None
+    assert r.format_id == "ai_video_flex_15s"
 
 
 def test_get_renderer_returns_none_for_unknown_format() -> None:
@@ -133,6 +144,86 @@ def test_render_media_ai_video_invokes_image_and_video_generators(
     assert updated.video_local_path == str(video_path)
 
 
+def test_render_media_ai_video_flex_uses_manifest_plan(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+    sample_product: Product,
+) -> None:
+    """ai_video_flex_15s reads video_plan from asset_manifest_json for prompt and duration."""
+    import json
+
+    from src import db
+    from src.renderers import render_media
+
+    db.upsert_product(sample_product)
+
+    video_plan = {
+        "strategy_summary": "Quick-cut product showcase",
+        "total_duration_seconds": 9.5,
+        "style_family": "realistic_cinematic",
+        "style_rationale": "Fits premium skincare positioning",
+        "script_total_words": 24,
+        "scenes": [
+            {"duration_seconds": 2.0, "scene_description": "Hook closeup.", "script": "First line."},
+            {"duration_seconds": 2.0, "scene_description": "HARD CUT to side angle.", "script": "Second line."},
+            {"duration_seconds": 2.0, "scene_description": "HARD CUT to texture.", "script": "Third line."},
+            {"duration_seconds": 2.0, "scene_description": "HARD CUT to CTA.", "script": "Fourth line."},
+            {"duration_seconds": 1.5, "scene_description": "Hold.", "script": "End."},
+        ],
+    }
+    content = Content(
+        id="test-flex-001",
+        product_sku=sample_product.sku,
+        theme="benefit",
+        hook_type="bold_claim",
+        creative_format="ai_video_flex_15s",
+        starting_image_prompt="A product on a counter",
+        asset_manifest_json=json.dumps({
+            "format": "ai_video_flex_15s",
+            "video_plan": video_plan,
+            "generation_metadata": {"total_duration_seconds": 9.5, "scene_count": 5},
+        }),
+    )
+    db.insert_content(content)
+    images: list[ProductImage] = []
+
+    video_path = tmp_path / "output.mp4"
+    video_path.write_bytes(b"fake-video")
+    image_path = tmp_path / "start.png"
+    image_path.write_bytes(b"fake-image")
+
+    video_calls: list[tuple] = []
+
+    def fake_generate_starting_image(c, p):
+        return image_path
+
+    def fake_generate_video(c, start_path, p):
+        video_calls.append((c, start_path, p))
+        db.update_content_video_path(c.id, str(video_path))
+        return video_path
+
+    monkeypatch.setattr("src.renderers.ai_video_flex.generate_starting_image", fake_generate_starting_image)
+    monkeypatch.setattr("src.renderers.ai_video_flex.generate_video", fake_generate_video)
+    monkeypatch.setattr(
+        "src.config._config",
+        {"data_root": str(tmp_path / "velura-data")},
+    )
+
+    result = render_media(content, sample_product, images)
+
+    assert result == video_path
+    assert len(video_calls) == 1
+    # Video generator receives content with manifest; prompt builder uses it
+    from src.video_generator import _build_video_prompt, _get_request_duration
+    prompt = _build_video_prompt(content, sample_product)
+    assert "9-second" in prompt
+    assert "realistic_cinematic" in prompt
+    assert "Scene 1 visual direction" in prompt
+    assert "Scene 5 voiceover" in prompt
+    assert _get_request_duration(content) == 9
+
+
 def test_render_media_image_motion_uses_plan_when_present(
     tmp_db: Path,
     monkeypatch,
@@ -214,3 +305,130 @@ def test_render_media_image_motion_uses_plan_when_present(
     manifest = json.loads(updated.asset_manifest_json or "{}")
     assert "generated_frame_paths" in manifest
     assert manifest["total_duration_seconds"] == 6.0
+
+
+def test_render_media_image_motion_with_voiceover_generates_tts_and_muxes(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+    sample_product: Product,
+) -> None:
+    """image_motion_15s with voiceover_plan generates TTS and muxes to final MP4."""
+    import json
+
+    from src import db
+    from src.renderers import render_media
+
+    db.upsert_product(sample_product)
+
+    frame1 = tmp_path / "frame0.png"
+    frame2 = tmp_path / "frame1.png"
+    frame3 = tmp_path / "frame2.png"
+    frame1.write_bytes(b"fake-png-1")
+    frame2.write_bytes(b"fake-png-2")
+    frame3.write_bytes(b"fake-png-3")
+
+    plan = {
+        "strategy_summary": "Hero-led sequence",
+        "total_duration_seconds": 6.0,
+        "performance_rationale": "default",
+        "frames": [
+            {"role": "hero_macro", "duration_seconds": 2.0, "image_prompt": "Frame 1"},
+            {"role": "hero_tabletop", "duration_seconds": 2.0, "image_prompt": "Frame 2"},
+            {"role": "texture_detail", "duration_seconds": 2.0, "image_prompt": "Frame 3"},
+        ],
+    }
+    voiceover_plan = {
+        "script_template_id": "caption_led",
+        "voiceover_script": "Want fresher skin? Try me.",
+        "voice": "marin",
+        "voice_instructions": "Speak in a calm, premium tone.",
+        "language": "english",
+    }
+    content = Content(
+        id="test-im-tts",
+        product_sku=sample_product.sku,
+        theme="benefit",
+        hook_type="bold_claim",
+        creative_format="image_motion_15s",
+        asset_manifest_json=json.dumps({
+            "format": "image_motion_15s",
+            "image_plan": plan,
+            "voiceover_plan": voiceover_plan,
+        }),
+    )
+    db.insert_content(content)
+
+    tts_calls: list[tuple] = []
+    mux_calls: list[tuple] = []
+
+    def fake_generate_frames(c, p, pl, output_dir=None):
+        return [frame1, frame2, frame3]
+
+    def fake_generate_voiceover(script, voice, voice_instructions, output_path, content_id, **kwargs):
+        tts_calls.append((script, voice, str(output_path)))
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"fake-wav-header-and-data")
+        return output_path
+
+    def fake_render(ffmpeg, paths, out_path, duration_sec=None, per_frame_durations=None):
+        out_path.write_bytes(b"fake-silent-mp4")
+        assert per_frame_durations == [2.0, 2.0, 2.0]
+        assert duration_sec == 6
+
+    def fake_mux(ffmpeg, video_path, audio_path, output_path):
+        mux_calls.append((str(video_path), str(audio_path), str(output_path)))
+        Path(output_path).write_bytes(b"fake-voiced-mp4")
+
+    monkeypatch.setattr(
+        "src.renderers.image_motion.generate_frame_images_for_plan",
+        fake_generate_frames,
+    )
+    monkeypatch.setattr(
+        "src.renderers.image_motion.generate_voiceover",
+        fake_generate_voiceover,
+    )
+    monkeypatch.setattr(
+        "src.renderers.image_motion._render_multi_image_concatenated",
+        fake_render,
+    )
+    monkeypatch.setattr(
+        "src.renderers.image_motion._mux_audio_into_video",
+        fake_mux,
+    )
+    monkeypatch.setattr(
+        "src.renderers.image_motion.find_ffmpeg",
+        lambda: "ffmpeg",
+    )
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "data_root": str(tmp_path / "velura-data"),
+            "openai": {"api_key": "test-key", "tts_enabled_formats": ["image_motion_15s"]},
+        },
+    )
+
+    result = render_media(content, sample_product, [])
+
+    assert len(tts_calls) == 1
+    assert tts_calls[0][0] == "Want fresher skin? Try me."
+    assert tts_calls[0][1] == "marin"
+    assert tts_calls[0][2].endswith("_voiceover.wav")
+
+    assert len(mux_calls) == 1
+    assert mux_calls[0][0].endswith("_silent.mp4")
+    assert mux_calls[0][1].endswith("_voiceover.wav")
+    assert mux_calls[0][2].endswith(".mp4")
+
+    assert result.suffix == ".mp4"
+    assert result.name == "test-im-tts.mp4"
+    assert result.read_bytes() == b"fake-voiced-mp4"
+
+    updated = db.get_content(content.id)
+    assert updated is not None
+    assert updated.video_local_path == str(result)
+    manifest = json.loads(updated.asset_manifest_json or "{}")
+    assert "audio_local_path" in manifest
+    assert "silent_video_local_path" in manifest
+    assert manifest["audio_local_path"].endswith("_voiceover.wav")

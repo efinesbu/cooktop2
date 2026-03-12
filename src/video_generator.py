@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import time
 from pathlib import Path
@@ -15,12 +16,18 @@ logger = logging.getLogger(__name__)
 XAI_VIDEO_GENERATIONS_ENDPOINT = "https://api.x.ai/v1/videos/generations"
 XAI_VIDEO_STATUS_ENDPOINT = "https://api.x.ai/v1/videos/{request_id}"
 TARGET_DURATION_SECONDS = 15
+MIN_FLEX_DURATION_SECONDS = 6
+MAX_FLEX_DURATION_SECONDS = 15
 XAI_VIDEO_COST_PER_SECOND_USD = 0.05
 MAX_RETRIES = 3
 INITIAL_BACKOFF = 2.0
 DEFAULT_POLL_INTERVAL_SECONDS = 15.0
 DEFAULT_POLL_TIMEOUT_SECONDS = 15 * 60.0
 DEFAULT_RESOLUTION = "720p"
+ANATOMY_GUARDRAIL = (
+    "If any human features or body parts appear, keep them anatomically correct with "
+    "natural proportions and realistic hands, lips, teeth, and facial structure."
+)
 
 
 def generate_video(
@@ -45,10 +52,11 @@ def generate_video(
 
     prompt = _build_video_prompt(content, product)
     image_data_uri = _image_to_data_uri(starting_image_path)
+    duration_seconds = _get_request_duration(content)
     request_payload = {
         "model": model,
         "prompt": prompt,
-        "duration": TARGET_DURATION_SECONDS,
+        "duration": duration_seconds,
         "resolution": resolution,
     }
     request_payload["aspect_ratio"] = aspect_ratio
@@ -79,7 +87,7 @@ def generate_video(
     db.update_content_video_path(content.id, str(video_path))
 
     video_meta = response_data.get("video", {})
-    duration = int(video_meta.get("duration") or TARGET_DURATION_SECONDS)
+    duration = int(video_meta.get("duration") or duration_seconds)
     cost_usd = response_data.get("cost_usd")
     if cost_usd is None:
         cost_usd = duration * XAI_VIDEO_COST_PER_SECOND_USD
@@ -94,7 +102,63 @@ def generate_video(
     return video_path
 
 
+def _get_request_duration(content: Content) -> int:
+    """Return the duration in seconds for the xAI request."""
+    if content.creative_format == "ai_video_flex_15s" and content.asset_manifest_json:
+        try:
+            manifest = json.loads(content.asset_manifest_json)
+            plan = manifest.get("video_plan", {})
+            total = plan.get("total_duration_seconds")
+            if isinstance(total, (int, float)) and MIN_FLEX_DURATION_SECONDS <= total <= MAX_FLEX_DURATION_SECONDS:
+                return int(total)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return TARGET_DURATION_SECONDS
+
+
 def _build_video_prompt(content: Content, product: Product) -> str:
+    if content.creative_format == "ai_video_flex_15s" and content.asset_manifest_json:
+        return _build_flex_video_prompt(content, product)
+    return _build_legacy_video_prompt(content, product)
+
+
+def _build_flex_video_prompt(content: Content, product: Product) -> str:
+    """Build prompt from persisted video_plan in asset_manifest_json."""
+    manifest = json.loads(content.asset_manifest_json or "{}")
+    plan = manifest.get("video_plan", {})
+    if not plan:
+        raise ValueError(
+            "ai_video_flex_15s content missing video_plan in asset_manifest_json. "
+            "Re-run prompt generation for this content."
+        )
+    total = plan.get("total_duration_seconds", 15)
+    style_family = plan.get("style_family", "")
+    style_rationale = plan.get("style_rationale", "")
+    scenes = plan.get("scenes", [])
+
+    parts = [
+        f"Create a {int(total)}-second product video for {product.name} ({product.sku}).",
+        "Animate the supplied starting image into a polished short-form ad.",
+    ]
+    if style_family:
+        parts.append(f"Style: {style_family}. {style_rationale}".strip())
+    for i, scene in enumerate(scenes):
+        if not isinstance(scene, dict):
+            continue
+        desc = scene.get("scene_description", "")
+        script = scene.get("script", "")
+        if desc:
+            parts.append(f"Scene {i + 1} visual direction: {desc}")
+        if script:
+            parts.append(f"Scene {i + 1} voiceover: {script}")
+    parts.append("Keep the product appearance, colors, and branding consistent with the provided image.")
+    parts.append(ANATOMY_GUARDRAIL)
+    parts.append("Use smooth motion, premium lighting, and ad-ready pacing.")
+    return "\n".join(parts)
+
+
+def _build_legacy_video_prompt(content: Content, product: Product) -> str:
+    """Build prompt from legacy scene_1_desc, scene_2_desc fields."""
     parts = [
         f"Create a 15-second product video for {product.name} ({product.sku}).",
         "Animate the supplied starting image into a polished short-form ad.",
@@ -108,6 +172,7 @@ def _build_video_prompt(content: Content, product: Product) -> str:
     if content.scene_2_script:
         parts.append(f"Scene 2 voiceover: {content.scene_2_script}")
     parts.append("Keep the product appearance, colors, and branding consistent with the provided image.")
+    parts.append(ANATOMY_GUARDRAIL)
     parts.append("Use smooth motion, premium lighting, and ad-ready pacing.")
     return "\n".join(parts)
 

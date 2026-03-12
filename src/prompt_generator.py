@@ -176,6 +176,407 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
 }
 """
 
+# TTS voiceover: bounded script templates and brand guardrails for image_motion_15s
+TTS_VOICE_INSTRUCTIONS = (
+    "Speak in a calm, premium, reassuring tone for a luxury skincare brand. "
+    "Sound polished, warm, and confident. Keep the pace slightly unhurried and never overly salesy or bubbly."
+)
+TTS_VOICES = ("marin",)
+TTS_SCRIPT_TEMPLATES = ("caption_led", "strategy_led", "proof_led")
+TTS_WORDS_PER_SECOND_MAX = 2.5
+TTS_WORDS_PER_SECOND_MIN = 2.1
+VOICEOVER_TARGET_WORDS_PER_SECOND = 2.3
+VOICEOVER_END_BUFFER_MIN_SECONDS = 0.5
+VOICEOVER_END_BUFFER_TARGET_SECONDS = 0.75
+VOICEOVER_END_BUFFER_MAX_SECONDS = 1.0
+VOICEOVER_GUARDRAIL_MAX_ATTEMPTS = 3
+# Patterns to reject or normalize (brand guardrails)
+TTS_GUARDRAIL_FORBIDDEN = (
+    "guarantee", "guaranteed", "miracle", "instant", "overnight", "permanent",
+    "cure", "heal", "treat", "medical", "clinical", "dermatologist-approved",
+    "omg", "lol", "slay", "vibes", "yass", "bae", "lit", "fire",
+    "limited time", "act now", "don't miss", "hurry", "last chance",
+    "before and after", "transformation", "dramatic results",
+)
+TTS_GUARDRAIL_SOFTENERS = ("appears to", "feels like", "helps skin look", "designed to")
+
+
+def _build_voiceover_script_caption_led(parsed: dict, product_name: str) -> str:
+    """Caption-led: hook_text + CTA."""
+    hook = (parsed.get("hook_text") or "").strip()
+    cta = (parsed.get("cta_text") or "see the product").strip()
+    if not hook:
+        hook = product_name
+    return f"{hook}. {cta}."
+
+
+def _build_voiceover_script_strategy_led(parsed: dict, product_name: str) -> str:
+    """Strategy-led: strategy_summary + product + CTA."""
+    plan = parsed.get("image_plan") or {}
+    strategy = (plan.get("strategy_summary") or "").strip()
+    cta = (parsed.get("cta_text") or "see the product").strip()
+    if not strategy:
+        strategy = f"{product_name} for your routine."
+    return f"{strategy} {product_name}. {cta}."
+
+
+def _build_voiceover_script_proof_led(parsed: dict, product_name: str) -> str:
+    """Proof-led: soft proof framing + CTA."""
+    cta = (parsed.get("cta_text") or "see the product").strip()
+    return f"{product_name} helps skin look its best. {cta}."
+
+
+def _select_script_template(parsed: dict) -> str:
+    """Prefer strategy_led when strategy_summary is strong; proof_led when proof_type present; else caption_led."""
+    plan = parsed.get("image_plan") or {}
+    strategy = (plan.get("strategy_summary") or "").strip()
+    proof = (parsed.get("proof_type") or "").strip()
+    if strategy and len(strategy) >= 15:
+        return "strategy_led"
+    if proof and proof != "none":
+        return "proof_led"
+    return "caption_led"
+
+
+def _build_voiceover_script(template_id: str, parsed: dict, product_name: str) -> str:
+    builders = {
+        "caption_led": _build_voiceover_script_caption_led,
+        "strategy_led": _build_voiceover_script_strategy_led,
+        "proof_led": _build_voiceover_script_proof_led,
+    }
+    fn = builders.get(template_id, _build_voiceover_script_caption_led)
+    return fn(parsed, product_name)
+
+
+def _voiceover_duration_targets(total_duration_seconds: float) -> tuple[float, float, float]:
+    """Return min, target, and max spoken durations that preserve an end buffer."""
+    min_spoken_duration = max(0.5, total_duration_seconds - VOICEOVER_END_BUFFER_MAX_SECONDS)
+    target_spoken_duration = max(0.5, total_duration_seconds - VOICEOVER_END_BUFFER_TARGET_SECONDS)
+    max_spoken_duration = max(0.5, total_duration_seconds - VOICEOVER_END_BUFFER_MIN_SECONDS)
+    return min_spoken_duration, target_spoken_duration, max_spoken_duration
+
+
+def _trim_script_to_duration(script: str, total_duration_seconds: float) -> str:
+    """Trim script to a safer voiceover budget that leaves an end buffer."""
+    _, _, max_spoken_duration = _voiceover_duration_targets(total_duration_seconds)
+    max_words = max(1, int(max_spoken_duration * VOICEOVER_TARGET_WORDS_PER_SECOND))
+    words = script.split()
+    if len(words) <= max_words:
+        return script
+    return " ".join(words[:max_words])
+
+
+def _guardrail_check(script: str) -> dict:
+    """Check script against brand guardrails. Returns dict with passed, violations, normalized_script."""
+    lower = script.lower()
+    violations = []
+    for forbidden in TTS_GUARDRAIL_FORBIDDEN:
+        if forbidden in lower:
+            violations.append(forbidden)
+    normalized = script
+    if violations:
+        for v in violations:
+            # Simple replacement: remove or soften - for now we reject
+            pass
+    return {"passed": len(violations) == 0, "violations": violations, "normalized_script": normalized}
+
+
+def _pick_voice(content_id: str) -> str:
+    """Use marin voice."""
+    return TTS_VOICES[0]
+
+
+def _build_voiceover_plan(
+    parsed: dict,
+    content_id: str,
+    product_name: str,
+    total_duration_seconds: float,
+) -> dict:
+    """Build durable voiceover plan for image_motion_15s manifest."""
+    template_id = _select_script_template(parsed)
+    raw_script = _build_voiceover_script(template_id, parsed, product_name)
+    script = _trim_script_to_duration(raw_script, total_duration_seconds)
+    guardrail = _guardrail_check(script)
+    if not guardrail["passed"]:
+        # Fall back to shortest compliant script
+        script = _build_voiceover_script_proof_led(parsed, product_name)
+        script = _trim_script_to_duration(script, total_duration_seconds)
+        guardrail = _guardrail_check(script)
+    voice = _pick_voice(content_id)
+    word_count = len(script.split())
+    speech_rate = word_count / total_duration_seconds if total_duration_seconds > 0 else 2.3
+    return {
+        "script_template_id": template_id,
+        "voiceover_script": script,
+        "voice": voice,
+        "voice_instructions": TTS_VOICE_INSTRUCTIONS,
+        "language": "english",
+        "speech_rate_words_per_second": round(speech_rate, 1),
+        "guardrail_checks": {
+            "passed": guardrail["passed"],
+            "violations": guardrail["violations"],
+        },
+    }
+
+
+_IMAGE_MOTION_VOICEOVER_SYSTEM_PROMPT = """\
+You are an expert short-form ad scriptwriter for premium cosmetic image-motion ads.
+
+TASK
+Write exactly 1 voiceover script for an already-planned `image_motion_15s` clip.
+- The visual plan is final. Do not invent scenes that are not represented in the provided frame plan.
+- The script must fit the exact clip duration supplied in the user message.
+- Aim for the spoken line to finish 0.5 to 1.0 seconds before the clip ends.
+- The script must feel natural when read aloud in one continuous take.
+
+TIMING RULES
+- Keep the full script within the provided word budget.
+- Target a natural premium read pace of about 2.1 to 2.5 words per second.
+- Do not write right up to the final frame or last half-second.
+- Do not add filler just to hit the maximum duration.
+
+CONTENT RULES
+- Reflect the actual frame order, visual details, and strategy summary from the provided image plan.
+- Keep the tone calm, premium, warm, and confident.
+- End with the provided CTA if it fits naturally.
+- No medical or health claims.
+- Do not use hypey urgency, slang, exaggerated promises, or forbidden phrasing.
+
+RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
+
+{
+  "voiceover_script": "string — one continuous spoken script that fits the supplied duration",
+  "estimated_word_count": "number — word count for the final script",
+  "timing_rationale": "string — one short sentence explaining why the script fits the duration and scene pacing"
+}
+"""
+
+
+def _build_voiceover_guardrail_lines() -> list[str]:
+    return [
+        "Brand guardrails:",
+        "Do not use any of these forbidden words or phrases:",
+        f"Forbidden terms: {', '.join(TTS_GUARDRAIL_FORBIDDEN)}",
+        f"Approved softeners when needed: {', '.join(TTS_GUARDRAIL_SOFTENERS)}",
+    ]
+
+
+def _build_image_motion_voiceover_user_message(
+    parsed: dict,
+    product_name: str,
+    total_duration_seconds: float,
+    violations: list[str] | None = None,
+) -> str:
+    plan = parsed.get("image_plan") or {}
+    frames = plan.get("frames") or []
+    min_spoken_duration, target_spoken_duration, max_spoken_duration = _voiceover_duration_targets(
+        total_duration_seconds
+    )
+    min_words = max(1, round(min_spoken_duration * VOICEOVER_TARGET_WORDS_PER_SECOND))
+    max_words = max(1, int(max_spoken_duration * VOICEOVER_TARGET_WORDS_PER_SECOND))
+    target_words = max(1, round(target_spoken_duration * VOICEOVER_TARGET_WORDS_PER_SECOND))
+
+    lines = [
+        f"Product: {product_name}",
+        f"Hook text: {(parsed.get('hook_text') or '').strip() or product_name}",
+        f"CTA text: {(parsed.get('cta_text') or 'see the product').strip()}",
+        f"Theme: {(parsed.get('theme') or '').strip()}",
+        f"Hook type: {(parsed.get('hook_type') or '').strip()}",
+        f"Proof type: {(parsed.get('proof_type') or '').strip() or 'none'}",
+        f"Script style: {(parsed.get('script_style') or '').strip() or 'direct'}",
+        f"Strategy summary: {(plan.get('strategy_summary') or '').strip()}",
+        "",
+        f"Exact clip duration seconds: {total_duration_seconds:.1f}",
+        "Voiceover should finish 0.5 to 1.0 seconds before clip end.",
+        f"Preferred spoken duration: {min_spoken_duration:.1f}-{max_spoken_duration:.1f} seconds",
+        f"Preferred spoken word range: {min_words}-{max_words} words",
+        f"Target word count: {target_words}",
+        "",
+        *_build_voiceover_guardrail_lines(),
+        "",
+    ]
+    if violations:
+        lines.extend([
+            "Retry instruction:",
+            f"The previous draft used forbidden terms: {', '.join(violations)}.",
+            "Return a new script that avoids every forbidden term listed above.",
+            "",
+        ])
+    lines.extend([
+        "Frame plan:",
+    ])
+    for idx, frame in enumerate(frames, start=1):
+        if not isinstance(frame, dict):
+            continue
+        lines.extend([
+            f"Frame {idx}:",
+            f"  - duration_seconds: {float(frame.get('duration_seconds', 0)):.1f}",
+            f"  - role: {frame.get('role', '')}",
+            f"  - style_family: {frame.get('style_family', '')}",
+            f"  - lighting: {frame.get('lighting', '')}",
+            f"  - camera_distance: {frame.get('camera_distance', '')}",
+            f"  - scene_description: {(frame.get('image_prompt') or '').strip()}",
+        ])
+    return "\n".join(lines)
+
+
+def _parse_voiceover_response(raw: str, total_duration_seconds: float) -> dict[str, Any]:
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"OpenAI returned invalid voiceover JSON: {exc}") from exc
+
+    script = str(data.get("voiceover_script") or "").strip()
+    if not script:
+        raise ValueError("OpenAI voiceover response missing `voiceover_script`.")
+
+    script = _trim_script_to_duration(script, total_duration_seconds)
+    guardrail = _guardrail_check(script)
+    if not guardrail["passed"]:
+        raise ValueError(
+            f"Voiceover script violated brand guardrails: {', '.join(guardrail['violations'])}"
+        )
+
+    data["voiceover_script"] = script
+    data["estimated_word_count"] = len(script.split())
+    return data
+
+
+def _generate_image_motion_voiceover_plan(
+    client: Any,
+    openai_module: Any,
+    model: str,
+    parsed: dict,
+    content_id: str,
+    product_name: str,
+    total_duration_seconds: float,
+) -> tuple[dict[str, Any], str, str, Any]:
+    guardrail_violations: list[str] = []
+    user_msg = ""
+    raw = ""
+    response = None
+    data: dict[str, Any] | None = None
+    for attempt in range(1, VOICEOVER_GUARDRAIL_MAX_ATTEMPTS + 1):
+        user_msg = _build_image_motion_voiceover_user_message(
+            parsed,
+            product_name,
+            total_duration_seconds,
+            violations=guardrail_violations or None,
+        )
+        response = _call_with_retries(
+            client,
+            openai_module,
+            model,
+            user_msg,
+            max_attempts=3,
+            system_prompt=_IMAGE_MOTION_VOICEOVER_SYSTEM_PROMPT,
+        )
+        raw = _response_text(response)
+        try:
+            data = _parse_voiceover_response(raw, total_duration_seconds)
+            break
+        except ValueError as exc:
+            if "Voiceover script violated brand guardrails:" not in str(exc):
+                raise
+            if attempt == VOICEOVER_GUARDRAIL_MAX_ATTEMPTS:
+                raise
+            guardrail_violations = [
+                violation.strip()
+                for violation in str(exc).split(":", 1)[1].split(",")
+                if violation.strip()
+            ]
+            logger.warning(
+                "Voiceover guardrail violation on attempt %d/%d: %s",
+                attempt,
+                VOICEOVER_GUARDRAIL_MAX_ATTEMPTS,
+                ", ".join(guardrail_violations),
+            )
+    if data is None or response is None:
+        raise ValueError("Voiceover generation failed before a valid script was returned.")
+    voice = _pick_voice(content_id)
+    speech_rate = (
+        len(data["voiceover_script"].split()) / total_duration_seconds
+        if total_duration_seconds > 0
+        else VOICEOVER_TARGET_WORDS_PER_SECOND
+    )
+    voiceover_plan = {
+        "script_template_id": "llm_scene_timed",
+        "voiceover_script": data["voiceover_script"],
+        "voice": voice,
+        "voice_instructions": TTS_VOICE_INSTRUCTIONS,
+        "language": "english",
+        "speech_rate_words_per_second": round(speech_rate, 1),
+        "guardrail_checks": {
+            "passed": True,
+            "violations": [],
+        },
+        "timing_rationale": str(data.get("timing_rationale") or "").strip(),
+        "estimated_word_count": int(data["estimated_word_count"]),
+    }
+    return voiceover_plan, user_msg, raw, response
+
+
+_AI_VIDEO_FLEX_SYSTEM_PROMPT = """\
+You are an expert creative director and AI video prompt engineer specializing in cosmetic advertising.
+
+TARGET PRODUCT: provided in the user message.
+
+CORE DIRECTIVE
+Generate exactly 1 unique creative for ai_video_flex_15s: a flexible multi-scene video plan (3–7 scenes, 6–15 seconds total).
+- Pick theme and hook_type from the allowed whitelist unless locked.
+- Return hook_text, platform_captions, hashtags.
+- Return a video_plan: structured scene list with durations, visual descriptions, and voiceover scripts.
+- Choose a style_family that fits the product and creative direction. Anamorphic is one option; you may choose other styles (e.g. realistic_cinematic, soft_minimal, bold_contrast).
+
+STYLE REFERENCE — when style_family is "anamorphic":
+Use cinematic 3D closeup of anthropomorphic product on luxury bathroom counter: Pixar-style face, large expressive eyes, articulated mouth, soft focus background, volumetric lighting, octane render, unreal engine 5, 4k, brand "velura" in brown serif (Cormorant Garamond, Georgia, Times New Roman).
+
+PLANNER RULES:
+- total_duration_seconds: 6 to 15 (prompt chooses; audience prefers quicker scene changes).
+- scenes: 3 to 7 entries; each scene duration_seconds: 1.5 to 3.0 (aim for faster pacing).
+- Sum of scene durations must equal total_duration_seconds.
+- script_total_words: combined word count of all scene scripts; must fit speaking pace for total_duration_seconds (roughly 2–3 words per second).
+- Require at least one hero/product-led scene.
+- No medical or health claims. Use approved softeners: "appears to", "feels like", "helps skin look".
+- Keep movements subtle for AI video generation.
+
+RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
+
+{
+  "theme": "string — from allowed themes",
+  "hook_type": "string — from allowed hook types",
+  "hook_text": "string — short opening hook line",
+  "creative_format": "ai_video_flex_15s",
+  "cta_type": "string — see_product or shop_now",
+  "cta_text": "string — CTA phrase",
+  "problem_angle": "string or null",
+  "proof_type": "string — test_result, testimonial, before_after, ingredient, none",
+  "script_style": "string — conversational, direct, storytelling, tip_based",
+  "starting_image_prompt": "string — flexible starting frame for the video; when anamorphic, use luxury bathroom + anthropomorphic product per style reference above",
+  "platform_captions": {
+    "youtube": "string — max 100 chars, end with 'Link in bio'",
+    "instagram": "string — conversational, emoji-friendly",
+    "tiktok": "string — trendy, max 150 chars",
+    "x": "string — max 280 chars"
+  },
+  "hashtags": ["list", "of", "hashtags", "without #"],
+  "video_plan": {
+    "strategy_summary": "string — one-line creative strategy",
+    "total_duration_seconds": number — 6 to 15,
+    "style_family": "string — anamorphic | realistic_cinematic | soft_minimal | bold_contrast | or other named style",
+    "style_rationale": "string — why this style fits the product and creative direction",
+    "script_total_words": number — sum of words across all scene scripts,
+    "scenes": [
+      {
+        "duration_seconds": number — 1.5 to 3.0,
+        "scene_description": "string — visual direction for this scene; include HARD CUT for scenes after the first",
+        "script": "string — voiceover for this scene; must fit duration"
+      }
+    ]
+  }
+}
+"""
+
 
 def _has_model_reference_assets() -> bool:
     """True if human-model reference images exist for lifestyle frames."""
@@ -232,6 +633,9 @@ def _build_user_message(
         has_models = _has_model_reference_assets()
         lines.append("")
         lines.append(f"Model reference assets for lifestyle frames: {'available' if has_models else 'not configured'}")
+    if creative_format == "ai_video_flex_15s":
+        lines.append("")
+        lines.append("AUDIENCE: prefers quicker scene changes; avoid long 7.5s scenes.")
     return "\n".join(lines)
 
 
@@ -283,9 +687,11 @@ def generate_content(
     content_id = uuid.uuid4().hex[:16]
 
     use_image_motion = fmt == "image_motion_15s"
+    use_ai_video_flex = fmt == "ai_video_flex_15s"
     system_prompt = (
         _IMAGE_MOTION_SYSTEM_PROMPT if use_image_motion else
-        (_SIMPLIFIED_SYSTEM_PROMPT if fmt != "ai_video_15s" else _SYSTEM_PROMPT)
+        (_AI_VIDEO_FLEX_SYSTEM_PROMPT if use_ai_video_flex else
+         (_SIMPLIFIED_SYSTEM_PROMPT if fmt != "ai_video_15s" else _SYSTEM_PROMPT))
     )
 
     response = _call_with_retries(
@@ -297,11 +703,16 @@ def generate_content(
         system_prompt=system_prompt,
     )
 
+    prompt_output_raw = _response_text(response)
+
     parsed = _parse_response(
         response, theme=theme, hook_type=hook_type, creative_format=creative_format
     )
 
     asset_manifest_json = None
+    voice_prompt_input = None
+    voice_prompt_output = None
+    voiceover_response = None
     if fmt == "image_motion_15s" and "image_plan" in parsed:
         plan = parsed["image_plan"]
         if not isinstance(plan, dict):
@@ -313,9 +724,54 @@ def generate_content(
         if not isinstance(total, (int, float)) or total > 15:
             raise ValueError("image_plan.total_duration_seconds must be <= 15")
         plan["performance_rationale"] = plan.get("performance_rationale", performance_rationale)
+        voiceover_plan, voice_prompt_input, voice_prompt_output, voiceover_response = _generate_image_motion_voiceover_plan(
+            client,
+            openai_module,
+            model,
+            parsed,
+            content_id,
+            product.name,
+            float(total),
+        )
         asset_manifest_json = json.dumps({
             "format": "image_motion_15s",
             "image_plan": plan,
+            "voiceover_plan": voiceover_plan,
+        })
+    elif fmt == "ai_video_flex_15s" and "video_plan" in parsed:
+        plan = parsed["video_plan"]
+        if not isinstance(plan, dict):
+            raise ValueError("OpenAI response video_plan must be an object")
+        scenes = plan.get("scenes", [])
+        if not isinstance(scenes, list) or len(scenes) < 3 or len(scenes) > 7:
+            raise ValueError("video_plan.scenes must have 3–7 entries")
+        total = plan.get("total_duration_seconds", 0)
+        if not isinstance(total, (int, float)) or total < 6 or total > 15:
+            raise ValueError("video_plan.total_duration_seconds must be 6–15")
+        scene_sum = sum(
+            s.get("duration_seconds", 0) for s in scenes
+            if isinstance(s, dict) and isinstance(s.get("duration_seconds"), (int, float))
+        )
+        if abs(scene_sum - total) > 0.1:
+            raise ValueError(
+                f"video_plan scene durations sum to {scene_sum}, must equal total_duration_seconds {total}"
+            )
+        for i, s in enumerate(scenes):
+            if not isinstance(s, dict):
+                raise ValueError(f"video_plan.scenes[{i}] must be an object")
+            dur = s.get("duration_seconds")
+            if not isinstance(dur, (int, float)) or dur < 1.5 or dur > 3.0:
+                raise ValueError(
+                    f"video_plan.scenes[{i}].duration_seconds must be 1.5–3.0, got {dur}"
+                )
+        asset_manifest_json = json.dumps({
+            "format": "ai_video_flex_15s",
+            "video_plan": plan,
+            "generation_metadata": {
+                "total_duration_seconds": total,
+                "scene_count": len(scenes),
+                "scene_durations": [s.get("duration_seconds") for s in scenes if isinstance(s, dict)],
+            },
         })
 
     content = Content(
@@ -332,13 +788,28 @@ def generate_content(
         script_style=parsed.get("script_style"),
         research_snapshot_id=snapshot.id if snapshot else None,
         starting_image_prompt=parsed.get("starting_image_prompt"),
-        scene_1_desc=parsed.get("scene_1_desc"),
-        scene_2_desc=parsed.get("scene_2_desc"),
-        scene_1_script=parsed.get("scene_1_script"),
-        scene_2_script=parsed.get("scene_2_script"),
+        scene_1_desc=parsed.get("scene_1_desc") if fmt != "ai_video_flex_15s" else None,
+        scene_2_desc=parsed.get("scene_2_desc") if fmt != "ai_video_flex_15s" else None,
+        scene_1_script=parsed.get("scene_1_script") if fmt != "ai_video_flex_15s" else None,
+        scene_2_script=parsed.get("scene_2_script") if fmt != "ai_video_flex_15s" else None,
         asset_manifest_json=asset_manifest_json,
     )
     db.insert_content(content)
+
+    if voiceover_response is not None:
+        usage = voiceover_response.usage
+        input_tokens = usage.prompt_tokens if usage else 0
+        output_tokens = usage.completion_tokens if usage else 0
+        input_per_m = float(config.get("openai.input_per_million_usd", 2.50))
+        output_per_m = float(config.get("openai.output_per_million_usd", 15.0))
+        cost_usd = (input_tokens / 1_000_000 * input_per_m) + (output_tokens / 1_000_000 * output_per_m)
+        db.insert_cost(Cost(
+            content_id=content_id,
+            step="voiceover_plan_gen",
+            api_provider="openai",
+            tokens_or_units=input_tokens + output_tokens,
+            cost_usd=cost_usd,
+        ))
 
     platform_captions: dict[str, str] = parsed.get("platform_captions", {})
     # Ensure YouTube caption always ends with "Link in bio"
@@ -385,7 +856,14 @@ def generate_content(
     extras = {
         "platform_captions": platform_captions,
         "hashtags": hashtags,
+        "prompt_input": f"[SYSTEM]\n{system_prompt}\n\n[USER]\n{user_msg}",
+        "prompt_output": prompt_output_raw,
     }
+    if voice_prompt_input and voice_prompt_output:
+        extras["voice_prompt_input"] = (
+            f"[SYSTEM]\n{_IMAGE_MOTION_VOICEOVER_SYSTEM_PROMPT}\n\n[USER]\n{voice_prompt_input}"
+        )
+        extras["voice_prompt_output"] = voice_prompt_output
     return content, extras
 
 
@@ -448,6 +926,7 @@ def _parse_response(
         raise ValueError(f"OpenAI returned invalid JSON: {exc}\n\nRaw response:\n{raw}") from exc
 
     use_image_motion = creative_format == "image_motion_15s"
+    use_ai_video_flex = creative_format == "ai_video_flex_15s"
     required = [
         "theme", "hook_type", "hook_text",
         "creative_format", "cta_type", "cta_text",
@@ -456,7 +935,9 @@ def _parse_response(
     ]
     if use_image_motion:
         required.append("image_plan")
-    if not use_image_motion:
+    elif use_ai_video_flex:
+        required.extend(["starting_image_prompt", "video_plan"])
+    else:
         required.extend([
             "starting_image_prompt",
             "scene_1_desc", "scene_2_desc",
@@ -634,7 +1115,19 @@ def generate_paid_variant_captions(
         max_attempts=3,
         system_prompt=_PAID_VARIANT_SYSTEM_PROMPT,
     )
-
+    usage = response.usage
+    input_tokens = usage.prompt_tokens if usage else 0
+    output_tokens = usage.completion_tokens if usage else 0
+    input_per_m = float(config.get("openai.input_per_million_usd", 2.50))
+    output_per_m = float(config.get("openai.output_per_million_usd", 15.0))
+    cost_usd = (input_tokens / 1_000_000 * input_per_m) + (output_tokens / 1_000_000 * output_per_m)
+    db.insert_cost(Cost(
+        content_id=content.id,
+        step="paid_variant_gen",
+        api_provider="openai",
+        tokens_or_units=input_tokens + output_tokens,
+        cost_usd=cost_usd,
+    ))
     raw = _response_text(response)
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[1]

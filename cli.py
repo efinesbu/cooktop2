@@ -243,8 +243,17 @@ def _print_prompt(content: Content) -> None:
         try:
             manifest = json.loads(content.asset_manifest_json)
             plan = manifest.get("image_plan") if isinstance(manifest, dict) else None
+            voiceover_plan = manifest.get("voiceover_plan") if isinstance(manifest, dict) else None
             if plan and isinstance(plan, dict) and plan.get("strategy_summary"):
                 lines.append(f"[bold]Overall scene:[/bold] {plan['strategy_summary']}")
+            if (
+                voiceover_plan
+                and isinstance(voiceover_plan, dict)
+                and voiceover_plan.get("voiceover_script")
+            ):
+                lines.append(
+                    f"[bold]Voiceover:[/bold] {voiceover_plan['voiceover_script']}"
+                )
         except json.JSONDecodeError:
             pass
     if lines:
@@ -388,6 +397,24 @@ def _generate_single(product: Product, theme: str | None, hook_type: str | None,
 
     console.print(f"  {product.sku}: generating prompt … ({_format_strategy_label(theme, hook_type)})")
     content, extras = generate_content(product, theme, hook_type, images, creative_format)
+    if "prompt_input" in extras:
+        console.print(Panel(extras["prompt_input"], title="Prompt", border_style="dim"))
+    if "prompt_output" in extras:
+        try:
+            output_json = json.loads(extras["prompt_output"])
+            output_str = json.dumps(output_json, indent=2)
+        except (json.JSONDecodeError, TypeError):
+            output_str = extras["prompt_output"]
+        console.print(Panel(output_str, title="Prompt output", border_style="dim"))
+    if "voice_prompt_input" in extras:
+        console.print(Panel(extras["voice_prompt_input"], title="Voice prompt", border_style="dim"))
+    if "voice_prompt_output" in extras:
+        try:
+            output_json = json.loads(extras["voice_prompt_output"])
+            output_str = json.dumps(output_json, indent=2)
+        except (json.JSONDecodeError, TypeError):
+            output_str = extras["voice_prompt_output"]
+        console.print(Panel(output_str, title="Voice prompt output", border_style="dim"))
     _print_prompt(content)
     captions: dict[str, str] = extras["platform_captions"]
     hashtags: list[str] = extras["hashtags"]
@@ -769,7 +796,7 @@ def briefing_diagnose_cmd():
     "creative_format",
     type=click.Choice(CREATIVE_FORMATS),
     default=None,
-    help="Creative format (ai_video_15s, image_motion_15s). Default: ai_video_15s.",
+    help="Creative format (ai_video_15s, ai_video_flex_15s, image_motion_15s). Default: ai_video_15s.",
 )
 @click.option("--count", default=8, show_default=True, help="Total clips across all products in --auto mode")
 @click.option(
@@ -930,6 +957,15 @@ def include(slug: str):
 # preview
 # ---------------------------------------------------------------------------
 
+def _media_type_from_format(creative_format: str | None) -> str:
+    """Return 'video' for video formats, 'static' for motion image (image_motion_15s)."""
+    if creative_format == "image_motion_15s":
+        return "static"
+    if creative_format in ("ai_video_15s", "ai_video_flex_15s"):
+        return "video"
+    return "—"
+
+
 def _review_display_status(content: Content, payloads: list[PlatformPayload]) -> str:
     """Derive Review column status from content and payloads: pending, approved, rejected, scheduled, posted."""
     if content.review_status == "rejected":
@@ -977,6 +1013,8 @@ def preview(today: bool, last_24h: bool):
     table.add_column("Row", justify="right", style="dim")
     table.add_column("ID", style="cyan", max_width=12)
     table.add_column("Product")
+    table.add_column("Format", style="dim")
+    table.add_column("Type", justify="center")
     table.add_column("Theme")
     table.add_column("Hook Type")
     table.add_column("Review", justify="center")
@@ -984,10 +1022,13 @@ def preview(today: bool, last_24h: bool):
     for i, c in enumerate(items, start=1):
         payloads = db.list_platform_payloads(c.id)
         review_status = _review_display_status(c, payloads)
+        media_type = _media_type_from_format(c.creative_format)
         table.add_row(
             str(i),
             c.id[:12],
             c.product_sku,
+            c.creative_format or "—",
+            media_type,
             c.theme,
             c.hook_type,
             review_status,
@@ -1000,18 +1041,19 @@ def preview(today: bool, last_24h: bool):
 # approve / reject / schedule / post
 # ---------------------------------------------------------------------------
 
-def _resolve_content(content_id: str, use_last_24h: bool = False):
-    """Resolve --content-id to a Content. Accepts row number (1-based) from preview (today or last-24h)."""
+def _resolve_content(content_id: str, use_last_24h: bool = True):
+    """Resolve --content-id to a Content. Accepts row number (1-based) from preview (today or last-24h).
+    Defaults to last-24h so row numbers match preview --last-24h (the common workflow)."""
     if content_id.isdigit() and int(content_id) >= 1:
         idx = int(content_id) - 1
         items = db.list_content_last_24h() if use_last_24h else db.list_content_today()
         if idx < len(items):
             return items[idx]
-        # If row is out of range for "today", try last-24h so row numbers match preview --last-24h
-        if not use_last_24h:
-            items_24h = db.list_content_last_24h()
-            if idx < len(items_24h):
-                return items_24h[idx]
+        # If row is out of range for last-24h, try today so row numbers match preview --today
+        if use_last_24h:
+            items_today = db.list_content_today()
+            if idx < len(items_today):
+                return items_today[idx]
         return None
     return db.get_content(content_id)
 

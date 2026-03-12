@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import date
 from pathlib import Path
 
@@ -209,6 +210,71 @@ def test_cost_tracking(
     assert len(costs) == 1
     assert costs[0].step == "prompt_gen"
     assert costs[0].cost_usd == 0.03
+
+
+def test_init_db_migrates_legacy_cost_step_check_and_allows_tts(tmp_path: Path) -> None:
+    db_file = tmp_path / "legacy.db"
+    old_path = db._DB_PATH
+    db.set_db_path(db_file)
+    try:
+        with sqlite3.connect(db_file) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE products (
+                    sku TEXT PRIMARY KEY,
+                    name TEXT NOT NULL
+                );
+                CREATE TABLE content (
+                    id TEXT PRIMARY KEY,
+                    product_sku TEXT NOT NULL REFERENCES products(sku),
+                    theme TEXT NOT NULL,
+                    hook_type TEXT NOT NULL,
+                    review_status TEXT DEFAULT 'pending',
+                    created_at TEXT DEFAULT (datetime('now'))
+                );
+                CREATE TABLE costs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    content_id TEXT NOT NULL REFERENCES content(id),
+                    step TEXT NOT NULL CHECK(step IN ('prompt_gen', 'image_gen', 'video_gen', 'slideshow_render', 'image_motion_render')),
+                    api_provider TEXT NOT NULL,
+                    tokens_or_units INTEGER,
+                    cost_usd REAL,
+                    created_at TEXT DEFAULT (datetime('now'))
+                );
+                """
+            )
+            conn.execute("INSERT INTO products (sku, name) VALUES (?, ?)", ("legacy-sku", "Legacy Product"))
+            conn.execute(
+                "INSERT INTO content (id, product_sku, theme, hook_type) VALUES (?, ?, ?, ?)",
+                ("legacy-content", "legacy-sku", "benefit", "question"),
+            )
+
+        db.init_db()
+
+        db.insert_cost(
+            Cost(
+                content_id="legacy-content",
+                step="tts_gen",
+                api_provider="openai",
+                tokens_or_units=42,
+                cost_usd=0.01,
+            )
+        )
+
+        with db._connect() as conn:
+            row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='costs'"
+            ).fetchone()
+            count = conn.execute(
+                "SELECT COUNT(*) AS count FROM costs WHERE content_id=? AND step='tts_gen'",
+                ("legacy-content",),
+            ).fetchone()
+
+        assert row is not None
+        assert "CHECK(step IN" not in row["sql"]
+        assert count["count"] == 1
+    finally:
+        db._DB_PATH = old_path
 
 
 def test_platform_payload_roundtrip(

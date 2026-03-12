@@ -169,37 +169,33 @@ def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
     return row is not None
 
 
+def _costs_step_has_legacy_check(conn: sqlite3.Connection) -> bool:
+    """Return True when the costs table still has a restrictive step CHECK."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='costs'"
+    ).fetchone()
+    if not row or not row["sql"]:
+        return False
+    sql = row["sql"].lower()
+    return "check" in sql and "step" in sql
+
+
 def _migrate_costs_step(conn: sqlite3.Connection) -> None:
-    """Remove costs.step CHECK constraint so new renderer formats work without migrations."""
-    if not _table_exists(conn, "costs"):
+    """Remove legacy costs.step CHECK constraints so new cost steps keep working."""
+    if not _table_exists(conn, "costs") or not _costs_step_has_legacy_check(conn):
         return
-    # Probe: try inserting a renderer step. If it fails, table has old CHECK.
-    row = conn.execute("SELECT id FROM content LIMIT 1").fetchone()
-    if row:
-        content_id = row[0]
-        conn.execute("SAVEPOINT costs_migrate")
-        try:
-            conn.execute(
-                "INSERT INTO costs (content_id, step, api_provider, tokens_or_units, cost_usd) "
-                "VALUES (?, 'image_motion_render', 'ffmpeg', 1, 0)",
-                (content_id,),
-            )
-            conn.execute(
-                "DELETE FROM costs WHERE content_id=? AND step='image_motion_render' AND api_provider='ffmpeg'",
-                (content_id,),
-            )
-            conn.execute("RELEASE SAVEPOINT costs_migrate")
-            return  # No restrictive CHECK
-        except sqlite3.IntegrityError:
-            conn.execute("ROLLBACK TO SAVEPOINT costs_migrate")
-            conn.execute("RELEASE SAVEPOINT costs_migrate")
-    # Recreate table without step CHECK
+
+    # Recreate table without the legacy step CHECK so new cost events like
+    # renderer-specific work and TTS can be stored on existing databases.
     conn.execute(
         "CREATE TABLE costs_new (id INTEGER PRIMARY KEY AUTOINCREMENT, content_id TEXT NOT NULL REFERENCES content(id), "
         "step TEXT NOT NULL, api_provider TEXT NOT NULL, tokens_or_units INTEGER, cost_usd REAL, "
         "created_at TEXT DEFAULT (datetime('now')))"
     )
-    conn.execute("INSERT INTO costs_new SELECT * FROM costs")
+    conn.execute(
+        "INSERT INTO costs_new (id, content_id, step, api_provider, tokens_or_units, cost_usd, created_at) "
+        "SELECT id, content_id, step, api_provider, tokens_or_units, cost_usd, created_at FROM costs"
+    )
     conn.execute("DROP TABLE costs")
     conn.execute("ALTER TABLE costs_new RENAME TO costs")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_costs_content ON costs(content_id)")

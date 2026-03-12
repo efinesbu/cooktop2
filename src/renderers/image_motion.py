@@ -10,6 +10,7 @@ from pathlib import Path
 from src import config, db
 from src.image_generator import generate_frame_images_for_plan
 from src.models import Content, Cost, Product, ProductImage
+from src.voiceover_generator import generate_voiceover
 
 from .base import BaseRenderer
 from .ffmpeg_utils import find_ffmpeg
@@ -125,6 +126,44 @@ def _parse_image_plan_from_manifest(content: Content) -> dict | None:
         return None
 
 
+def _parse_manifest(content: Content) -> dict:
+    """Parse asset_manifest_json into a dict. Returns {} if invalid."""
+    raw = content.asset_manifest_json
+    if not raw or not raw.strip():
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def _mux_audio_into_video(ffmpeg: str, video_path: Path, audio_path: Path, output_path: Path) -> None:
+    """Mux audio track into video. Uses -shortest to trim to shorter stream."""
+    cmd = [
+        ffmpeg, "-y",
+        "-i", str(video_path),
+        "-i", str(audio_path),
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-shortest",
+        str(output_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+
+
+def _tts_enabled_for_format(creative_format: str) -> bool:
+    """True if TTS is enabled for this creative format."""
+    enabled = config.get("openai.tts_enabled_formats")
+    if enabled is None:
+        return creative_format == "image_motion_15s"
+    if not isinstance(enabled, list):
+        return False
+    return creative_format in enabled
+
+
 @register_renderer
 class ImageMotionRenderer(BaseRenderer):
     """Renders image_motion_15s from Gemini-generated frames or product images with pans and zooms."""
@@ -141,8 +180,21 @@ class ImageMotionRenderer(BaseRenderer):
         video_dir = config.videos_dir() / product.sku
         video_dir.mkdir(parents=True, exist_ok=True)
         video_path = video_dir / f"{content.id}.mp4"
+        silent_path = video_dir / f"{content.id}_silent.mp4"
 
         plan = _parse_image_plan_from_manifest(content)
+        manifest = _parse_manifest(content)
+        manifest["format"] = "image_motion_15s"
+
+        voiceover_plan = manifest.get("voiceover_plan")
+        use_tts = (
+            _tts_enabled_for_format(content.creative_format)
+            and isinstance(voiceover_plan, dict)
+            and voiceover_plan.get("voiceover_script")
+            and voiceover_plan.get("voice")
+        )
+        render_target = silent_path if use_tts else video_path
+
         if plan and plan.get("frames"):
             source_paths = generate_frame_images_for_plan(
                 content, product, plan, output_dir=video_dir
@@ -155,17 +207,12 @@ class ImageMotionRenderer(BaseRenderer):
             _render_multi_image_concatenated(
                 ffmpeg,
                 source_paths,
-                video_path,
+                render_target,
                 duration_sec=int(total_duration),
                 per_frame_durations=per_frame_durations,
             )
-            manifest_raw = content.asset_manifest_json or "{}"
-            manifest = json.loads(manifest_raw) if manifest_raw else {}
-            manifest["format"] = "image_motion_15s"
             manifest["generated_frame_paths"] = [str(p) for p in source_paths]
             manifest["total_duration_seconds"] = total_duration
-            db.update_content_video_path(content.id, str(video_path))
-            db.update_content_asset_manifest(content.id, json.dumps(manifest))
         else:
             source_paths = _select_source_images(images, product.sku)
             if not source_paths:
@@ -175,14 +222,25 @@ class ImageMotionRenderer(BaseRenderer):
                     "or ensure image_plan is persisted in asset_manifest_json."
                 )
             _render_multi_image_concatenated(
-                ffmpeg, source_paths, video_path, TARGET_DURATION_SECONDS
+                ffmpeg, source_paths, render_target, TARGET_DURATION_SECONDS
             )
-            manifest = {
-                "source_images": [str(p) for p in source_paths],
-                "format": "image_motion_15s",
-            }
-            db.update_content_video_path(content.id, str(video_path))
-            db.update_content_asset_manifest(content.id, json.dumps(manifest))
+            manifest["source_images"] = [str(p) for p in source_paths]
+
+        if use_tts:
+            manifest["silent_video_local_path"] = str(silent_path)
+            audio_path = video_dir / f"{content.id}_voiceover.wav"
+            generate_voiceover(
+                script=voiceover_plan["voiceover_script"],
+                voice=voiceover_plan["voice"],
+                voice_instructions=voiceover_plan.get("voice_instructions", ""),
+                output_path=audio_path,
+                content_id=content.id,
+            )
+            manifest["audio_local_path"] = str(audio_path)
+            _mux_audio_into_video(ffmpeg, silent_path, audio_path, video_path)
+
+        db.update_content_video_path(content.id, str(video_path))
+        db.update_content_asset_manifest(content.id, json.dumps(manifest))
 
         db.insert_cost(Cost(
             content_id=content.id,

@@ -454,8 +454,9 @@ def test_generate_content_image_motion_15s_persists_image_plan(
     """image_motion_15s returns image_plan and persists it in asset_manifest_json."""
     sys.modules.pop("src.prompt_generator", None)
     prompt_generator = importlib.import_module("src.prompt_generator")
+    captured_calls: list[dict[str, object]] = []
 
-    response_payload = {
+    image_plan_payload = {
         "theme": "benefit",
         "hook_type": "question",
         "hook_text": "Want fresher skin?",
@@ -504,15 +505,309 @@ def test_generate_content_image_motion_15s_persists_image_plan(
             ],
         },
     }
+    voiceover_payload = {
+        "voiceover_script": "Want fresher-looking skin? Serum X brings a polished glow across every frame, ending with a soft confident try me today.",
+        "estimated_word_count": 18,
+        "timing_rationale": "The line stays concise enough for a calm premium read over a 9-second sequence.",
+    }
 
     class FakeCompletions:
         def create(self, **kwargs):
+            captured_calls.append(kwargs)
+            payload = image_plan_payload if len(captured_calls) == 1 else voiceover_payload
             return SimpleNamespace(
                 choices=[
                     SimpleNamespace(
-                        message=SimpleNamespace(content=json.dumps(response_payload))
+                        message=SimpleNamespace(content=json.dumps(payload))
                     )
                 ],
+                usage=SimpleNamespace(prompt_tokens=100, completion_tokens=150),
+            )
+
+    class FakeOpenAIClient:
+        def __init__(self, api_key: str) -> None:
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    fake_openai = SimpleNamespace(
+        OpenAI=FakeOpenAIClient,
+        APIConnectionError=Exception,
+        RateLimitError=Exception,
+        APIStatusError=Exception,
+    )
+
+    client_secrets = tmp_path / "youtube_client_secrets.json"
+    client_secrets.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "openai": {"api_key": "test-openai-key", "model": "gpt-4.1-mini"},
+            "site_url": "https://example.com",
+            "platforms": {"enabled": ["youtube"]},
+            "youtube": {"client_secrets_file": str(client_secrets)},
+            "bandit": {"ranking_objective": "engagement_rate"},
+        },
+    )
+    monkeypatch.setattr("src.config.load_dotenv", lambda: None)
+    monkeypatch.setattr(prompt_generator, "_load_openai_module", lambda: fake_openai)
+
+    product = Product(sku="serum-x", name="Serum X", product_url="https://example.com/products/serum-x")
+    db.upsert_product(product)
+
+    content, extras = prompt_generator.generate_content(
+        product=product,
+        theme="benefit",
+        hook_type="question",
+        product_images=[],
+        creative_format="image_motion_15s",
+    )
+
+    assert content.creative_format == "image_motion_15s"
+    assert content.asset_manifest_json is not None
+    manifest = json.loads(content.asset_manifest_json)
+    assert manifest["format"] == "image_motion_15s"
+    assert "image_plan" in manifest
+    plan = manifest["image_plan"]
+    assert len(plan["frames"]) == 3
+    assert plan["total_duration_seconds"] == 9.0
+    assert plan["frames"][0]["role"] == "hero_macro"
+    assert len(captured_calls) == 2
+    assert "Exact clip duration seconds: 9.0" in captured_calls[1]["messages"][1]["content"]
+    assert "Frame 1:" in captured_calls[1]["messages"][1]["content"]
+    assert "scene_description: Close-up of Serum X bottle with golden light." in captured_calls[1]["messages"][1]["content"]
+    assert "voice_prompt_input" in extras
+    assert "voice_prompt_output" in extras
+    # TTS voiceover plan must be persisted from the second LLM pass
+    assert "voiceover_plan" in manifest
+    vp = manifest["voiceover_plan"]
+    assert vp["script_template_id"] == "llm_scene_timed"
+    assert vp["voice"] == "marin"
+    assert vp["voiceover_script"] != voiceover_payload["voiceover_script"]
+    assert vp["voiceover_script"].endswith("try me")
+    assert "calm, premium, reassuring" in vp["voice_instructions"]
+    assert vp["language"] == "english"
+    assert "guardrail_checks" in vp
+    # Script must leave some room before clip end.
+    word_count = len(vp["voiceover_script"].split())
+    assert word_count <= 19
+
+
+def test_generate_content_image_motion_voice_uses_marin(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Voice is always marin."""
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    response_payload = {
+        "theme": "benefit",
+        "hook_type": "question",
+        "hook_text": "Want fresher skin?",
+        "creative_format": "image_motion_15s",
+        "cta_type": "see_product",
+        "cta_text": "try me",
+        "problem_angle": None,
+        "proof_type": "none",
+        "script_style": "conversational",
+        "platform_captions": {"youtube": "Glow", "instagram": "Glow", "tiktok": "Glow", "x": "Glow"},
+        "hashtags": ["skincare"],
+        "image_plan": {
+            "strategy_summary": "Hero-led sequence",
+            "total_duration_seconds": 6.0,
+            "performance_rationale": "default",
+            "frames": [
+                {"role": "hero_macro", "duration_seconds": 2.0, "image_prompt": "F1"},
+                {"role": "hero_tabletop", "duration_seconds": 2.0, "image_prompt": "F2"},
+                {"role": "texture_detail", "duration_seconds": 2.0, "image_prompt": "F3"},
+            ],
+        },
+    }
+    voiceover_payload = {
+        "voiceover_script": "Serum X keeps this quick sequence polished and easy to follow, then closes with a calm try me.",
+        "estimated_word_count": 17,
+        "timing_rationale": "The script is short enough for a clean premium read over six seconds.",
+    }
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            payload = response_payload if getattr(self, "_call_count", 0) % 2 == 0 else voiceover_payload
+            self._call_count = getattr(self, "_call_count", 0) + 1
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
+                usage=SimpleNamespace(prompt_tokens=80, completion_tokens=120),
+            )
+
+    fake_openai = SimpleNamespace(
+        OpenAI=lambda api_key: SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions())),
+        APIConnectionError=Exception,
+        RateLimitError=Exception,
+        APIStatusError=Exception,
+    )
+
+    client_secrets = tmp_path / "youtube_client_secrets.json"
+    client_secrets.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "src.config._config",
+        {"openai": {"api_key": "k"}, "site_url": "x", "platforms": {"enabled": ["youtube"]}, "youtube": {"client_secrets_file": str(client_secrets)}},
+    )
+    monkeypatch.setattr("src.config.load_dotenv", lambda: None)
+    monkeypatch.setattr(prompt_generator, "_load_openai_module", lambda: fake_openai)
+
+    product = Product(sku="serum-x", name="Serum X", product_url="https://x.com/serum-x")
+    db.upsert_product(product)
+
+    content1, _ = prompt_generator.generate_content(product=product, theme="benefit", hook_type="question", product_images=[], creative_format="image_motion_15s")
+    manifest1 = json.loads(content1.asset_manifest_json or "{}")
+    voice1 = manifest1.get("voiceover_plan", {}).get("voice")
+
+    content2, _ = prompt_generator.generate_content(product=product, theme="benefit", hook_type="question", product_images=[], creative_format="image_motion_15s")
+    manifest2 = json.loads(content2.asset_manifest_json or "{}")
+    voice2 = manifest2.get("voiceover_plan", {}).get("voice")
+
+    assert voice1 == "marin"
+    assert voice2 == "marin"
+    assert voice1 == manifest1["voiceover_plan"]["voice"]
+    assert voice2 == manifest2["voiceover_plan"]["voice"]
+    assert manifest1["voiceover_plan"]["script_template_id"] == "llm_scene_timed"
+    assert manifest2["voiceover_plan"]["script_template_id"] == "llm_scene_timed"
+
+
+def test_image_motion_voiceover_budget_leaves_end_buffer() -> None:
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    parsed = {
+        "hook_text": "What makes this lipstick look this smooth?",
+        "cta_text": "Shop now",
+        "theme": "benefit",
+        "hook_type": "question",
+        "proof_type": "none",
+        "script_style": "conversational",
+        "image_plan": {
+            "strategy_summary": "Macro texture reveal followed by hero payoff.",
+            "frames": [
+                {
+                    "duration_seconds": 2.0,
+                    "role": "hero_macro",
+                    "style_family": "realistic_cinematic",
+                    "lighting": "soft_diffused_daylight",
+                    "camera_distance": "macro_closeup",
+                    "image_prompt": "Macro texture reveal.",
+                },
+                {
+                    "duration_seconds": 2.0,
+                    "role": "texture_detail",
+                    "style_family": "realistic_cinematic",
+                    "lighting": "soft_diffused_daylight",
+                    "camera_distance": "closeup",
+                    "image_prompt": "Creamy satin swipe.",
+                },
+            ],
+        },
+    }
+
+    user_message = prompt_generator._build_image_motion_voiceover_user_message(
+        parsed,
+        "Lux Lipstick",
+        8.0,
+    )
+    assert "Voiceover should finish 0.5 to 1.0 seconds before clip end." in user_message
+    assert "Preferred spoken duration: 7.0-7.5 seconds" in user_message
+    assert "Target word count: 17" in user_message
+    assert "Brand guardrails:" in user_message
+    assert "Forbidden terms:" in user_message
+    assert "instant" in user_message
+    assert "Approved softeners when needed:" in user_message
+
+    script = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen"
+    trimmed = prompt_generator._trim_script_to_duration(script, 8.0)
+    assert len(trimmed.split()) == 17
+
+
+def test_generate_content_image_motion_retries_voiceover_guardrail_failures(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+    captured_calls: list[dict[str, object]] = []
+
+    image_plan_payload = {
+        "theme": "benefit",
+        "hook_type": "question",
+        "hook_text": "Want fresher skin?",
+        "creative_format": "image_motion_15s",
+        "cta_type": "see_product",
+        "cta_text": "try me",
+        "problem_angle": None,
+        "proof_type": "ingredient",
+        "script_style": "conversational",
+        "platform_captions": {
+            "youtube": "Glow faster",
+            "instagram": "Meet your shortcut.",
+            "tiktok": "POV: your skin",
+            "x": "Serum X makes tired skin look camera-ready.",
+        },
+        "hashtags": ["skincare", "glow"],
+        "image_plan": {
+            "strategy_summary": "Hero-led sequence with texture detail",
+            "total_duration_seconds": 9.0,
+            "performance_rationale": "default",
+            "frames": [
+                {
+                    "role": "hero_macro",
+                    "duration_seconds": 1.5,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "golden_window_light",
+                    "camera_distance": "macro_closeup",
+                    "image_prompt": "Close-up of Serum X bottle with golden light.",
+                },
+                {
+                    "role": "hero_tabletop",
+                    "duration_seconds": 2.0,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "soft_diffused_daylight",
+                    "camera_distance": "closeup",
+                    "image_prompt": "Serum X on bathroom counter.",
+                },
+                {
+                    "role": "texture_detail",
+                    "duration_seconds": 1.5,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "clean_studio_backlight",
+                    "camera_distance": "macro_closeup",
+                    "image_prompt": "Texture detail of Serum X.",
+                },
+            ],
+        },
+    }
+    voiceover_payloads = [
+        {
+            "voiceover_script": "Serum X delivers instant glow across every frame, then closes with a soft confident try me.",
+            "estimated_word_count": 16,
+            "timing_rationale": "The line is concise enough for a calm premium read.",
+        },
+        {
+            "voiceover_script": "Serum X keeps skin polished overnight, then ends with a calm confident try me.",
+            "estimated_word_count": 14,
+            "timing_rationale": "The line remains short for a premium read.",
+        },
+        {
+            "voiceover_script": "Serum X brings a polished glow across every frame, then closes with a soft confident try me.",
+            "estimated_word_count": 17,
+            "timing_rationale": "The line stays concise enough for a calm premium read over a 9-second sequence.",
+        },
+    ]
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured_calls.append(kwargs)
+            payload = image_plan_payload if len(captured_calls) == 1 else voiceover_payloads[len(captured_calls) - 2]
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
                 usage=SimpleNamespace(prompt_tokens=100, completion_tokens=150),
             )
 
@@ -554,12 +849,312 @@ def test_generate_content_image_motion_15s_persists_image_plan(
         creative_format="image_motion_15s",
     )
 
-    assert content.creative_format == "image_motion_15s"
+    manifest = json.loads(content.asset_manifest_json or "{}")
+    voiceover_plan = manifest["voiceover_plan"]
+    assert len(captured_calls) == 4
+    assert "Forbidden terms:" in captured_calls[1]["messages"][1]["content"]
+    assert "Retry instruction:" in captured_calls[2]["messages"][1]["content"]
+    assert "instant" in captured_calls[2]["messages"][1]["content"]
+    assert "overnight" in captured_calls[3]["messages"][1]["content"]
+    assert voiceover_plan["voiceover_script"] == voiceover_payloads[2]["voiceover_script"]
+
+
+def test_generate_content_image_motion_raises_after_third_voiceover_guardrail_failure(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+    captured_calls: list[dict[str, object]] = []
+
+    image_plan_payload = {
+        "theme": "benefit",
+        "hook_type": "question",
+        "hook_text": "Want fresher skin?",
+        "creative_format": "image_motion_15s",
+        "cta_type": "see_product",
+        "cta_text": "try me",
+        "problem_angle": None,
+        "proof_type": "ingredient",
+        "script_style": "conversational",
+        "platform_captions": {
+            "youtube": "Glow faster",
+            "instagram": "Meet your shortcut.",
+            "tiktok": "POV: your skin",
+            "x": "Serum X makes tired skin look camera-ready.",
+        },
+        "hashtags": ["skincare", "glow"],
+        "image_plan": {
+            "strategy_summary": "Hero-led sequence with texture detail",
+            "total_duration_seconds": 9.0,
+            "performance_rationale": "default",
+            "frames": [
+                {
+                    "role": "hero_macro",
+                    "duration_seconds": 1.5,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "golden_window_light",
+                    "camera_distance": "macro_closeup",
+                    "image_prompt": "Close-up of Serum X bottle with golden light.",
+                },
+                {
+                    "role": "hero_tabletop",
+                    "duration_seconds": 2.0,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "soft_diffused_daylight",
+                    "camera_distance": "closeup",
+                    "image_prompt": "Serum X on bathroom counter.",
+                },
+                {
+                    "role": "texture_detail",
+                    "duration_seconds": 1.5,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "clean_studio_backlight",
+                    "camera_distance": "macro_closeup",
+                    "image_prompt": "Texture detail of Serum X.",
+                },
+            ],
+        },
+    }
+    invalid_voiceover_payload = {
+        "voiceover_script": "Serum X delivers instant glow across every frame, then closes with a soft confident try me.",
+        "estimated_word_count": 16,
+        "timing_rationale": "The line is concise enough for a calm premium read.",
+    }
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured_calls.append(kwargs)
+            payload = image_plan_payload if len(captured_calls) == 1 else invalid_voiceover_payload
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
+                usage=SimpleNamespace(prompt_tokens=100, completion_tokens=150),
+            )
+
+    class FakeOpenAIClient:
+        def __init__(self, api_key: str) -> None:
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    fake_openai = SimpleNamespace(
+        OpenAI=FakeOpenAIClient,
+        APIConnectionError=Exception,
+        RateLimitError=Exception,
+        APIStatusError=Exception,
+    )
+
+    client_secrets = tmp_path / "youtube_client_secrets.json"
+    client_secrets.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "openai": {"api_key": "test-openai-key", "model": "gpt-4.1-mini"},
+            "site_url": "https://example.com",
+            "platforms": {"enabled": ["youtube"]},
+            "youtube": {"client_secrets_file": str(client_secrets)},
+            "bandit": {"ranking_objective": "engagement_rate"},
+        },
+    )
+    monkeypatch.setattr("src.config.load_dotenv", lambda: None)
+    monkeypatch.setattr(prompt_generator, "_load_openai_module", lambda: fake_openai)
+
+    product = Product(sku="serum-x", name="Serum X", product_url="https://example.com/products/serum-x")
+    db.upsert_product(product)
+
+    with pytest.raises(ValueError, match="Voiceover script violated brand guardrails: instant"):
+        prompt_generator.generate_content(
+            product=product,
+            theme="benefit",
+            hook_type="question",
+            product_images=[],
+            creative_format="image_motion_15s",
+        )
+
+    assert len(captured_calls) == 4
+    assert "Retry instruction:" in captured_calls[2]["messages"][1]["content"]
+    assert "Retry instruction:" in captured_calls[3]["messages"][1]["content"]
+
+
+def test_generate_content_ai_video_flex_15s_persists_video_plan(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """ai_video_flex_15s returns video_plan and persists it in asset_manifest_json."""
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    response_payload = {
+        "theme": "benefit",
+        "hook_type": "question",
+        "hook_text": "Want fresher skin?",
+        "creative_format": "ai_video_flex_15s",
+        "cta_type": "see_product",
+        "cta_text": "try me",
+        "problem_angle": None,
+        "proof_type": "ingredient",
+        "script_style": "conversational",
+        "starting_image_prompt": "Cinematic 3D closeup of Serum X on luxury bathroom counter.",
+        "platform_captions": {
+            "youtube": "Glow faster",
+            "instagram": "Meet your shortcut.",
+            "tiktok": "POV: your skin",
+            "x": "Serum X makes tired skin look camera-ready.",
+        },
+        "hashtags": ["skincare", "glow"],
+        "video_plan": {
+            "strategy_summary": "Quick-cut hero sequence",
+            "total_duration_seconds": 8.0,
+            "style_family": "realistic_cinematic",
+            "style_rationale": "Premium skincare positioning",
+            "script_total_words": 18,
+            "scenes": [
+                {"duration_seconds": 2.0, "scene_description": "Hook closeup.", "script": "First line."},
+                {"duration_seconds": 2.0, "scene_description": "HARD CUT to side.", "script": "Second line."},
+                {"duration_seconds": 2.0, "scene_description": "HARD CUT to texture.", "script": "Third line."},
+                {"duration_seconds": 2.0, "scene_description": "HARD CUT to CTA.", "script": "Fourth line."},
+            ],
+        },
+    }
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=json.dumps(response_payload))
+                    )
+                ],
+                usage=SimpleNamespace(prompt_tokens=100, completion_tokens=150),
+            )
+
+    class FakeOpenAIClient:
+        def __init__(self, api_key: str) -> None:
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    fake_openai = SimpleNamespace(
+        OpenAI=FakeOpenAIClient,
+        APIConnectionError=Exception,
+        RateLimitError=Exception,
+        APIStatusError=Exception,
+    )
+
+    client_secrets = tmp_path / "youtube_client_secrets.json"
+    client_secrets.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "openai": {"api_key": "test-openai-key", "model": "gpt-4.1-mini"},
+            "site_url": "https://example.com",
+            "platforms": {"enabled": ["youtube"]},
+            "youtube": {"client_secrets_file": str(client_secrets)},
+        },
+    )
+    monkeypatch.setattr("src.config.load_dotenv", lambda: None)
+    monkeypatch.setattr(prompt_generator, "_load_openai_module", lambda: fake_openai)
+
+    product = Product(sku="serum-x", name="Serum X", product_url="https://example.com/products/serum-x")
+    db.upsert_product(product)
+
+    content, _ = prompt_generator.generate_content(
+        product=product,
+        theme="benefit",
+        hook_type="question",
+        product_images=[],
+        creative_format="ai_video_flex_15s",
+    )
+
+    assert content.creative_format == "ai_video_flex_15s"
     assert content.asset_manifest_json is not None
     manifest = json.loads(content.asset_manifest_json)
-    assert manifest["format"] == "image_motion_15s"
-    assert "image_plan" in manifest
-    plan = manifest["image_plan"]
-    assert len(plan["frames"]) == 3
-    assert plan["total_duration_seconds"] == 9.0
-    assert plan["frames"][0]["role"] == "hero_macro"
+    assert manifest["format"] == "ai_video_flex_15s"
+    assert "video_plan" in manifest
+    plan = manifest["video_plan"]
+    assert len(plan["scenes"]) == 4
+    assert plan["total_duration_seconds"] == 8.0
+    assert plan["style_family"] == "realistic_cinematic"
+    assert "generation_metadata" in manifest
+    assert manifest["generation_metadata"]["scene_count"] == 4
+
+
+def test_generate_content_ai_video_flex_rejects_invalid_video_plan(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """ai_video_flex_15s rejects video_plan with invalid scene count or duration."""
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    base_payload = {
+        "theme": "benefit",
+        "hook_type": "question",
+        "hook_text": "Want fresher skin?",
+        "creative_format": "ai_video_flex_15s",
+        "cta_type": "see_product",
+        "cta_text": "try me",
+        "problem_angle": None,
+        "proof_type": "ingredient",
+        "script_style": "conversational",
+        "starting_image_prompt": "Product on counter.",
+        "platform_captions": {"youtube": "Glow", "instagram": "Glow", "tiktok": "Glow", "x": "Glow"},
+        "hashtags": ["skincare"],
+    }
+
+    def make_fake(payload):
+        class FakeCompletions:
+            def create(self, **kwargs):
+                return SimpleNamespace(
+                    choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
+                    usage=SimpleNamespace(prompt_tokens=100, completion_tokens=100),
+                )
+        return SimpleNamespace(
+            OpenAI=lambda api_key: SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions())),
+            APIConnectionError=Exception,
+            RateLimitError=Exception,
+            APIStatusError=Exception,
+        )
+
+    client_secrets = tmp_path / "youtube_client_secrets.json"
+    client_secrets.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "src.config._config",
+        {"openai": {"api_key": "k"}, "site_url": "x", "platforms": {"enabled": ["youtube"]}, "youtube": {"client_secrets_file": str(client_secrets)}},
+    )
+    monkeypatch.setattr("src.config.load_dotenv", lambda: None)
+
+    product = Product(sku="serum-x", name="Serum X", product_url="https://x.com/serum-x")
+    db.upsert_product(product)
+
+    # Too few scenes (2 < 3)
+    payload = {**base_payload, "video_plan": {
+        "total_duration_seconds": 4,
+        "style_family": "realistic",
+        "style_rationale": "Test",
+        "script_total_words": 8,
+        "scenes": [
+            {"duration_seconds": 2.0, "scene_description": "A", "script": "A"},
+            {"duration_seconds": 2.0, "scene_description": "B", "script": "B"},
+        ],
+    }}
+    monkeypatch.setattr(prompt_generator, "_load_openai_module", lambda: make_fake(payload))
+    with pytest.raises(ValueError, match="3–7 entries"):
+        prompt_generator.generate_content(product=product, theme="benefit", hook_type="question", product_images=[], creative_format="ai_video_flex_15s")
+
+    # Duration out of range (5 < 6)
+    payload = {**base_payload, "video_plan": {
+        "total_duration_seconds": 5,
+        "style_family": "realistic",
+        "style_rationale": "Test",
+        "script_total_words": 10,
+        "scenes": [
+            {"duration_seconds": 2.0, "scene_description": "A", "script": "A"},
+            {"duration_seconds": 2.0, "scene_description": "B", "script": "B"},
+            {"duration_seconds": 1.5, "scene_description": "C", "script": "C"},
+        ],
+    }}
+    monkeypatch.setattr(prompt_generator, "_load_openai_module", lambda: make_fake(payload))
+    with pytest.raises(ValueError, match="6–15"):
+        prompt_generator.generate_content(product=product, theme="benefit", hook_type="question", product_images=[], creative_format="ai_video_flex_15s")

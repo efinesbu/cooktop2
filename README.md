@@ -73,6 +73,9 @@ python cli.py register-images --product eye-cream
 # AI video (4 clips: 2 products × 2 theme/hook pairs)
 python cli.py run --product moisturizer --product eye-cream --theme problem_solution --theme benefit --hook relatable_pain --hook bold_claim --rotate-theme-hook --count 2 --format ai_video_15s
 
+# AI video flex (experimental: 3–7 scenes, 6–15s, flexible style)
+python cli.py run --product moisturizer --product eye-cream --theme problem_solution --theme benefit --hook relatable_pain --hook bold_claim --rotate-theme-hook --count 2 --format ai_video_flex_15s
+
 # Image motion (4 clips)
 python cli.py run --product moisturizer --product eye-cream --theme problem_solution --theme benefit --hook relatable_pain --hook bold_claim --rotate-theme-hook --count 2 --format image_motion_15s
 ```
@@ -85,6 +88,7 @@ To let the bandit choose theme/hook pairs instead of locking them:
 
 ```bash
 python cli.py run --product moisturizer --product eye-cream --count 4 --format ai_video_15s
+python cli.py run --product moisturizer --product eye-cream --count 4 --format ai_video_flex_15s
 python cli.py run --product moisturizer --product eye-cream --count 4 --format image_motion_15s
 ```
 
@@ -205,6 +209,7 @@ This is a manual or semi-manual handoff, not a full paid automation system.
 │   ├── storage.py            # File storage + GCS archival
 │   ├── bandit.py             # Thompson Sampling optimizer
 │   ├── prompt_generator.py   # OpenAI-powered script generation
+│   ├── voiceover_generator.py # OpenAI TTS for image_motion voiceover
 │   ├── image_generator.py    # Gemini-powered image generation
 │   ├── video_generator.py    # xAI-powered video generation
 │   ├── cost_tracker.py       # API cost tracking + budget
@@ -224,7 +229,7 @@ Copy `config.example.yaml` to `config.yaml` and fill in:
 - **Site URL** — public storefront base URL used to build product links and UTMs
 - **Platforms** — optional `platforms.enabled` list to limit the workflow to only the platforms you are ready to test, e.g. `["youtube"]`
 - **Shopify** — optional store URL + Client ID + Client Secret if you want automatic product sync
-- **OpenAI** — API key + model for script generation
+- **OpenAI** — API key + model for script generation. For image_motion_15s voiceover, TTS uses the same key; optional `openai.tts_model` (default `gpt-4o-mini-tts`), `openai.tts_voice_cycle` (default `[marin]`), `openai.tts_response_format` (default `wav`), `openai.tts_language` (default `english`), and `openai.tts_enabled_formats` (default `[image_motion_15s]`)
 - **Gemini** — Google AI API key, optional `gemini.aspect_ratio` (default `9:16` for vertical short-form)
 - **xAI** — Video generation API key, optional `xai.model` (default `grok-imagine-video`), optional `xai.resolution`/`xai.aspect_ratio` (default `9:16` for vertical short-form), and polling controls via `xai.poll_interval_seconds` and `xai.poll_timeout_seconds`
 - **YouTube** — Google OAuth Desktop app client secrets JSON for posting, optional `youtube.token_file` for the cached login token, optional `youtube.login_hint` to suggest the correct Google account during auth, plus `youtube.api_key` for analytics pulls
@@ -380,7 +385,8 @@ For the full runbook, see `tiktok-demo/README.md`.
 - **Database:** `db/velura.db` (SQLite, auto-created)
 - **Videos:** `~/.velura/videos/{product-sku}/{content-id}.mp4`
 - **Product images:** `~/.velura/product-images/{product-slug}/`
-- **image_motion_15s reference folders:** `~/.velura/brand/` (brand-kit images, always used), `~/.velura/models/` (human-model images for lifestyle frames only)
+- **image_motion_15s reference folders:** `~/.velura/brand/` (brand-kit images, always used), `~/.velura/models/` (human-model images for lifestyle frames only). When TTS is enabled, voiceover WAV and silent MP4 sidecars are stored alongside the final voiced `{content-id}.mp4`.
+- **ai_video_flex_15s:** Experimental format; uses the same Gemini + xAI pipeline as ai_video_15s but with a flexible multi-scene plan (3–7 scenes, 6–15 seconds) stored in `asset_manifest_json`
 
 On Windows, `~` resolves to `%USERPROFILE%`.
 

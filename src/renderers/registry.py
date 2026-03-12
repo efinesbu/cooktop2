@@ -56,6 +56,7 @@ def _register_builtin_renderers() -> None:
     if _RENDERERS:
         return
     from . import ai_video  # noqa: F401  # registers on import
+    from . import ai_video_flex  # noqa: F401
     from . import image_motion  # noqa: F401
 
 

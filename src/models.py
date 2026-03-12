@@ -122,10 +122,19 @@ HOOK_TYPE_MAP = {hook.id: hook for hook in HOOK_DEFINITIONS}
 
 PLATFORMS = ["youtube", "instagram", "tiktok", "x"]
 
-GENERATION_STEPS = ["prompt_gen", "image_gen", "video_gen"]
+GENERATION_STEPS = [
+    "prompt_gen",
+    "voiceover_plan_gen",
+    "paid_variant_gen",
+    "image_gen",
+    "video_gen",
+    "slideshow_render",
+    "image_motion_render",
+    "tts_gen",
+]
 
 # Phase 2: creative metadata for reporting and learning
-CREATIVE_FORMATS = ["ai_video_15s", "image_motion_15s"]
+CREATIVE_FORMATS = ["ai_video_15s", "ai_video_flex_15s", "image_motion_15s"]
 CTA_TYPES = ["see_product", "shop_now"]
 PROOF_TYPES = ["test_result", "testimonial", "before_after", "ingredient", "none"]
 SCRIPT_STYLES = ["conversational", "direct", "storytelling", "tip_based"]
