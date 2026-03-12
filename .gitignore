@@ -37,3 +37,5 @@ product-images/
 
 # Debug
 argv_debug.txt
+content_dump.txt
+payloads.txt
