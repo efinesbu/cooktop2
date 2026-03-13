@@ -186,6 +186,91 @@ def _group_performance(
     return ranked
 
 
+def _append_top_and_worst_performers(
+    lines: list[str],
+    performances: list[_PostPerformance],
+) -> None:
+    if not performances:
+        return
+
+    ranked = sorted(performances, key=lambda p: p.engagement_rate, reverse=True)
+
+    lines.append("")
+    lines.append("Top Performers:")
+    for i, p in enumerate(ranked[:3], 1):
+        lines.append(
+            f"  {i}. [{p.product_name}] {p.theme}/{p.hook_type} on {p.post.platform}"
+            f" — {p.engagement_rate:.1%} engagement ({p.metrics.views:,} views)"
+        )
+
+    if len(ranked) > 3:
+        worst_start = max(3, len(ranked) - 3)
+        worst = ranked[worst_start:]
+        lines.append("")
+        lines.append("Worst Performers:")
+        for i, p in enumerate(worst, 1):
+            lines.append(
+                f"  {i}. [{p.product_name}] {p.theme}/{p.hook_type} on {p.post.platform}"
+                f" — {p.engagement_rate:.1%} engagement ({p.metrics.views:,} views)"
+            )
+
+
+def _append_platform_breakdown(
+    lines: list[str],
+    platform_totals: dict[str, dict[str, int]],
+    plat_labels: dict[str, str],
+) -> None:
+    lines.append("")
+    lines.append("Platform Breakdown:")
+    for plat in PLATFORMS:
+        t = platform_totals.get(plat, {})
+        v = t.get("views", 0)
+        lk = t.get("likes", 0)
+        sh = t.get("shares", 0)
+        cm = t.get("comments", 0)
+        label = plat_labels.get(plat, plat)
+        lines.append(
+            f"  {label:>10}: {v:>8,} views │ {lk:>6,} likes │ "
+            f"{sh:>6,} shares │ {cm:>6,} comments"
+        )
+
+
+def _append_window_comparison(
+    lines: list[str],
+    label: str,
+    current_summary: _PerformanceSummary,
+    current_count: int,
+    prior_summary: _PerformanceSummary,
+    prior_count: int,
+) -> None:
+    if not prior_count:
+        lines.append(f"Vs prior {label}: not enough historical data yet.")
+        return
+
+    views_change = _pct_change(current_summary.total_views, prior_summary.total_views)
+    engagement_change = _pct_change(
+        current_summary.engagement_rate,
+        prior_summary.engagement_rate,
+    )
+    post_delta = current_count - prior_count
+    post_delta_label = f"{post_delta:+d}" if post_delta else "0"
+    views_change_label = (
+        f"views {'↑' if views_change >= 0 else '↓'}{abs(views_change):.0f}%"
+        if views_change is not None else "views n/a"
+    )
+    engagement_change_label = (
+        f"engagement {'↑' if engagement_change >= 0 else '↓'}{abs(engagement_change):.0f}%"
+        if engagement_change is not None else "engagement n/a"
+    )
+    change_bits = [
+        views_change_label,
+        engagement_change_label,
+        f"posts {post_delta_label}",
+    ]
+    change_summary = " │ ".join(change_bits)
+    lines.append(f"Vs prior {label}: {change_summary}")
+
+
 def _gather_yesterday_performance() -> tuple[list[_PostPerformance], dict[str, dict[str, int]]]:
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     performances = [
@@ -299,6 +384,10 @@ def _product_health(products: list[Product]) -> dict:
 def generate_briefing() -> str:
     today = date.today()
     lines: list[str] = []
+    plat_labels = {
+        "youtube": "YouTube", "instagram": "Instagram",
+        "tiktok": "TikTok", "x": "X",
+    }
 
     def heading(title: str) -> None:
         lines.append("")
@@ -322,46 +411,11 @@ def generate_briefing() -> str:
     lines.append(f"Posts tracked: {len(performances)}")
 
     if performances:
-        ranked = sorted(performances, key=lambda p: p.engagement_rate, reverse=True)
-
-        lines.append("")
-        lines.append("Top Performers:")
-        for i, p in enumerate(ranked[:3], 1):
-            lines.append(
-                f"  {i}. [{p.product_name}] {p.theme}/{p.hook_type} on {p.post.platform}"
-                f" \u2014 {p.engagement_rate:.1%} engagement ({p.metrics.views:,} views)"
-            )
-
-        if len(ranked) > 3:
-            worst_start = max(3, len(ranked) - 3)
-            worst = ranked[worst_start:]
-            lines.append("")
-            lines.append("Worst Performers:")
-            for i, p in enumerate(worst, 1):
-                lines.append(
-                    f"  {i}. [{p.product_name}] {p.theme}/{p.hook_type} on {p.post.platform}"
-                    f" \u2014 {p.engagement_rate:.1%} engagement ({p.metrics.views:,} views)"
-                )
+        _append_top_and_worst_performers(lines, performances)
     else:
         lines.append("No posts published yesterday with metrics.")
 
-    lines.append("")
-    lines.append("Platform Breakdown:")
-    plat_labels = {
-        "youtube": "YouTube", "instagram": "Instagram",
-        "tiktok": "TikTok", "x": "X",
-    }
-    for plat in PLATFORMS:
-        t = platform_totals.get(plat, {})
-        v = t.get("views", 0)
-        lk = t.get("likes", 0)
-        sh = t.get("shares", 0)
-        cm = t.get("comments", 0)
-        label = plat_labels.get(plat, plat)
-        lines.append(
-            f"  {label:>10}: {v:>8,} views \u2502 {lk:>6,} likes \u2502 "
-            f"{sh:>6,} shares \u2502 {cm:>6,} comments"
-        )
+    _append_platform_breakdown(lines, platform_totals, plat_labels)
 
     # ── Section 2: 7-Day Performance ───────────────────────────────────────
 
@@ -371,7 +425,7 @@ def generate_briefing() -> str:
     prior_start = today - timedelta(days=13)
     prior_end = today - timedelta(days=7)
 
-    recent_performances = _gather_recent_performance(days=15)
+    recent_performances = _gather_recent_performance(days=60)
     current_window = _filter_performance_window(recent_performances, current_start, current_end)
     prior_window = _filter_performance_window(recent_performances, prior_start, prior_end)
     current_summary = _summarize_performance(current_window)
@@ -390,65 +444,16 @@ def generate_briefing() -> str:
     if current_summary.avg_watch_through_rate is not None:
         lines.append(f"Avg watch-through rate: {current_summary.avg_watch_through_rate:.1%}")
 
-    if current_window:
-        ranked = sorted(current_window, key=lambda p: p.engagement_rate, reverse=True)
-        lines.append("")
-        lines.append("Top Performers:")
-        for i, p in enumerate(ranked[:3], 1):
-            lines.append(
-                f"  {i}. [{p.product_name}] {p.theme}/{p.hook_type} on {p.post.platform}"
-                f" \u2014 {p.engagement_rate:.1%} engagement ({p.metrics.views:,} views)"
-            )
-        if len(ranked) > 3:
-            worst_start = max(3, len(ranked) - 3)
-            worst = ranked[worst_start:]
-            lines.append("")
-            lines.append("Worst Performers:")
-            for i, p in enumerate(worst, 1):
-                lines.append(
-                    f"  {i}. [{p.product_name}] {p.theme}/{p.hook_type} on {p.post.platform}"
-                    f" \u2014 {p.engagement_rate:.1%} engagement ({p.metrics.views:,} views)"
-                )
-
-    lines.append("")
-    lines.append("Platform Breakdown:")
-    for plat in PLATFORMS:
-        t = current_summary.platform_totals.get(plat, {})
-        v = t.get("views", 0)
-        lk = t.get("likes", 0)
-        sh = t.get("shares", 0)
-        cm = t.get("comments", 0)
-        label = plat_labels.get(plat, plat)
-        lines.append(
-            f"  {label:>10}: {v:>8,} views \u2502 {lk:>6,} likes \u2502 "
-            f"{sh:>6,} shares \u2502 {cm:>6,} comments"
-        )
-
-    if prior_window:
-        views_change = _pct_change(current_summary.total_views, prior_summary.total_views)
-        engagement_change = _pct_change(
-            current_summary.engagement_rate,
-            prior_summary.engagement_rate,
-        )
-        post_delta = len(current_window) - len(prior_window)
-        post_delta_label = f"{post_delta:+d}" if post_delta else "0"
-        views_change_label = (
-            f"views {'↑' if views_change >= 0 else '↓'}{abs(views_change):.0f}%"
-            if views_change is not None else "views n/a"
-        )
-        engagement_change_label = (
-            f"engagement {'↑' if engagement_change >= 0 else '↓'}{abs(engagement_change):.0f}%"
-            if engagement_change is not None else "engagement n/a"
-        )
-        change_bits = [
-            views_change_label,
-            engagement_change_label,
-            f"posts {post_delta_label}",
-        ]
-        change_summary = " \u2502 ".join(change_bits)
-        lines.append(f"Vs prior 7 days: {change_summary}")
-    else:
-        lines.append("Vs prior 7 days: not enough historical data yet.")
+    _append_top_and_worst_performers(lines, current_window)
+    _append_platform_breakdown(lines, current_summary.platform_totals, plat_labels)
+    _append_window_comparison(
+        lines,
+        "7 days",
+        current_summary,
+        len(current_window),
+        prior_summary,
+        len(prior_window),
+    )
 
     platform_rankings = [
         (platform, summary)
@@ -475,7 +480,68 @@ def generate_briefing() -> str:
             f" {_post_count_label(len(most_viewed_summary.performances))}"
         )
 
-    # ── Section 3: Creative Insights ───────────────────────────────────────
+    # ── Section 3: 30-Day Performance ──────────────────────────────────────
+
+    heading("30-DAY PERFORMANCE")
+    month_start = today - timedelta(days=29)
+    month_end = today
+    prior_month_start = today - timedelta(days=59)
+    prior_month_end = today - timedelta(days=30)
+
+    current_month_window = _filter_performance_window(recent_performances, month_start, month_end)
+    prior_month_window = _filter_performance_window(recent_performances, prior_month_start, prior_month_end)
+    current_month_summary = _summarize_performance(current_month_window)
+    prior_month_summary = _summarize_performance(prior_month_window)
+
+    lines.append(f"Window: {month_start.isoformat()} to {month_end.isoformat()}")
+    lines.append(
+        f"Total: {current_month_summary.total_views:,} views \u2502 {current_month_summary.total_likes:,} likes \u2502 "
+        f"{current_month_summary.total_shares:,} shares \u2502 {current_month_summary.total_comments:,} comments \u2502 "
+        f"{current_month_summary.total_saves:,} saves"
+    )
+    lines.append(
+        f"Posts tracked: {len(current_month_window)} \u2502 Avg/post: {current_month_summary.avg_views_per_post:.0f} views"
+        f" \u2502 Engagement: {current_month_summary.engagement_rate:.1%}"
+    )
+    if current_month_summary.avg_watch_through_rate is not None:
+        lines.append(f"Avg watch-through rate: {current_month_summary.avg_watch_through_rate:.1%}")
+
+    _append_platform_breakdown(lines, current_month_summary.platform_totals, plat_labels)
+    _append_window_comparison(
+        lines,
+        "30 days",
+        current_month_summary,
+        len(current_month_window),
+        prior_month_summary,
+        len(prior_month_window),
+    )
+
+    month_platform_rankings = [
+        (platform, summary)
+        for platform, summary in _group_performance(current_month_window, lambda p: p.post.platform)
+        if summary.performances
+    ]
+    if month_platform_rankings:
+        top_month_platform, top_month_platform_summary = month_platform_rankings[0]
+        lines.append(
+            f"Best platform: {plat_labels.get(str(top_month_platform), str(top_month_platform))}"
+            f" \u2014 {top_month_platform_summary.engagement_rate:.1%} engagement across"
+            f" {_post_count_label(len(top_month_platform_summary.performances))}"
+        )
+
+    month_product_rankings = _group_performance(current_month_window, lambda p: p.product_name)
+    if month_product_rankings:
+        most_viewed_month_product, most_viewed_month_summary = max(
+            month_product_rankings,
+            key=lambda item: (item[1].total_views, item[1].engagement_rate),
+        )
+        lines.append(
+            f"Most viewed product: {most_viewed_month_product}"
+            f" \u2014 {most_viewed_month_summary.total_views:,} views across"
+            f" {_post_count_label(len(most_viewed_month_summary.performances))}"
+        )
+
+    # ── Section 4: Creative Insights ───────────────────────────────────────
 
     heading("CREATIVE INSIGHTS")
     combo_rankings = _group_performance(current_window, lambda p: (p.theme, p.hook_type))
@@ -523,7 +589,7 @@ def generate_briefing() -> str:
     else:
         lines.append("No 7-day creative data available yet.")
 
-    # ── Section 3b: Organic Evaluation (12-Creative Matrix) ───────────────────
+    # ── Section 4b: Organic Evaluation (12-Creative Matrix) ───────────────────
 
     heading("ORGANIC EVALUATION (12-CREATIVE MATRIX)")
     cohort_perfs = gather_cohort_performances(
@@ -580,7 +646,7 @@ def generate_briefing() -> str:
         lines.append("No cohort data in the 7-day window yet.")
         lines.append("Publish creatives across the matrix to see winner/middle/loser labels.")
 
-    # ── Section 4: Bandit Recommendations ──────────────────────────────────
+    # ── Section 5: Bandit Recommendations ──────────────────────────────────
 
     heading("BANDIT RECOMMENDATIONS")
     products = db.list_products(active_only=True, exclude_excluded=True)
@@ -609,7 +675,7 @@ def generate_briefing() -> str:
     else:
         lines.append("No active products to recommend for.")
 
-    # ── Section 5: Product Health ──────────────────────────────────────────
+    # ── Section 6: Product Health ──────────────────────────────────────────
 
     heading("PRODUCT HEALTH")
     health = _product_health(products)
@@ -636,7 +702,7 @@ def generate_briefing() -> str:
         for name in health["awaiting_setup"]:
             lines.append(f"  \u2022 {name}")
 
-    # ── Section 6: Budget ──────────────────────────────────────────────────
+    # ── Section 7: Budget ──────────────────────────────────────────────────
 
     heading("BUDGET")
     spent_today, daily_budget, within_budget = check_budget()
@@ -658,7 +724,7 @@ def generate_briefing() -> str:
     if not within_budget:
         lines.append("\u26a0 TODAY'S BUDGET ALREADY EXCEEDED")
 
-    # ── Section 7: Action Items ────────────────────────────────────────────
+    # ── Section 8: Action Items ────────────────────────────────────────────
 
     heading("ACTION ITEMS")
     actions: list[str] = []
@@ -735,6 +801,7 @@ def display_briefing(briefing: str) -> None:
     section_styles = {
         "YESTERDAY'S PERFORMANCE": "bright_cyan",
         "7-DAY PERFORMANCE": "cyan",
+        "30-DAY PERFORMANCE": "bright_cyan",
         "CREATIVE INSIGHTS": "bright_blue",
         "ORGANIC EVALUATION (12-CREATIVE MATRIX)": "bright_blue",
         "BANDIT RECOMMENDATIONS": "bright_magenta",

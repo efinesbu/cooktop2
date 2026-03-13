@@ -23,6 +23,13 @@ TARGET_WIDTH = 720
 TARGET_HEIGHT = 1280  # 9:16 vertical
 
 
+def _artifact_dir(product_sku: str, content_id: str) -> Path:
+    """Store image-motion intermediates away from the final video folder."""
+    path = config.data_root() / "render-artifacts" / "image-motion" / product_sku / content_id
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _select_source_images(
     images: list[ProductImage],
     product_sku: str,
@@ -179,8 +186,9 @@ class ImageMotionRenderer(BaseRenderer):
         ffmpeg = find_ffmpeg()
         video_dir = config.videos_dir() / product.sku
         video_dir.mkdir(parents=True, exist_ok=True)
+        artifact_dir = _artifact_dir(product.sku, content.id)
         video_path = video_dir / f"{content.id}.mp4"
-        silent_path = video_dir / f"{content.id}_silent.mp4"
+        silent_path = artifact_dir / f"{content.id}_silent.mp4"
 
         plan = _parse_image_plan_from_manifest(content)
         manifest = _parse_manifest(content)
@@ -197,7 +205,7 @@ class ImageMotionRenderer(BaseRenderer):
 
         if plan and plan.get("frames"):
             source_paths = generate_frame_images_for_plan(
-                content, product, plan, output_dir=video_dir
+                content, product, plan, output_dir=artifact_dir
             )
             frames = plan.get("frames", [])
             per_frame_durations = [
@@ -228,7 +236,7 @@ class ImageMotionRenderer(BaseRenderer):
 
         if use_tts:
             manifest["silent_video_local_path"] = str(silent_path)
-            audio_path = video_dir / f"{content.id}_voiceover.wav"
+            audio_path = artifact_dir / f"{content.id}_voiceover.wav"
             generate_voiceover(
                 script=voiceover_plan["voiceover_script"],
                 voice=voiceover_plan["voice"],

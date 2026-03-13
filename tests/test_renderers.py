@@ -265,7 +265,10 @@ def test_render_media_image_motion_uses_plan_when_present(
     )
     db.insert_content(content)
 
+    frame_output_dirs: list[Path | None] = []
+
     def fake_generate_frames(c, p, pl, output_dir=None):
+        frame_output_dirs.append(output_dir)
         return [frame1, frame2, frame3]
 
     monkeypatch.setattr(
@@ -305,6 +308,15 @@ def test_render_media_image_motion_uses_plan_when_present(
     manifest = json.loads(updated.asset_manifest_json or "{}")
     assert "generated_frame_paths" in manifest
     assert manifest["total_duration_seconds"] == 6.0
+    assert len(frame_output_dirs) == 1
+    assert frame_output_dirs[0] is not None
+    assert frame_output_dirs[0] != video_dir
+    assert frame_output_dirs[0].parts[-4:] == (
+        "render-artifacts",
+        "image-motion",
+        sample_product.sku,
+        content.id,
+    )
 
 
 def test_render_media_image_motion_with_voiceover_generates_tts_and_muxes(
@@ -361,8 +373,10 @@ def test_render_media_image_motion_with_voiceover_generates_tts_and_muxes(
 
     tts_calls: list[tuple] = []
     mux_calls: list[tuple] = []
+    frame_output_dirs: list[Path | None] = []
 
     def fake_generate_frames(c, p, pl, output_dir=None):
+        frame_output_dirs.append(output_dir)
         return [frame1, frame2, frame3]
 
     def fake_generate_voiceover(script, voice, voice_instructions, output_path, content_id, **kwargs):
@@ -415,15 +429,19 @@ def test_render_media_image_motion_with_voiceover_generates_tts_and_muxes(
     assert tts_calls[0][0] == "Want fresher skin? Try me."
     assert tts_calls[0][1] == "marin"
     assert tts_calls[0][2].endswith("_voiceover.wav")
+    assert "render-artifacts" in Path(tts_calls[0][2]).parts
 
     assert len(mux_calls) == 1
     assert mux_calls[0][0].endswith("_silent.mp4")
     assert mux_calls[0][1].endswith("_voiceover.wav")
     assert mux_calls[0][2].endswith(".mp4")
+    assert "render-artifacts" in Path(mux_calls[0][0]).parts
+    assert "render-artifacts" in Path(mux_calls[0][1]).parts
 
     assert result.suffix == ".mp4"
     assert result.name == "test-im-tts.mp4"
     assert result.read_bytes() == b"fake-voiced-mp4"
+    assert "render-artifacts" not in result.parts
 
     updated = db.get_content(content.id)
     assert updated is not None
@@ -432,3 +450,13 @@ def test_render_media_image_motion_with_voiceover_generates_tts_and_muxes(
     assert "audio_local_path" in manifest
     assert "silent_video_local_path" in manifest
     assert manifest["audio_local_path"].endswith("_voiceover.wav")
+    assert "render-artifacts" in Path(manifest["audio_local_path"]).parts
+    assert "render-artifacts" in Path(manifest["silent_video_local_path"]).parts
+    assert len(frame_output_dirs) == 1
+    assert frame_output_dirs[0] is not None
+    assert frame_output_dirs[0].parts[-4:] == (
+        "render-artifacts",
+        "image-motion",
+        sample_product.sku,
+        content.id,
+    )

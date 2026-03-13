@@ -170,6 +170,47 @@ def test_approve_schedule_and_post_due(
     assert posts[0].destination_url == "https://example.com/products/serum-x"
 
 
+def test_preview_all_shows_every_saved_row(tmp_db: Path) -> None:
+    product = Product(sku="serum-x", name="Serum X")
+    db.upsert_product(product)
+
+    recent = Content(
+        id="content-recent",
+        product_sku=product.sku,
+        theme="benefit",
+        hook_type="question",
+    )
+    older = Content(
+        id="content-older",
+        product_sku=product.sku,
+        theme="problem",
+        hook_type="bold_claim",
+    )
+    db.insert_content(recent)
+    db.insert_content(older)
+    with db._connect() as conn:
+        conn.execute(
+            "UPDATE content SET created_at=datetime('now', '-2 days') WHERE id=?",
+            (older.id,),
+        )
+
+    runner = CliRunner()
+
+    all_result = runner.invoke(cli_module.cli, ["preview", "--all"])
+    assert all_result.exit_code == 0
+    assert "All Content" in all_result.output
+    assert "benefit" in all_result.output
+    assert "problem" in all_result.output
+    assert "Product" in all_result.output
+    assert "Theme" in all_result.output
+    assert "Hook Type" in all_result.output
+
+    last_24h_result = runner.invoke(cli_module.cli, ["preview", "--last-24h"])
+    assert last_24h_result.exit_code == 0
+    assert "benefit" in last_24h_result.output
+    assert "problem" not in last_24h_result.output
+
+
 def test_schedule_and_post_due_skip_disabled_platform_payloads(
     tmp_db: Path,
     monkeypatch,

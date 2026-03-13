@@ -122,6 +122,12 @@ def test_generate_briefing_includes_7day_trends_and_creative_insights(monkeypatc
     assert "Vs prior 7 days: views ↓25% │ engagement ↓22% │ posts +2" in briefing
     assert "Best platform: YouTube — 12.0% engagement across 1 post" in briefing
     assert "Most viewed product: Serum B — 2,700 views across 2 posts" in briefing
+    assert "30-DAY PERFORMANCE" in briefing
+    assert "Window: 2026-02-08 to 2026-03-09" in briefing
+    assert "Posts tracked: 6 │ Avg/post: 1750 views │ Engagement: 5.9%" in briefing
+    assert "Vs prior 30 days: not enough historical data yet." in briefing
+    assert "Best platform: Instagram — 7.6% engagement across 2 posts" in briefing
+    assert "Most viewed product: Serum B — 5,700 views across 3 posts" in briefing
     assert "Top repeated combos (7d):" in briefing
     assert "1. benefit/question — 11.1% engagement (2 posts, 1,800 views)" in briefing
     assert "1. routine/quick_tip — 1.1% engagement (2 posts)" in briefing
@@ -176,6 +182,9 @@ def test_generate_briefing_includes_today_in_rolling_7day_window(monkeypatch) ->
     assert "No posts published yesterday with metrics." in briefing
     assert "Window: 2026-03-03 to 2026-03-09" in briefing
     assert "Posts tracked: 1 │ Avg/post: 700 views │ Engagement: 10.0%" in briefing
+    assert "30-DAY PERFORMANCE" in briefing
+    assert "Window: 2026-02-08 to 2026-03-09" in briefing
+    assert "Vs prior 30 days: not enough historical data yet." in briefing
     assert "Most viewed product: Serum A — 700 views across 1 post" in briefing
 
 

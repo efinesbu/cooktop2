@@ -443,6 +443,16 @@ def list_content_last_24h() -> list[Content]:
     return [_row_to_content(r) for r in rows]
 
 
+def list_all_content() -> list[Content]:
+    """Return all content, newest first."""
+    with _connect() as conn:
+        rows = conn.execute(
+            """SELECT * FROM content
+               ORDER BY created_at DESC"""
+        ).fetchall()
+    return [_row_to_content(r) for r in rows]
+
+
 def approve_content(content_id: str) -> None:
     with _connect() as conn:
         conn.execute(

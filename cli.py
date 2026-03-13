@@ -988,16 +988,22 @@ def _review_display_status(content: Content, payloads: list[PlatformPayload]) ->
 @cli.command()
 @click.option("--today", is_flag=True, help="Show today's content (00:00–23:59 local)")
 @click.option("--last-24h", "last_24h", is_flag=True, help="Show content from the last 24 hours")
-def preview(today: bool, last_24h: bool):
+@click.option("--all", "show_all", is_flag=True, help="Show all saved content")
+def preview(today: bool, last_24h: bool, show_all: bool):
     """Preview generated content."""
-    if not today and not last_24h:
-        console.print("[red]Provide either --today or --last-24h.[/red]")
+    selected_scopes = sum([today, last_24h, show_all])
+    if selected_scopes == 0:
+        console.print("[red]Provide one of --today, --last-24h, or --all.[/red]")
         return
-    if today and last_24h:
-        console.print("[red]Provide only one of --today or --last-24h.[/red]")
+    if selected_scopes > 1:
+        console.print("[red]Provide only one of --today, --last-24h, or --all.[/red]")
         return
     _init()
-    if last_24h:
+    if show_all:
+        items = db.list_all_content()
+        title = "All Content"
+        empty_msg = "No content found."
+    elif last_24h:
         items = db.list_content_last_24h()
         title = "Content (last 24 hours)"
         empty_msg = "No content in the last 24 hours."
@@ -1052,6 +1058,9 @@ def _resolve_content(content_id: str, use_last_24h: bool = True):
             items_today = db.list_content_today()
             if idx < len(items_today):
                 return items_today[idx]
+            items_all = db.list_all_content()
+            if idx < len(items_all):
+                return items_all[idx]
         return None
     return db.get_content(content_id)
 
