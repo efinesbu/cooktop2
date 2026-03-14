@@ -3,7 +3,9 @@ from __future__ import annotations
 import importlib
 import json
 import logging
+import re
 import time
+import unicodedata
 import uuid
 from typing import Any
 
@@ -33,6 +35,8 @@ Generate exactly 1 unique creative variation for the target product. Output an i
 STRICT RULES AND CONSTRAINTS
 - Each script must be exactly 30 words total, split into two 15-word parts: `scene_1_script` and `scene_2_script`.
 - No medical or health claims.
+- Use plain ASCII characters only in every field.
+- Do not use emoji, curly quotes, smart apostrophes, ellipses, em dashes, or other Unicode punctuation.
 - Use only approved softeners when needed: "appears to", "feels like", "helps skin look", "designed to".
 - No before/after treatment framing.
 - No quick or drastic movements.
@@ -60,7 +64,7 @@ RESPOND WITH ONLY valid JSON matching this exact schema — no markdown fences, 
   "scene_2_script": "string — 15 words, first person, FTC-compliant benefits, ending with a call to action.",
   "platform_captions": {
     "youtube": "string — YouTube Shorts caption (max 100 chars, keyword-rich, must end with 'Link in bio')",
-    "instagram": "string — Instagram Reels caption (conversational, emoji-friendly, 1-2 sentences)",
+    "instagram": "string — Instagram Reels caption (conversational plain text, 1-2 sentences, no emoji)",
     "tiktok": "string — TikTok caption (trendy, casual, max 150 chars)",
     "x": "string — X/Twitter caption (max 280 chars, concise and punchy)"
   },
@@ -80,6 +84,7 @@ RULES:
 - The `starting_image_prompt` must stay visually grounded in a luxury bathroom counter setup.
 - Keep the anthropomorphic product as the only character.
 - Keep the total video pacing to 15 seconds.
+- Use only plain ASCII characters in every field. No emoji or Unicode punctuation.
 """
 
 _SIMPLIFIED_SYSTEM_PROMPT = """\
@@ -92,6 +97,7 @@ Generate exactly 1 unique creative variation for the target product. Output a sh
 - Pick a `theme` and `hook_type` from the allowed whitelist unless locked.
 - Return a concise `hook_text` that captures the opening hook.
 - No medical or health claims. Use only approved softeners: "appears to", "feels like", "helps skin look".
+- Use plain ASCII characters only in every field. No emoji or Unicode punctuation.
 
 RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
 
@@ -107,7 +113,7 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
   "script_style": "string — conversational, direct, storytelling, tip_based",
   "platform_captions": {
     "youtube": "string — max 100 chars, end with 'Link in bio'",
-    "instagram": "string — conversational, emoji-friendly",
+    "instagram": "string — conversational plain text, no emoji",
     "tiktok": "string — trendy, max 150 chars",
     "x": "string — max 280 chars"
   },
@@ -125,6 +131,7 @@ Generate exactly 1 unique creative for image_motion_15s: a 3–5 frame vertical 
 - Pick theme and hook_type from the allowed whitelist unless locked.
 - Return hook_text, platform_captions, hashtags.
 - Also return an image_plan: a structured multi-frame plan for Gemini to generate 3–5 images.
+- Use plain ASCII characters only in every field. No emoji or Unicode punctuation.
 
 CONTROLLED VARIETY (use this vocabulary; vary at most 1–2 axes per creative):
 - style_family: anamorphic, realistic_cinematic
@@ -153,7 +160,7 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
   "script_style": "string — conversational, direct, storytelling, tip_based",
   "platform_captions": {
     "youtube": "string — max 100 chars, end with 'Link in bio'",
-    "instagram": "string — conversational, emoji-friendly",
+    "instagram": "string — conversational plain text, no emoji",
     "tiktok": "string — trendy, max 150 chars",
     "x": "string — max 280 chars"
   },
@@ -199,6 +206,49 @@ TTS_GUARDRAIL_FORBIDDEN = (
     "before and after", "transformation", "dramatic results",
 )
 TTS_GUARDRAIL_SOFTENERS = ("appears to", "feels like", "helps skin look", "designed to")
+
+_UNICODE_TEXT_REPLACEMENTS = {
+    "\u00a0": " ",
+    "\u200b": "",
+    "\u200c": "",
+    "\u200d": "",
+    "\ufeff": "",
+    "\u2018": "'",
+    "\u2019": "'",
+    "\u201a": "'",
+    "\u201b": "'",
+    "\u201c": '"',
+    "\u201d": '"',
+    "\u201e": '"',
+    "\u2026": "...",
+    "\u2013": "-",
+    "\u2014": "-",
+    "\u2212": "-",
+}
+
+
+def _sanitize_generated_text(value: str) -> str:
+    """Normalize model text to plain ASCII-safe content for downstream media tools."""
+    text = value
+    for source, target in _UNICODE_TEXT_REPLACEMENTS.items():
+        text = text.replace(source, target)
+    text = unicodedata.normalize("NFKD", text)
+    text = text.encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    text = re.sub(r"\n\s*", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _sanitize_generated_payload(value: Any) -> Any:
+    """Recursively sanitize OpenAI-generated text fields before validation/persistence."""
+    if isinstance(value, str):
+        return _sanitize_generated_text(value)
+    if isinstance(value, list):
+        return [_sanitize_generated_payload(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _sanitize_generated_payload(item) for key, item in value.items()}
+    return value
 
 
 def _build_voiceover_script_caption_led(parsed: dict, product_name: str) -> str:
@@ -341,6 +391,7 @@ CONTENT RULES
 - End with the provided CTA if it fits naturally.
 - No medical or health claims.
 - Do not use hypey urgency, slang, exaggerated promises, or forbidden phrasing.
+- Use only plain ASCII characters. No emoji or Unicode punctuation.
 
 RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
 
@@ -425,6 +476,7 @@ def _parse_voiceover_response(raw: str, total_duration_seconds: float) -> dict[s
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ValueError(f"OpenAI returned invalid voiceover JSON: {exc}") from exc
+    data = _sanitize_generated_payload(data)
 
     script = str(data.get("voiceover_script") or "").strip()
     if not script:
@@ -527,6 +579,7 @@ Generate exactly 1 unique creative for ai_video_flex_15s: a flexible multi-scene
 - Return hook_text, platform_captions, hashtags.
 - Return a video_plan: structured scene list with durations, visual descriptions, and voiceover scripts.
  - Choose a style_family that fits the product and creative direction. Supported options are anamorphic and realistic_cinematic.
+- Use plain ASCII characters only in every field. No emoji or Unicode punctuation.
 
 STYLE REFERENCE — when style_family is "anamorphic":
 Use cinematic 3D closeup of anthropomorphic product on luxury bathroom counter: Pixar-style face, large expressive eyes, articulated mouth, soft focus background, volumetric lighting, octane render, unreal engine 5, 4k, brand "velura" in brown serif (Cormorant Garamond, Georgia, Times New Roman).
@@ -555,7 +608,7 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
   "starting_image_prompt": "string — flexible starting frame for the video; when anamorphic, use luxury bathroom + anthropomorphic product per style reference above",
   "platform_captions": {
     "youtube": "string — max 100 chars, end with 'Link in bio'",
-    "instagram": "string — conversational, emoji-friendly",
+    "instagram": "string — conversational plain text, no emoji",
     "tiktok": "string — trendy, max 150 chars",
     "x": "string — max 280 chars"
   },
@@ -638,6 +691,7 @@ Generate exactly 1 unique creative for a 15-second video. Output MUST use a time
 - Choose content_goal: "conversion" (direct-response) or "engagement" (saves, shares, follows, watch-through).
 - When content_goal is "engagement", CTA can be softer; prioritize stopping the scroll and earning a save or follow.
 - If product reference images are provided, preserve the real package silhouette, label layout, and visible brand wordmark from the hero references in the starting frame and product hero scenes. Do not genericize or omit on-pack branding.
+- Use plain ASCII characters only in every field. No emoji or Unicode punctuation.
 
 STRICT TIMING RULES
 - timeline: exactly 4 scenes. Use these exact timestamp brackets: [0:00–0:03], [0:03–0:07], [0:07–0:11], [0:11–0:15].
@@ -647,6 +701,27 @@ STRICT TIMING RULES
 PACING (no word-count math)
 - Write voiceover scripts that fit a moderate speaking pace of 2–3 words per second for each scene's timestamp bracket.
 - Scene 1 (0–3s): ~6–9 words. Scene 2 (3–7s): ~8–12 words. Scene 3 (7–11s): ~8–12 words. Scene 4 (11–15s): ~8–12 words.
+
+SCENE ROLE DEFINITIONS (each scene MUST serve its assigned role in BOTH visual direction and voiceover script):
+- hook (Scene 1): Grab attention with a bold or surprising opening. Expression should be attention-catching (e.g., bold confidence, wide-eyed surprise). Script introduces ONE compelling claim or question — this is the only scene that states the core hook.
+- problem (Scene 2): Create tension or contrast. Expression shifts to a distinctly different register (e.g., conspiratorial side-eye, gentle concern, empathetic knowing look). Script names a relatable pain point, gap, or contrast that the viewer recognizes. Do NOT restate or rephrase the hook.
+- proof (Scene 3): Build credibility. Expression shifts to warm confidence or delight. Script delivers ONE specific reason to believe — a texture detail, key ingredient, sensory experience, or social validation. The visual must include at least one concrete detail that reinforces the proof (e.g., rack focus on creamy texture, light catching the product surface, a visual cue for the claimed benefit).
+- cta (Scene 4): Invite action with warmth. Expression is inviting and open. Script closes with a clear, distinct call to action that does NOT repeat language from earlier scenes.
+
+SCRIPT VARIETY (mandatory):
+- Each scene's voiceover must advance the narrative to a NEW idea. The four scripts must read as a mini-story with a beginning, middle, and end — not four versions of the same tagline.
+- No two scenes may express the same concept. Do not use synonyms of the same idea (e.g., "rebuying," "keep reaching for," "favorite," "repeat-purchase") across multiple scenes.
+- If the theme is social_proof, distribute the proof: Scene 1 can claim popularity, but Scene 2 must pivot to a problem or contrast, Scene 3 must give a specific reason, and Scene 4 must invite action with fresh language.
+
+VISUAL-SCRIPT COUPLING (mandatory):
+- Each scene_description must include at least one specific visual detail that directly illustrates or emotionally reinforces the voiceover line for that scene.
+- The product's facial expression MUST match the emotional register of the script line (e.g., conspiratorial for revealing a secret, warm pride for a proof point, beckoning for a CTA).
+- Do not write generic beauty-shot descriptions disconnected from the script content. Every visual choice should serve the story beat.
+
+EXPRESSION ARC (mandatory for anamorphic):
+- The product's facial expression must follow a distinct emotional progression across the 4 scenes.
+- No two consecutive scenes may use the same emotional register.
+- Example arcs: bold confidence → conspiratorial concern → warm delight → inviting warmth, or wide-eyed surprise → empathetic knowing → proud satisfaction → playful beckoning.
 
 FTC COMPLIANCE
 - No medical or health claims. Use approved softeners: "appears to", "feels like", "helps skin look", "designed to".
@@ -667,7 +742,7 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
   "starting_image_prompt": "string — first frame; preserve visible packaging branding/wordmark and label layout from hero reference images when provided; when style_family is anamorphic, MUST use full anamorphic spec per ANAMORPHIC SCENE RULES (cinematic 3D closeup, anthropomorphic product, luxury bathroom counter, Pixar-style face, volumetric lighting, octane render, unreal engine 5, 4k, brand velura in brown serif)",
   "platform_captions": {
     "youtube": "string — max 100 chars, end with 'Link in bio'",
-    "instagram": "string — conversational, emoji-friendly",
+    "instagram": "string — conversational plain text, no emoji",
     "tiktok": "string — trendy, max 150 chars",
     "x": "string — max 280 chars"
   },
@@ -682,10 +757,10 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
     "scene_roles": ["hook", "problem", "proof", "cta"]
   },
   "timeline": [
-    {"start_seconds": 0, "end_seconds": 3, "scene_description": "string — visual direction; NO HARD CUT for scene 1; when anamorphic, anthropomorphic product must be sole on-screen subject", "script": "string — voiceover, first person when anamorphic"},
-    {"start_seconds": 3, "end_seconds": 7, "scene_description": "string — MUST start with 'HARD CUT:'; when anamorphic, new angle/expression on anthropomorphic product only, no new characters", "script": "string"},
-    {"start_seconds": 7, "end_seconds": 11, "scene_description": "string — MUST start with 'HARD CUT:'; when anamorphic, anthropomorphic product remains sole subject", "script": "string"},
-    {"start_seconds": 11, "end_seconds": 15, "scene_description": "string — MUST start with 'HARD CUT:'; when anamorphic, product hero shot with anthropomorphic product only", "script": "string"}
+    {"start_seconds": 0, "end_seconds": 3, "scene_description": "string — ROLE: hook. Visual direction with attention-grabbing expression; NO HARD CUT for scene 1; when anamorphic, anthropomorphic product must be sole on-screen subject", "script": "string — voiceover introducing the core hook, first person when anamorphic"},
+    {"start_seconds": 3, "end_seconds": 7, "scene_description": "string — ROLE: problem. MUST start with 'HARD CUT:'; expression shifts to a contrasting register; visual reinforces the pain point or contrast in the script; when anamorphic, new angle/expression on anthropomorphic product only, no new characters", "script": "string — names a pain point or contrast, must NOT restate the hook"},
+    {"start_seconds": 7, "end_seconds": 11, "scene_description": "string — ROLE: proof. MUST start with 'HARD CUT:'; expression shifts to warm confidence; must include a concrete visual detail reinforcing the proof claim; when anamorphic, anthropomorphic product remains sole subject", "script": "string — delivers one specific reason to believe"},
+    {"start_seconds": 11, "end_seconds": 15, "scene_description": "string — ROLE: cta. MUST start with 'HARD CUT:'; expression is inviting and open; when anamorphic, product hero shot with anthropomorphic product only", "script": "string — clear call to action with fresh language, no repeated concepts from earlier scenes"}
   ]
 }
 """
@@ -1080,6 +1155,7 @@ def _parse_response(
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ValueError(f"OpenAI returned invalid JSON: {exc}\n\nRaw response:\n{raw}") from exc
+    data = _sanitize_generated_payload(data)
 
     use_image_motion = creative_format == "image_motion_15s"
     use_ai_video_flex = creative_format == "ai_video_flex_15s" and not video_v2
@@ -1259,6 +1335,7 @@ TASK: Generate N ad-safe caption variants for a proven organic winner. Each vari
 - Vary the CTA (see_product vs shop_now), opening hook, or caption tone
 - Stay FTC-compliant; no medical or health claims
 - Use only approved softeners: "appears to", "feels like", "helps skin look"
+- Use plain ASCII characters only in every field. No emoji or Unicode punctuation.
 
 RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
 
@@ -1270,7 +1347,7 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
       "cta_text": "string — CTA phrase (e.g. 'try me today', 'shop now')",
       "platform_captions": {
         "youtube": "string — max 100 chars, end with 'Link in bio'",
-        "instagram": "string — conversational, emoji-friendly",
+        "instagram": "string — conversational plain text, no emoji",
         "tiktok": "string — trendy, max 150 chars",
         "x": "string — max 280 chars"
       },
@@ -1346,7 +1423,7 @@ def generate_paid_variant_captions(
         raw = raw.split("\n", 1)[1]
         if raw.endswith("```"):
             raw = raw[: raw.rfind("```")]
-    data = json.loads(raw)
+    data = _sanitize_generated_payload(json.loads(raw))
 
     variants = data.get("variants", [])
     if not isinstance(variants, list) or len(variants) < 1:
