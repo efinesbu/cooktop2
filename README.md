@@ -248,7 +248,7 @@ If `platforms.enabled` is omitted, Velura auto-enables only the platforms that h
 
 For YouTube posting, `youtube.client_secrets_file` must be a Google Cloud OAuth client JSON for a `Desktop app`. A `Web application` client will fail with `Error 400: redirect_uri_mismatch` because Velura uses a localhost callback during the installed-app auth flow.
 
-The upload goes to whichever Google/YouTube account completes the OAuth browser flow when `youtube_token.json` is created. Set `youtube.login_hint` if you want Google to prefill the intended account, and delete the token file before retrying if you need to switch accounts.
+The upload goes to whichever Google/YouTube account completes the OAuth browser flow when `youtube_token.json` is created. Set `youtube.login_hint` if you want Google to prefill the intended account. If Google later revokes that cached refresh token, Velura now falls back to a fresh browser login automatically; you can still delete the token file manually before retrying if you want to switch accounts completely.
 
 xAI video generation now uses the async `POST /v1/videos/generations` flow and polls `GET /v1/videos/{request_id}` until the video is ready. The default poll interval is 15 seconds, and you can change it with `xai.poll_interval_seconds` in `config.yaml`.
 

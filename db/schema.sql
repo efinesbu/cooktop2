@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS content (
     script_style          TEXT,
     research_snapshot_id  TEXT,
     asset_manifest_json   TEXT,
-    source_content_id     TEXT
+    source_content_id     TEXT,
+    strategy_metadata_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS platform_payloads (

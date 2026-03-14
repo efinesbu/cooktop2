@@ -1,0 +1,22 @@
+feat: add video-v2 rigid timelines, dynamic image refresh, and youtube token recovery
+
+Content pipeline:
+- Add --video-v2 flag to force ai_video_flex_15s with rigid 4-scene [0,3,7,11,15s] timeline
+- Introduce _AI_VIDEO_V2_SYSTEM_PROMPT enforcing HARD CUT transitions and anamorphic/realistic_cinematic styles
+- Extract strategy_metadata_json (style_family, style_angle, audience clusters) into schema and asset manifest
+- Update paid_variant to clone strategy metadata
+
+CLI & Product Images:
+- Add dynamic product image refresh (refresh_images_if_changed) before generation
+- Improve reference image fallback to prefer hero files, falling back to any valid image
+- Block incompatible --video-v2 and --format image_motion_15s flags
+
+Bandit & Briefing:
+- Transition bandit arm lookup to canonical arm_key strings (theme__hook_type)
+- Update morning_briefing to format combo strings as theme/hook_type
+- Fix starter arms configuration in config.example.yaml and tests
+
+Posters (YouTube):
+- Automatically trigger a fresh browser login if a cached refresh token is expired/revoked (RefreshError)
+
+Made-with: Cursor

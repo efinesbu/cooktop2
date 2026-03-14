@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -43,8 +44,19 @@ class YouTubePoster(BasePoster):
             creds = Credentials.from_authorized_user_file(str(token_path), _SCOPES)
 
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        elif not creds or not creds.valid:
+            try:
+                creds.refresh(Request())
+            except RefreshError as exc:
+                if not self._is_revoked_refresh_token_error(exc):
+                    raise
+                logger.warning(
+                    "Cached YouTube OAuth token at %s was expired or revoked; "
+                    "starting a fresh browser login.",
+                    token_path,
+                )
+                creds = None
+
+        if not creds or not creds.valid:
             flow = self._build_oauth_flow(secrets_file)
             creds = flow.run_local_server(
                 port=0,
@@ -55,6 +67,12 @@ class YouTubePoster(BasePoster):
 
         token_path.write_text(creds.to_json(), encoding="utf-8")
         return creds
+
+    def _is_revoked_refresh_token_error(self, exc: RefreshError) -> bool:
+        message = str(exc).lower()
+        return "invalid_grant" in message and (
+            "expired or revoked" in message or "revoked" in message
+        )
 
     def _build_oauth_flow(self, secrets_file: Path) -> InstalledAppFlow:
         client_config = json.loads(secrets_file.read_text(encoding="utf-8"))

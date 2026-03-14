@@ -233,7 +233,7 @@ def test_generate_content_allows_prompt_selected_labels_without_overrides(
         product_images=[],
     )
 
-    assert "Creative selection task:" in captured["messages"][1]["content"]
+    assert "Locked creative constraints:" in captured["messages"][1]["content"]
     assert "Allowed themes:" in captured["messages"][1]["content"]
     assert "Allowed hook types:" in captured["messages"][1]["content"]
     assert content.theme == "routine"
@@ -1143,18 +1143,182 @@ def test_generate_content_ai_video_flex_rejects_invalid_video_plan(
     with pytest.raises(ValueError, match="3–7 entries"):
         prompt_generator.generate_content(product=product, theme="benefit", hook_type="question", product_images=[], creative_format="ai_video_flex_15s")
 
-    # Duration out of range (5 < 6)
+    # Scene duration 4.0 out of range (1.5–3.0): clamped and total normalized
     payload = {**base_payload, "video_plan": {
-        "total_duration_seconds": 5,
+        "total_duration_seconds": 10,
         "style_family": "realistic",
         "style_rationale": "Test",
-        "script_total_words": 10,
+        "script_total_words": 12,
         "scenes": [
-            {"duration_seconds": 2.0, "scene_description": "A", "script": "A"},
-            {"duration_seconds": 2.0, "scene_description": "B", "script": "B"},
-            {"duration_seconds": 1.5, "scene_description": "C", "script": "C"},
+            {"duration_seconds": 4.0, "scene_description": "A", "script": "A"},
+            {"duration_seconds": 3.0, "scene_description": "B", "script": "B"},
+            {"duration_seconds": 3.0, "scene_description": "C", "script": "C"},
         ],
     }}
     monkeypatch.setattr(prompt_generator, "_load_openai_module", lambda: make_fake(payload))
-    with pytest.raises(ValueError, match="6–15"):
-        prompt_generator.generate_content(product=product, theme="benefit", hook_type="question", product_images=[], creative_format="ai_video_flex_15s")
+    content, _ = prompt_generator.generate_content(
+        product=product, theme="benefit", hook_type="question", product_images=[], creative_format="ai_video_flex_15s"
+    )
+    manifest = json.loads(content.asset_manifest_json)
+    plan = manifest["video_plan"]
+    assert plan["scenes"][0]["duration_seconds"] == 3.0  # 4.0 clamped to 3.0
+    assert 6 <= plan["total_duration_seconds"] <= 15
+
+
+def test_build_user_message_video_v2_preserves_branding_from_hero_references() -> None:
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    product = Product(sku="eye-cream", name="Eye Cream")
+    product_images = [
+        ProductImage(
+            product_sku=product.sku,
+            file_path="C:/tmp/hero-eyecream.png",
+            image_type="hero",
+        ),
+        ProductImage(
+            product_sku=product.sku,
+            file_path="C:/tmp/detail-eyecream.jpeg",
+            image_type="detail",
+        ),
+    ]
+
+    message = prompt_generator._build_user_message(
+        product=product,
+        theme="benefit",
+        hook_type="visual_surprise",
+        product_images=product_images,
+        creative_format="ai_video_flex_15s",
+        video_v2=True,
+    )
+
+    assert "preserve the real package silhouette, label layout, and visible brand wordmark" in message
+    assert "Do not genericize or omit the on-pack Velura branding" in message
+
+
+# ---------------------------------------------------------------------------
+# Video V2: _validate_and_normalize_v2_timeline (Batch 5)
+# ---------------------------------------------------------------------------
+
+
+def test_validate_and_normalize_v2_timeline_valid_four_scenes() -> None:
+    """Valid 4-scene timeline with timestamps [0-3], [3-7], [7-11], [11-15] returns video_plan with duration_seconds."""
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    data = {
+        "theme": "benefit",
+        "hook_type": "question",
+        "timeline": [
+            {"start_seconds": 0, "end_seconds": 3, "scene_description": "Hook closeup.", "script": "First line."},
+            {"start_seconds": 3, "end_seconds": 7, "scene_description": "HARD CUT to side.", "script": "Second line."},
+            {"start_seconds": 7, "end_seconds": 11, "scene_description": "HARD CUT to texture.", "script": "Third line."},
+            {"start_seconds": 11, "end_seconds": 15, "scene_description": "HARD CUT to CTA.", "script": "Fourth line."},
+        ],
+        "strategy_metadata": {"style_family": "anamorphic", "style_angle": "Test rationale"},
+    }
+    prompt_generator._validate_and_normalize_v2_timeline(data)
+
+    assert "video_plan" in data
+    plan = data["video_plan"]
+    assert plan["total_duration_seconds"] == 15
+    assert len(plan["scenes"]) == 4
+    assert plan["scenes"][0]["duration_seconds"] == 3.0
+    assert plan["scenes"][1]["duration_seconds"] == 4.0
+    assert plan["scenes"][2]["duration_seconds"] == 4.0
+    assert plan["scenes"][3]["duration_seconds"] == 4.0
+    assert plan["style_family"] == "anamorphic"
+    assert plan["style_rationale"] == "Test rationale"
+
+
+def test_validate_and_normalize_v2_timeline_wrong_scene_count_raises() -> None:
+    """Invalid: wrong scene count (3 or 5) raises ValueError."""
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    base_scene = {"start_seconds": 0, "end_seconds": 3, "scene_description": "X", "script": "X"}
+
+    # 3 scenes
+    data = {"timeline": [base_scene.copy(), base_scene.copy(), base_scene.copy()]}
+    with pytest.raises(ValueError, match="exactly 4 scenes"):
+        prompt_generator._validate_and_normalize_v2_timeline(data)
+
+    # 5 scenes
+    data = {"timeline": [base_scene.copy() for _ in range(5)]}
+    with pytest.raises(ValueError, match="exactly 4 scenes"):
+        prompt_generator._validate_and_normalize_v2_timeline(data)
+
+
+def test_validate_and_normalize_v2_timeline_missing_hard_cut_raises() -> None:
+    """Invalid: missing HARD CUT prefix on scenes 2-4 raises ValueError."""
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    valid_timeline = [
+        {"start_seconds": 0, "end_seconds": 3, "scene_description": "Hook closeup.", "script": "First."},
+        {"start_seconds": 3, "end_seconds": 7, "scene_description": "HARD CUT to side.", "script": "Second."},
+        {"start_seconds": 7, "end_seconds": 11, "scene_description": "HARD CUT to texture.", "script": "Third."},
+        {"start_seconds": 11, "end_seconds": 15, "scene_description": "HARD CUT to CTA.", "script": "Fourth."},
+    ]
+
+    # Scene 2 missing HARD CUT
+    data = {"timeline": valid_timeline.copy()}
+    data["timeline"][1]["scene_description"] = "Just a cut to side."
+    with pytest.raises(ValueError, match="HARD CUT"):
+        prompt_generator._validate_and_normalize_v2_timeline(data)
+
+    # Scene 3 missing HARD CUT
+    data = {"timeline": [s.copy() for s in valid_timeline]}
+    data["timeline"][2]["scene_description"] = "Another angle."
+    with pytest.raises(ValueError, match="HARD CUT"):
+        prompt_generator._validate_and_normalize_v2_timeline(data)
+
+    # Scene 4 missing HARD CUT
+    data = {"timeline": [s.copy() for s in valid_timeline]}
+    data["timeline"][3]["scene_description"] = "Final CTA shot."
+    with pytest.raises(ValueError, match="HARD CUT"):
+        prompt_generator._validate_and_normalize_v2_timeline(data)
+
+
+def test_validate_and_normalize_v2_timeline_malformed_timestamps_raises() -> None:
+    """Invalid: malformed timestamps raises ValueError."""
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    valid_timeline = [
+        {"start_seconds": 0, "end_seconds": 3, "scene_description": "Hook.", "script": "A"},
+        {"start_seconds": 3, "end_seconds": 7, "scene_description": "HARD CUT.", "script": "B"},
+        {"start_seconds": 7, "end_seconds": 11, "scene_description": "HARD CUT.", "script": "C"},
+        {"start_seconds": 11, "end_seconds": 15, "scene_description": "HARD CUT.", "script": "D"},
+    ]
+
+    # Wrong start/end for scene 0
+    data = {"timeline": [s.copy() for s in valid_timeline]}
+    data["timeline"][0]["start_seconds"] = 1
+    data["timeline"][0]["end_seconds"] = 4
+    with pytest.raises(ValueError, match="start_seconds=0, end_seconds=3"):
+        prompt_generator._validate_and_normalize_v2_timeline(data)
+
+    # Wrong start/end for scene 2
+    data = {"timeline": [s.copy() for s in valid_timeline]}
+    data["timeline"][2]["start_seconds"] = 8
+    data["timeline"][2]["end_seconds"] = 12
+    with pytest.raises(ValueError, match="start_seconds=7, end_seconds=11"):
+        prompt_generator._validate_and_normalize_v2_timeline(data)
+
+    # Missing scene_description
+    data = {"timeline": [s.copy() for s in valid_timeline]}
+    data["timeline"][1]["scene_description"] = ""
+    with pytest.raises(ValueError, match="scene_description is required"):
+        prompt_generator._validate_and_normalize_v2_timeline(data)
+
+    # Missing script
+    data = {"timeline": [s.copy() for s in valid_timeline]}
+    data["timeline"][3]["script"] = ""
+    with pytest.raises(ValueError, match="script is required"):
+        prompt_generator._validate_and_normalize_v2_timeline(data)
+
+    # Non-dict scene
+    data = {"timeline": [valid_timeline[0], "not a dict", valid_timeline[2], valid_timeline[3]]}
+    with pytest.raises(ValueError, match="must be an object"):
+        prompt_generator._validate_and_normalize_v2_timeline(data)

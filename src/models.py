@@ -203,6 +203,8 @@ class Content:
     asset_manifest_json: Optional[str] = None
     # Phase 7: lineage from paid variant back to organic winner
     source_content_id: Optional[str] = None
+    # Video V2: strategy metadata for learning (style_family, audience clusters, etc.)
+    strategy_metadata_json: Optional[str] = None
 
 
 @dataclass
@@ -333,3 +335,4 @@ class ThemeHookAllocation:
     hook_type: str
     count: int
     score: float = 0.0
+    arm_key: str = ""  # For lookup of the selected theme/hook arm

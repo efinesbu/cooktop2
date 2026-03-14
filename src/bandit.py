@@ -15,20 +15,24 @@ from src.models import (
 
 ARM_KEY_SEPARATOR = "__"
 DEFAULT_STARTER_ARMS: list[tuple[str, str]] = [
+    ("fear", "relatable_pain"),
     ("problem_solution", "relatable_pain"),
-    ("benefit", "bold_claim"),
     ("curiosity", "question"),
-    ("benefit", "visual_surprise"),
+    ("social_proof", "bold_claim"),
 ]
 
 
 def arm_key(theme: str, hook_type: str) -> str:
+    """Build arm key from the canonical learnable strategy pair."""
     return f"{theme}{ARM_KEY_SEPARATOR}{hook_type}"
 
 
 def parse_arm_key(key: str) -> tuple[str, str]:
-    theme, hook_type = key.split(ARM_KEY_SEPARATOR, 1)
-    return theme, hook_type
+    """Parse arm key into its canonical strategy pair."""
+    parts = key.split(ARM_KEY_SEPARATOR)
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    raise ValueError(f"Invalid arm_key format: {key!r}")
 
 
 def starter_arm_keys() -> list[str]:
@@ -103,6 +107,7 @@ def recommend(total_slots: int = 8) -> BanditRecommendation:
             hook_type=arm.hook_type,
             count=allocation_map[arm.arm_key],
             score=sampled_scores[arm.arm_key],
+            arm_key=arm.arm_key,
         )
         for arm in ranked_arms
         if allocation_map[arm.arm_key] > 0
@@ -176,7 +181,6 @@ def _allocate_remaining_slots(
         )
         allocation_map[chosen.arm_key] += 1
         extra_allocations[chosen.arm_key] += 1
-
 
 def _ranking_objective() -> str:
     """Return configured ranking objective, validated against supported values."""
@@ -261,7 +265,9 @@ def update_from_metrics() -> int:
         theme = str(aggregate["theme"])
         hook_type = str(aggregate["hook_type"])
         key = arm_key(theme, hook_type)
-        if db.get_bandit_arm(key) is None:
+
+        arm = db.get_bandit_arm(key)
+        if arm is None:
             continue
 
         rate = int(aggregate["engagements"]) / max(int(aggregate["views"]), 1)

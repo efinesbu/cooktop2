@@ -69,6 +69,7 @@ def clone_for_paid(
             research_snapshot_id=content.research_snapshot_id,
             asset_manifest_json=content.asset_manifest_json,
             source_content_id=source_content_id,
+            strategy_metadata_json=getattr(content, "strategy_metadata_json", None),
         )
         db.insert_content(variant)
 

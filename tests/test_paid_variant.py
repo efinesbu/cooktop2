@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -107,3 +108,27 @@ def test_clone_for_paid_raises_when_no_video(winner_content: Content) -> None:
     with pytest.raises(ValueError, match="no video_local_path"):
         with patch("src.paid_variant.generate_paid_variant_captions", side_effect=_mock_variant_captions):
             clone_for_paid(winner_content.id, variant_count=2)
+
+
+def test_clone_for_paid_copies_strategy_metadata_json(
+    winner_content: Content,
+    mock_config: dict,
+) -> None:
+    """Paid variant clone copies strategy_metadata_json from source content."""
+    strategy = {"style_family": "realistic_cinematic", "style_angle": "Curiosity-led product reveal"}
+    with db._connect() as conn:
+        conn.execute(
+            "UPDATE content SET strategy_metadata_json = ? WHERE id = ?",
+            (json.dumps(strategy), winner_content.id),
+        )
+
+    with patch("src.paid_variant.config.enabled_platforms", return_value=["youtube"]):
+        with patch("src.paid_variant.generate_paid_variant_captions", side_effect=_mock_variant_captions):
+            created = clone_for_paid(winner_content.id, variant_count=2)
+
+    assert len(created) == 2
+    for variant in created:
+        assert variant.strategy_metadata_json is not None
+        parsed = json.loads(variant.strategy_metadata_json)
+        assert parsed["style_family"] == "realistic_cinematic"
+        assert parsed["style_angle"] == "Curiosity-led product reveal"

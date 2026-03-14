@@ -54,12 +54,21 @@ def generate_starting_image(content: Content, product: Product) -> Path:
 
 
 def _first_hero_image_path(product: Product) -> Path | None:
-    """Return the path of the first product hero image, or None if none exist."""
-    hero_dir = config.product_images_dir() / product.sku
-    if not hero_dir.exists():
+    """Prefer a hero reference image; fall back to the first supported product image."""
+    image_dir = config.product_images_dir() / product.sku
+    if not image_dir.exists():
         return None
-    hero_images = sorted(hero_dir.glob("*"))
-    return hero_images[0] if hero_images else None
+
+    image_paths = [
+        path
+        for path in sorted(image_dir.glob("*"))
+        if path.is_file() and path.suffix.lower() in _IMAGE_MIME
+    ]
+    if not image_paths:
+        return None
+
+    hero_images = [path for path in image_paths if "hero" in path.stem.lower()]
+    return hero_images[0] if hero_images else image_paths[0]
 
 
 def _mime_type_for_path(path: Path) -> str:
@@ -73,7 +82,9 @@ def _build_prompt(content: Content, product: Product) -> str:
     if _first_hero_image_path(product):
         base_prompt += (
             f"\n\nUse the attached reference image of the product '{product.name}' "
-            "to match its real appearance, colors, and branding as closely as possible."
+            "to match its real appearance, packaging, label layout, and visible brand "
+            "wordmark as closely as possible. Do not replace, omit, or genericize the "
+            "on-pack branding from the reference."
         )
 
     return base_prompt
@@ -231,10 +242,7 @@ def _generate_with_retries(
                     image_config=types.ImageConfig(aspect_ratio=aspect_ratio),
                 ),
             )
-            for part in response.candidates[0].content.parts:
-                if part.inline_data is not None:
-                    return part.inline_data.data
-            raise RuntimeError("Gemini response contained no image data")
+            return _extract_image_bytes(response)
         except Exception as exc:
             if attempt == max_attempts:
                 raise
@@ -242,3 +250,47 @@ def _generate_with_retries(
             time.sleep(delay)
             delay *= 2
     raise RuntimeError("Exhausted retries without returning")
+
+
+def _extract_image_bytes(response: object) -> bytes:
+    """Return inline image bytes or raise a helpful error for empty Gemini responses."""
+    candidates = getattr(response, "candidates", None) or []
+    for candidate in candidates:
+        content = getattr(candidate, "content", None)
+        parts = getattr(content, "parts", None) or []
+        for part in parts:
+            inline_data = getattr(part, "inline_data", None)
+            data = getattr(inline_data, "data", None)
+            if data is not None:
+                return data
+    raise RuntimeError(_describe_response_issue(response))
+
+
+def _describe_response_issue(response: object) -> str:
+    """Summarize blocked or empty Gemini responses for logs and retries."""
+    prompt_feedback = getattr(response, "prompt_feedback", None)
+    block_reason = getattr(prompt_feedback, "block_reason", None)
+    block_message = getattr(prompt_feedback, "block_reason_message", None)
+    if block_reason or block_message:
+        details = [f"block_reason={block_reason!r}"] if block_reason else []
+        if block_message:
+            details.append(f"message={block_message}")
+        return "Gemini response contained no image data (" + ", ".join(details) + ")"
+
+    candidates = getattr(response, "candidates", None) or []
+    if not candidates:
+        return "Gemini response contained no candidates"
+
+    finish_reasons: list[str] = []
+    for candidate in candidates:
+        finish_reason = getattr(candidate, "finish_reason", None)
+        if finish_reason:
+            finish_reasons.append(str(finish_reason))
+
+    if finish_reasons:
+        return (
+            "Gemini response contained no image data "
+            f"(finish_reasons={', '.join(finish_reasons)})"
+        )
+
+    return "Gemini response contained no image data"

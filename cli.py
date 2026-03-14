@@ -32,7 +32,7 @@ from src.posters.instagram import InstagramPoster
 from src.posters.tiktok import TikTokPoster
 from src.posters.x import XPoster
 from src.posters.youtube import YouTubePoster
-from src.product_images import register_images
+from src.product_images import refresh_images_if_changed, register_images
 from src.prompt_generator import generate_content
 from src.renderers import render_media
 
@@ -353,9 +353,10 @@ def _run_generation_job(
     job: tuple[Product, str | None, str | None],
     should_post: bool,
     creative_format: str | None = None,
+    video_v2: bool = False,
 ) -> Optional[Content]:
     product, theme, hook_type = job
-    return _generate_single(product, theme, hook_type, should_post, creative_format)
+    return _generate_single(product, theme, hook_type, should_post, creative_format, video_v2)
 
 
 def _generate_batch(
@@ -363,6 +364,7 @@ def _generate_batch(
     should_post: bool,
     requested_count: int,
     creative_format: str | None = None,
+    video_v2: bool = False,
 ) -> int:
     if not jobs:
         return 0
@@ -371,19 +373,19 @@ def _generate_batch(
         max_workers = min(len(jobs), requested_count)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             results = executor.map(
-                lambda job: _run_generation_job(job, should_post, creative_format),
+                lambda job: _run_generation_job(job, should_post, creative_format, video_v2),
                 jobs,
             )
             return sum(1 for result in results if result)
 
     return sum(
         1 for product, theme, hook_type in jobs
-        if _generate_single(product, theme, hook_type, should_post, creative_format)
+        if _generate_single(product, theme, hook_type, should_post, creative_format, video_v2)
     )
 
 
 def _generate_single(product: Product, theme: str | None, hook_type: str | None,
-                     should_post: bool, creative_format: str | None = None) -> Optional[Content]:
+                     should_post: bool, creative_format: str | None = None, video_v2: bool = False) -> Optional[Content]:
     spent, budget, within = check_budget()
     if not within:
         console.print(
@@ -391,12 +393,14 @@ def _generate_single(product: Product, theme: str | None, hook_type: str | None,
         )
         return None
 
-    images = db.list_product_images(product.sku)
+    images, refreshed_images = refresh_images_if_changed(product.sku)
+    if refreshed_images:
+        console.print(f"[dim]{product.sku}: refreshed registered images from disk.[/dim]")
     if not images:
         console.print(f"[yellow]{product.sku}: no images registered, continuing anyway.[/yellow]")
 
     console.print(f"  {product.sku}: generating prompt … ({_format_strategy_label(theme, hook_type)})")
-    content, extras = generate_content(product, theme, hook_type, images, creative_format)
+    content, extras = generate_content(product, theme, hook_type, images, creative_format, video_v2=video_v2)
     if "prompt_input" in extras:
         console.print(Panel(extras["prompt_input"], title="Prompt", border_style="dim"))
     if "prompt_output" in extras:
@@ -798,6 +802,12 @@ def briefing_diagnose_cmd():
     default=None,
     help="Creative format (ai_video_15s, ai_video_flex_15s, image_motion_15s). Default: ai_video_15s.",
 )
+@click.option(
+    "--video-v2",
+    "video_v2",
+    is_flag=True,
+    help="Use video-v2 prompts (forces ai_video_flex_15s). Incompatible with --format image_motion_15s.",
+)
 @click.option("--count", default=8, show_default=True, help="Total clips across all products in --auto mode")
 @click.option(
     "--rotate-theme-hook",
@@ -806,10 +816,20 @@ def briefing_diagnose_cmd():
 )
 @click.option("--post", "should_post", is_flag=True, help="Deprecated: use preview, approve, schedule, and post-due")
 def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
-        hooks: tuple[str, ...], creative_format: str | None, count: int,
-        rotate_theme_hook: bool, should_post: bool):
+        hooks: tuple[str, ...], creative_format: str | None, video_v2: bool,
+        count: int, rotate_theme_hook: bool, should_post: bool):
     """Generate content — manually or via bandit recommendations."""
     _init()
+
+    if video_v2 and creative_format == "image_motion_15s":
+        console.print(
+            "[red]--video-v2 cannot be combined with --format image_motion_15s.[/red] "
+            "Use --video-v2 alone (it forces ai_video_flex_15s) or omit --video-v2."
+        )
+        sys.exit(1)
+
+    if video_v2:
+        creative_format = "ai_video_flex_15s"
 
     if should_post:
         console.print(
@@ -825,12 +845,12 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
         sys.exit(1)
 
     if auto_mode:
-        _run_auto(count, should_post, creative_format)
+        _run_auto(count, should_post, creative_format, video_v2)
     else:
-        _run_manual(slugs, themes, hooks, count, should_post, creative_format, rotate_theme_hook)
+        _run_manual(slugs, themes, hooks, count, should_post, creative_format, rotate_theme_hook, video_v2)
 
 
-def _run_auto(count: int, should_post: bool, creative_format: str | None = None):
+def _run_auto(count: int, should_post: bool, creative_format: str | None = None, video_v2: bool = False):
     products = db.list_products(
         active_only=True,
         exclude_excluded=True,
@@ -869,7 +889,7 @@ def _run_auto(count: int, should_post: bool, creative_format: str | None = None)
         console.print(Panel(f"[bold]{product.name}[/bold] ({product.sku})", style="blue"))
         jobs.extend((product, theme, hook_type) for theme, hook_type in product_runs)
 
-    total = _generate_batch(jobs, should_post, requested_count=count, creative_format=creative_format)
+    total = _generate_batch(jobs, should_post, requested_count=count, creative_format=creative_format, video_v2=video_v2)
 
     piece = "piece" if total == 1 else "pieces"
     console.print(f"\n[green]{total}[/green] {piece} of content generated ({len(products)} products eligible).")
@@ -877,7 +897,7 @@ def _run_auto(count: int, should_post: bool, creative_format: str | None = None)
 
 def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
                 hooks: tuple[str, ...], count: int, should_post: bool,
-                creative_format: str | None = None, rotate_theme_hook: bool = False):
+                creative_format: str | None = None, rotate_theme_hook: bool = False, video_v2: bool = False):
     if not slugs:
         console.print("[red]Provide at least one --product or use --auto.[/red]")
         sys.exit(1)
@@ -900,7 +920,7 @@ def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
             strategy_pairs = _manual_strategy_runs(themes, hooks, count, rotate_theme_hook)
         jobs.extend((product, theme, hook) for theme, hook in strategy_pairs)
 
-    total = _generate_batch(jobs, should_post, requested_count=count, creative_format=creative_format)
+    total = _generate_batch(jobs, should_post, requested_count=count, creative_format=creative_format, video_v2=video_v2)
 
     console.print(f"\n[green]{total}[/green] pieces of content generated.")
 
@@ -1645,6 +1665,7 @@ def _report_bandit_weights(slug: str):
     recommendation_count = int(config.get("bandit.daily_slots", 8))
     rec = bandit.recommend(recommendation_count)
 
+    arms_by_key = {arm.arm_key: arm for arm in arms}
     rec_table = Table(title="Current Recommendations")
     rec_table.add_column("Theme", style="cyan")
     rec_table.add_column("Hook Type")
@@ -1652,7 +1673,12 @@ def _report_bandit_weights(slug: str):
     rec_table.add_column("Sampled Score", justify="right")
     rec_table.add_column("Mode")
     for alloc in rec.allocations:
-        arm = next((item for item in arms if item.theme == alloc.theme and item.hook_type == alloc.hook_type), None)
+        arm = arms_by_key.get(alloc.arm_key) if alloc.arm_key else None
+        if not arm:
+            arm = next(
+                (a for a in arms if a.theme == alloc.theme and a.hook_type == alloc.hook_type),
+                None,
+            )
         trials = max(int((arm.alpha + arm.beta) - 2), 0) if arm else 0
         mode = "explore" if trials < 5 else "exploit"
         rec_table.add_row(

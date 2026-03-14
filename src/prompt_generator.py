@@ -526,7 +526,7 @@ Generate exactly 1 unique creative for ai_video_flex_15s: a flexible multi-scene
 - Pick theme and hook_type from the allowed whitelist unless locked.
 - Return hook_text, platform_captions, hashtags.
 - Return a video_plan: structured scene list with durations, visual descriptions, and voiceover scripts.
-- Choose a style_family that fits the product and creative direction. Anamorphic is one option; you may choose other styles (e.g. realistic_cinematic, soft_minimal, bold_contrast).
+ - Choose a style_family that fits the product and creative direction. Supported options are anamorphic and realistic_cinematic.
 
 STYLE REFERENCE — when style_family is "anamorphic":
 Use cinematic 3D closeup of anthropomorphic product on luxury bathroom counter: Pixar-style face, large expressive eyes, articulated mouth, soft focus background, volumetric lighting, octane render, unreal engine 5, 4k, brand "velura" in brown serif (Cormorant Garamond, Georgia, Times New Roman).
@@ -563,7 +563,7 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
   "video_plan": {
     "strategy_summary": "string — one-line creative strategy",
     "total_duration_seconds": number — 6 to 15,
-    "style_family": "string — anamorphic | realistic_cinematic | soft_minimal | bold_contrast | or other named style",
+    "style_family": "string — anamorphic | realistic_cinematic",
     "style_rationale": "string — why this style fits the product and creative direction",
     "script_total_words": number — sum of words across all scene scripts,
     "scenes": [
@@ -574,6 +574,119 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
       }
     ]
   }
+}
+"""
+
+# Video V2: Audience research clusters for fear and curiosity style buckets
+_AUDIENCE_QUESTIONS = [
+    "Does it work for my skin type?",
+    "How fast will I see results?",
+    "Will it irritate sensitive skin?",
+    "Which ingredient actually matters?",
+    "How does it fit into my routine?",
+    "Is it worth the price? (yes)",
+    "Will it help with dark spots, acne, dryness, or texture?",    
+]
+_AUDIENCE_FEARS = [
+    "Breakouts or purging",
+    "Irritation or barrier damage",
+    "Wasting money on hype",
+    "Fake before-and-afters",
+    "Buying the wrong product for the skin concern",
+    "Overcomplicated routines",
+    "Results that do not last",
+    "Actives being too harsh for daily use",
+]
+
+STYLE_BUCKETS = [
+    "fear_non_user",
+    "aspirational_luxury",
+    "routine_upgrade",    
+    "curiosity_reveal",    
+]
+
+_AI_VIDEO_V2_SYSTEM_PROMPT = """\
+You are an expert creative director and AI video prompt engineer for premium beauty and skincare content. Your output powers both conversion-oriented ads and highly engaging organic content that builds followers and saves.
+
+TARGET PRODUCT: provided in the user message.
+
+VISUAL DIRECTORY (apply to scene descriptions when style_family matches):
+- anamorphic: Cinematic 3D closeup of anthropomorphic product on luxury bathroom counter. Pixar-style face, large expressive eyes, articulated mouth, soft focus background, volumetric lighting, octane render, unreal engine 5, 4k, brand "velura" in brown serif (Cormorant Garamond, Georgia, Times New Roman).
+- realistic_cinematic: Natural proportions, realistic hands and skin, soft diffusion, premium product hero shot.
+
+STYLE_FAMILY DEFAULT:
+- Prefer style_family "anamorphic" unless RESEARCH INSIGHT in the user message explicitly requests "realistic_cinematic". Anamorphic is the default for premium product-led video.
+
+ANAMORPHIC SCENE RULES (apply to ALL scenes when style_family is "anamorphic"):
+- The anthropomorphic product is the ONLY character in every scene. No human hands, models, or secondary characters.
+- Every scene_description must include the anthropomorphic product with its Pixar-style face, expressive eyes, and articulated mouth.
+- Scene variety comes from camera angle, expression, and lighting changes on the product — NOT from introducing new characters or environments.
+- The luxury bathroom counter is the consistent environment. Do not switch to vanities, studios, or abstract backgrounds.
+- The product speaks in first person in every voiceover script.
+- When anamorphic, starting_image_prompt MUST use the full spec: cinematic 3D closeup, anthropomorphic product, luxury bathroom counter, Pixar-style face, volumetric lighting, octane render, unreal engine 5, 4k, brand "velura" in brown serif.
+
+AUDIENCE INSIGHT — when theme is fear:
+Choose ONE realistic fear from this list and frame it gently and compliantly: """ + "; ".join(_AUDIENCE_FEARS) + """.
+
+AUDIENCE INSIGHT — when theme is curiosity:
+Choose ONE question from this list and build the open loop around it: """ + "; ".join(_AUDIENCE_QUESTIONS) + """.
+
+CORE DIRECTIVE
+Generate exactly 1 unique creative for a 15-second video. Output MUST use a timeline with exactly 4 scenes and absolute timestamps. Total duration is LOCKED at 15 seconds.
+- Pick theme and hook_type from the allowed whitelist unless locked.
+- Return hook_text, platform_captions, hashtags.
+- Choose content_goal: "conversion" (direct-response) or "engagement" (saves, shares, follows, watch-through).
+- When content_goal is "engagement", CTA can be softer; prioritize stopping the scroll and earning a save or follow.
+- If product reference images are provided, preserve the real package silhouette, label layout, and visible brand wordmark from the hero references in the starting frame and product hero scenes. Do not genericize or omit on-pack branding.
+
+STRICT TIMING RULES
+- timeline: exactly 4 scenes. Use these exact timestamp brackets: [0:00–0:03], [0:03–0:07], [0:07–0:11], [0:11–0:15].
+- Each scene has start_seconds (0, 3, 7, 11) and end_seconds (3, 7, 11, 15).
+- Scenes 2, 3, and 4 MUST begin their scene_description with the exact phrase "HARD CUT:" to force visual cuts and prevent subject melting.
+
+PACING (no word-count math)
+- Write voiceover scripts that fit a moderate speaking pace of 2–3 words per second for each scene's timestamp bracket.
+- Scene 1 (0–3s): ~6–9 words. Scene 2 (3–7s): ~8–12 words. Scene 3 (7–11s): ~8–12 words. Scene 4 (11–15s): ~8–12 words.
+
+FTC COMPLIANCE
+- No medical or health claims. Use approved softeners: "appears to", "feels like", "helps skin look", "designed to".
+- Keep movements subtle for AI video generation.
+
+RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
+
+{
+  "theme": "string — from allowed themes",
+  "hook_type": "string — from allowed hook types",
+  "hook_text": "string — short opening hook line",
+  "creative_format": "ai_video_flex_15s",
+  "cta_type": "string — see_product or shop_now",
+  "cta_text": "string — CTA phrase",
+  "problem_angle": "string or null",
+  "proof_type": "string — test_result, testimonial, before_after, ingredient, none",
+  "script_style": "string — conversational, direct, storytelling, tip_based",
+  "starting_image_prompt": "string — first frame; preserve visible packaging branding/wordmark and label layout from hero reference images when provided; when style_family is anamorphic, MUST use full anamorphic spec per ANAMORPHIC SCENE RULES (cinematic 3D closeup, anthropomorphic product, luxury bathroom counter, Pixar-style face, volumetric lighting, octane render, unreal engine 5, 4k, brand velura in brown serif)",
+  "platform_captions": {
+    "youtube": "string — max 100 chars, end with 'Link in bio'",
+    "instagram": "string — conversational, emoji-friendly",
+    "tiktok": "string — trendy, max 150 chars",
+    "x": "string — max 280 chars"
+  },
+  "hashtags": ["list", "of", "hashtags", "without #"],
+  "strategy_metadata": {
+    "style_family": "string — anamorphic (default) | realistic_cinematic (only when RESEARCH INSIGHT explicitly requests it)",
+    "style_angle": "string — one-line summary of the execution",
+    "content_goal": "conversion or engagement",
+    "primary_engagement_intent": "follow | save | share | comment | click",
+    "audience_question_cluster": "string or null — if theme is curiosity, which question",
+    "audience_fear_cluster": "string or null — if theme is fear, which fear",
+    "scene_roles": ["hook", "problem", "proof", "cta"]
+  },
+  "timeline": [
+    {"start_seconds": 0, "end_seconds": 3, "scene_description": "string — visual direction; NO HARD CUT for scene 1; when anamorphic, anthropomorphic product must be sole on-screen subject", "script": "string — voiceover, first person when anamorphic"},
+    {"start_seconds": 3, "end_seconds": 7, "scene_description": "string — MUST start with 'HARD CUT:'; when anamorphic, new angle/expression on anthropomorphic product only, no new characters", "script": "string"},
+    {"start_seconds": 7, "end_seconds": 11, "scene_description": "string — MUST start with 'HARD CUT:'; when anamorphic, anthropomorphic product remains sole subject", "script": "string"},
+    {"start_seconds": 11, "end_seconds": 15, "scene_description": "string — MUST start with 'HARD CUT:'; when anamorphic, product hero shot with anthropomorphic product only", "script": "string"}
+  ]
 }
 """
 
@@ -593,6 +706,7 @@ def _build_user_message(
     research_summary: str | None = None,
     creative_format: str | None = None,
     performance_summary: str | None = None,
+    video_v2: bool = False,
 ) -> str:
     theme_ids = [theme] if theme else None
     hook_ids = [hook_type] if hook_type else None
@@ -621,6 +735,12 @@ def _build_user_message(
         ]
         lines.append("Available product images:")
         lines.extend(img_descriptions)
+        if any((img.image_type or "").strip().lower() == "hero" for img in product_images):
+            lines.append(
+                "Reference-image rule: preserve the real package silhouette, label layout, "
+                "and visible brand wordmark from hero product images. Do not genericize or "
+                "omit the on-pack Velura branding in the starting image or product hero shots."
+            )
     if research_summary and research_summary.strip():
         lines.append("")
         lines.append("RESEARCH INSIGHT (use to inform your creative choices):")
@@ -636,6 +756,9 @@ def _build_user_message(
     if creative_format == "ai_video_flex_15s":
         lines.append("")
         lines.append("AUDIENCE: prefers quicker scene changes; avoid long 7.5s scenes.")
+    if video_v2:
+        lines.append("")
+        lines.append("VIDEO V2: Use the timeline format with exactly 4 scenes and absolute timestamps [0:00–0:03], [0:03–0:07], [0:07–0:11], [0:11–0:15]. Scenes 2–4 must start with 'HARD CUT:'.")
     return "\n".join(lines)
 
 
@@ -645,6 +768,7 @@ def generate_content(
     hook_type: str | None,
     product_images: list[ProductImage],
     creative_format: str | None = None,
+    video_v2: bool = False,
 ) -> tuple[Content, dict]:
     """Call OpenAI to generate a structured content script for a 15-second video ad.
 
@@ -663,6 +787,8 @@ def generate_content(
 
     # Phase 3: inject research snapshot for reuse across generation cycles
     fmt = creative_format or "ai_video_15s"
+    if video_v2:
+        fmt = "ai_video_flex_15s"
     snapshot = db.get_best_matching_snapshot(
         product_sku=product.sku,
         platform=None,
@@ -681,17 +807,20 @@ def generate_content(
     user_msg = _build_user_message(
         product, theme, hook_type, product_images,
         research_summary=research_summary,
-        creative_format=creative_format,
+        creative_format=fmt,
         performance_summary=performance_summary,
+        video_v2=video_v2,
     )
     content_id = uuid.uuid4().hex[:16]
 
     use_image_motion = fmt == "image_motion_15s"
     use_ai_video_flex = fmt == "ai_video_flex_15s"
+    use_ai_video_v2 = video_v2
     system_prompt = (
         _IMAGE_MOTION_SYSTEM_PROMPT if use_image_motion else
-        (_AI_VIDEO_FLEX_SYSTEM_PROMPT if use_ai_video_flex else
-         (_SIMPLIFIED_SYSTEM_PROMPT if fmt != "ai_video_15s" else _SYSTEM_PROMPT))
+        (_AI_VIDEO_V2_SYSTEM_PROMPT if use_ai_video_v2 else
+         (_AI_VIDEO_FLEX_SYSTEM_PROMPT if use_ai_video_flex else
+          (_SIMPLIFIED_SYSTEM_PROMPT if fmt != "ai_video_15s" else _SYSTEM_PROMPT)))
     )
 
     response = _call_with_retries(
@@ -706,7 +835,7 @@ def generate_content(
     prompt_output_raw = _response_text(response)
 
     parsed = _parse_response(
-        response, theme=theme, hook_type=hook_type, creative_format=creative_format
+        response, theme=theme, hook_type=hook_type, creative_format=fmt, video_v2=video_v2
     )
 
     asset_manifest_json = None
@@ -746,25 +875,40 @@ def generate_content(
         if not isinstance(scenes, list) or len(scenes) < 3 or len(scenes) > 7:
             raise ValueError("video_plan.scenes must have 3–7 entries")
         total = plan.get("total_duration_seconds", 0)
-        if not isinstance(total, (int, float)) or total < 6 or total > 15:
-            raise ValueError("video_plan.total_duration_seconds must be 6–15")
-        scene_sum = sum(
-            s.get("duration_seconds", 0) for s in scenes
-            if isinstance(s, dict) and isinstance(s.get("duration_seconds"), (int, float))
-        )
-        if abs(scene_sum - total) > 0.1:
-            raise ValueError(
-                f"video_plan scene durations sum to {scene_sum}, must equal total_duration_seconds {total}"
+        if not isinstance(total, (int, float)):
+            raise ValueError("video_plan.total_duration_seconds must be a number")
+        # V2 timeline uses fixed 15s format with 3,4,4,4 second scenes; skip clamp for that path.
+        # For non-V2 ai_video_flex_15s, clamp LLM slip-ups (values outside 1.5–3.0).
+        if not video_v2:
+            for i, s in enumerate(scenes):
+                if not isinstance(s, dict):
+                    raise ValueError(f"video_plan.scenes[{i}] must be an object")
+                dur = s.get("duration_seconds")
+                if not isinstance(dur, (int, float)):
+                    raise ValueError(
+                        f"video_plan.scenes[{i}].duration_seconds must be a number, got {dur!r}"
+                    )
+                clamped = max(1.5, min(3.0, float(dur)))
+                if abs(clamped - dur) > 0.01:
+                    s["duration_seconds"] = clamped
+            scene_sum = sum(
+                s.get("duration_seconds", 0) for s in scenes
+                if isinstance(s, dict) and isinstance(s.get("duration_seconds"), (int, float))
             )
-        for i, s in enumerate(scenes):
-            if not isinstance(s, dict):
-                raise ValueError(f"video_plan.scenes[{i}] must be an object")
-            dur = s.get("duration_seconds")
-            if not isinstance(dur, (int, float)) or dur < 1.5 or dur > 3.0:
-                raise ValueError(
-                    f"video_plan.scenes[{i}].duration_seconds must be 1.5–3.0, got {dur}"
+            if scene_sum < 6 or scene_sum > 15:
+                scale = 6.0 / scene_sum if scene_sum < 6 else 15.0 / scene_sum
+                for s in scenes:
+                    if isinstance(s, dict) and "duration_seconds" in s:
+                        d = float(s["duration_seconds"]) * scale
+                        s["duration_seconds"] = max(1.5, min(3.0, round(d, 1)))
+                scene_sum = sum(
+                    s.get("duration_seconds", 0) for s in scenes
+                    if isinstance(s, dict) and isinstance(s.get("duration_seconds"), (int, float))
                 )
-        asset_manifest_json = json.dumps({
+            total = scene_sum
+            plan["total_duration_seconds"] = total
+        # When video_v2, video_plan comes from _validate_and_normalize_v2_timeline with fixed 3,4,4,4s scenes.
+        manifest_payload = {
             "format": "ai_video_flex_15s",
             "video_plan": plan,
             "generation_metadata": {
@@ -772,7 +916,17 @@ def generate_content(
                 "scene_count": len(scenes),
                 "scene_durations": [s.get("duration_seconds") for s in scenes if isinstance(s, dict)],
             },
-        })
+        }
+        if video_v2 and "strategy_metadata" in parsed:
+            manifest_payload["schema_version"] = 2
+            manifest_payload["strategy_metadata"] = parsed["strategy_metadata"]
+            if "timeline" in parsed:
+                manifest_payload["timeline"] = parsed["timeline"]
+        asset_manifest_json = json.dumps(manifest_payload)
+
+    strategy_metadata_json = None
+    if video_v2 and "strategy_metadata" in parsed:
+        strategy_metadata_json = json.dumps(parsed["strategy_metadata"])
 
     content = Content(
         id=content_id,
@@ -780,7 +934,7 @@ def generate_content(
         theme=parsed["theme"],
         hook_type=parsed["hook_type"],
         hook_text=parsed["hook_text"],
-        creative_format=parsed.get("creative_format") or creative_format or "ai_video_15s",
+        creative_format=parsed.get("creative_format") or fmt or "ai_video_15s",
         cta_type=parsed.get("cta_type", "see_product"),
         cta_text=parsed.get("cta_text"),
         problem_angle=parsed.get("problem_angle"),
@@ -793,6 +947,7 @@ def generate_content(
         scene_1_script=parsed.get("scene_1_script") if fmt != "ai_video_flex_15s" else None,
         scene_2_script=parsed.get("scene_2_script") if fmt != "ai_video_flex_15s" else None,
         asset_manifest_json=asset_manifest_json,
+        strategy_metadata_json=strategy_metadata_json,
     )
     db.insert_content(content)
 
@@ -914,6 +1069,7 @@ def _parse_response(
     theme: str | None = None,
     hook_type: str | None = None,
     creative_format: str | None = None,
+    video_v2: bool = False,
 ) -> dict:
     raw = _response_text(response)
     if raw.startswith("```"):
@@ -926,7 +1082,8 @@ def _parse_response(
         raise ValueError(f"OpenAI returned invalid JSON: {exc}\n\nRaw response:\n{raw}") from exc
 
     use_image_motion = creative_format == "image_motion_15s"
-    use_ai_video_flex = creative_format == "ai_video_flex_15s"
+    use_ai_video_flex = creative_format == "ai_video_flex_15s" and not video_v2
+    use_ai_video_v2 = video_v2
     required = [
         "theme", "hook_type", "hook_text",
         "creative_format", "cta_type", "cta_text",
@@ -935,6 +1092,8 @@ def _parse_response(
     ]
     if use_image_motion:
         required.append("image_plan")
+    elif use_ai_video_v2:
+        required.extend(["starting_image_prompt", "timeline", "strategy_metadata"])
     elif use_ai_video_flex:
         required.extend(["starting_image_prompt", "video_plan"])
     else:
@@ -947,7 +1106,61 @@ def _parse_response(
     if missing:
         raise ValueError(f"OpenAI response missing required fields: {missing}")
     _validate_response_shape(data, theme=theme, hook_type=hook_type)
+    if use_ai_video_v2:
+        _validate_and_normalize_v2_timeline(data)
     return data
+
+
+def _validate_and_normalize_v2_timeline(data: dict[str, Any]) -> None:
+    """Validate V2 timeline and normalize to video_plan for downstream compatibility."""
+    timeline = data.get("timeline", [])
+    if not isinstance(timeline, list) or len(timeline) != 4:
+        raise ValueError(
+            f"Video V2 timeline must have exactly 4 scenes, got {len(timeline) if isinstance(timeline, list) else 'non-list'}"
+        )
+    expected_starts = [0, 3, 7, 11]
+    expected_ends = [3, 7, 11, 15]
+    strategy = data.get("strategy_metadata") or {}
+    if not isinstance(strategy, dict):
+        strategy = {}
+    style_family = strategy.get("style_family") or "anamorphic"
+    style_rationale = strategy.get("style_angle") or "Video V2 rigid timeline"
+
+    scenes_normalized = []
+    for i, scene in enumerate(timeline):
+        if not isinstance(scene, dict):
+            raise ValueError(f"timeline[{i}] must be an object")
+        start = scene.get("start_seconds")
+        end = scene.get("end_seconds")
+        if start != expected_starts[i] or end != expected_ends[i]:
+            raise ValueError(
+                f"timeline[{i}] must have start_seconds={expected_starts[i]}, end_seconds={expected_ends[i]}, got {start}, {end}"
+            )
+        duration_seconds = float(end - start)
+        desc = (scene.get("scene_description") or "").strip()
+        script = (scene.get("script") or "").strip()
+        if not desc:
+            raise ValueError(f"timeline[{i}].scene_description is required")
+        if not script:
+            raise ValueError(f"timeline[{i}].script is required")
+        if i >= 1 and not desc.upper().startswith("HARD CUT"):
+            raise ValueError(
+                f"timeline[{i}].scene_description must start with 'HARD CUT:' for scenes 2-4"
+            )
+        scenes_normalized.append({
+            "duration_seconds": duration_seconds,
+            "scene_description": desc,
+            "script": script,
+        })
+
+    video_plan = {
+        "strategy_summary": strategy.get("style_angle") or "Video V2",
+        "total_duration_seconds": 15,
+        "style_family": style_family,
+        "style_rationale": style_rationale,
+        "scenes": scenes_normalized,
+    }
+    data["video_plan"] = video_plan
 
 
 def _validate_response_shape(

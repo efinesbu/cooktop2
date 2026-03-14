@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+import pytest
+
 from src import bandit, db
-from src.models import Content, Metric, Post, Product
+from src.models import BanditArm, Content, Metric, Post, Product
 
 
 def _create_post_with_metric(
@@ -174,3 +177,70 @@ def test_update_from_metrics_falls_back_to_engagement_when_no_commerce(monkeypat
     losing_arm = db.get_bandit_arm(bandit.arm_key("benefit", "bold_claim"))
     assert winning_arm is not None and winning_arm.alpha == 2.0
     assert losing_arm is not None and losing_arm.beta == 2.0
+
+
+def test_update_from_metrics_legacy_content_produces_observation_with_canonical_arm_key(
+    tmp_db: Path,
+) -> None:
+    """Legacy content still produces observations keyed only by theme and hook_type."""
+    db.upsert_product(Product(sku="serum-legacy", name="Serum Legacy"))
+    bandit.initialize_arms()
+
+    _create_post_with_metric(
+        product_sku="serum-legacy",
+        content_id="content-legacy",
+        theme="benefit",
+        hook_type="bold_claim",
+        views=100,
+        likes=30,
+    )
+
+    updated = bandit.update_from_metrics()
+    assert updated == 1
+
+    obs = db.get_bandit_observation_for_content("content-legacy")
+    assert obs is not None
+    assert obs.arm_key == "benefit__bold_claim"
+
+
+def test_update_from_metrics_ignores_non_arm_strategy_metadata(
+    tmp_db: Path,
+) -> None:
+    """Stored strategy metadata should not create extra bandit arms."""
+    db.upsert_product(Product(sku="serum-v2", name="Serum V2"))
+    arm_key = "benefit__bold_claim"
+    db.upsert_bandit_arm(
+        BanditArm(
+            arm_key=arm_key,
+            theme="benefit",
+            hook_type="bold_claim",
+        )
+    )
+    bandit.initialize_arms()
+
+    # Content with strategy_metadata_json
+    strategy = {"style_family": "anamorphic", "style_angle": "Luxury closeup"}
+    db.insert_content(
+        Content(
+            id="content-v2",
+            product_sku="serum-v2",
+            theme="benefit",
+            hook_type="bold_claim",
+            strategy_metadata_json=json.dumps(strategy),
+        )
+    )
+    _create_post_with_metric(
+        product_sku="serum-v2",
+        content_id="content-v2",
+        theme="benefit",
+        hook_type="bold_claim",
+        views=100,
+        likes=50,
+    )
+
+    updated = bandit.update_from_metrics()
+    assert updated == 1
+
+    obs = db.get_bandit_observation_for_content("content-v2")
+    assert obs is not None
+    assert obs.arm_key == arm_key

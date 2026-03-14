@@ -116,6 +116,31 @@ def test_insert_and_get_content_with_phase2_metadata(
     assert fetched.script_style == "conversational"
 
 
+def test_insert_and_get_content_preserves_strategy_metadata_json(
+    db_with_product: Path, sample_product: Product
+) -> None:
+    """Video V2: strategy_metadata_json round-trips via insert_content and get_content."""
+    import json
+
+    strategy = {"style_family": "anamorphic", "style_angle": "Luxury product hero"}
+    content = Content(
+        id="strategy-001",
+        product_sku=sample_product.sku,
+        theme="benefit",
+        hook_type="bold_claim",
+        hook_text="Test hook",
+        strategy_metadata_json=json.dumps(strategy),
+    )
+    db.insert_content(content)
+
+    fetched = db.get_content("strategy-001")
+    assert fetched is not None
+    assert fetched.strategy_metadata_json is not None
+    parsed = json.loads(fetched.strategy_metadata_json)
+    assert parsed["style_family"] == "anamorphic"
+    assert parsed["style_angle"] == "Luxury product hero"
+
+
 def test_list_content_today_uses_sqlite_local_date(
     db_with_product: Path, sample_content: Content, monkeypatch
 ) -> None:

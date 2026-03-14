@@ -198,8 +198,9 @@ def _append_top_and_worst_performers(
     lines.append("")
     lines.append("Top Performers:")
     for i, p in enumerate(ranked[:3], 1):
+        combo = f"{p.theme}/{p.hook_type}"
         lines.append(
-            f"  {i}. [{p.product_name}] {p.theme}/{p.hook_type} on {p.post.platform}"
+            f"  {i}. [{p.product_name}] {combo} on {p.post.platform}"
             f" — {p.engagement_rate:.1%} engagement ({p.metrics.views:,} views)"
         )
 
@@ -209,8 +210,9 @@ def _append_top_and_worst_performers(
         lines.append("")
         lines.append("Worst Performers:")
         for i, p in enumerate(worst, 1):
+            combo = f"{p.theme}/{p.hook_type}"
             lines.append(
-                f"  {i}. [{p.product_name}] {p.theme}/{p.hook_type} on {p.post.platform}"
+                f"  {i}. [{p.product_name}] {combo} on {p.post.platform}"
                 f" — {p.engagement_rate:.1%} engagement ({p.metrics.views:,} views)"
             )
 
@@ -544,19 +546,25 @@ def generate_briefing() -> str:
     # ── Section 4: Creative Insights ───────────────────────────────────────
 
     heading("CREATIVE INSIGHTS")
-    combo_rankings = _group_performance(current_window, lambda p: (p.theme, p.hook_type))
+    combo_rankings = _group_performance(
+        current_window,
+        lambda p: (p.theme, p.hook_type),
+    )
     repeated_combos = [
         (combo, summary)
         for combo, summary in combo_rankings
         if len(summary.performances) >= 2
     ]
 
+    def _combo_label(combo: tuple) -> str:
+        theme, hook_type = combo
+        return f"{theme}/{hook_type}"
+
     if repeated_combos:
         lines.append("Top repeated combos (7d):")
         for i, (combo, summary) in enumerate(repeated_combos[:3], 1):
-            theme, hook_type = combo
             lines.append(
-                f"  {i}. {theme}/{hook_type} \u2014 {summary.engagement_rate:.1%} engagement"
+                f"  {i}. {_combo_label(combo)} \u2014 {summary.engagement_rate:.1%} engagement"
                 f" ({len(summary.performances)} posts, {summary.total_views:,} views)"
             )
 
@@ -573,17 +581,16 @@ def generate_briefing() -> str:
                 lines.append("")
                 lines.append("Needs refresh:")
                 for i, (combo, summary) in enumerate(weakest, 1):
-                    theme, hook_type = combo
                     lines.append(
-                        f"  {i}. {theme}/{hook_type} \u2014 {summary.engagement_rate:.1%} engagement"
+                        f"  {i}. {_combo_label(combo)} \u2014 {summary.engagement_rate:.1%} engagement"
                         f" ({_post_count_label(len(summary.performances))})"
                     )
     elif combo_rankings:
-        theme, hook_type = combo_rankings[0][0]
+        combo = combo_rankings[0][0]
         summary = combo_rankings[0][1]
         lines.append("Need more repeated posts to compare creative combos confidently.")
         lines.append(
-            f"Current leader: {theme}/{hook_type} \u2014 {summary.engagement_rate:.1%} engagement"
+            f"Current leader: {_combo_label(combo)} \u2014 {summary.engagement_rate:.1%} engagement"
             f" ({_post_count_label(len(summary.performances))})"
         )
     else:
@@ -654,16 +661,23 @@ def generate_briefing() -> str:
 
     if products:
         rec = bandit.recommend(daily_slots)
-        arms = {(arm.theme, arm.hook_type): arm for arm in db.list_bandit_arms()}
+        arms_by_key = {arm.arm_key: arm for arm in db.list_bandit_arms()}
         lines.append(f"Recommended allocation ({daily_slots} posts):")
         for alloc in rec.allocations:
-            arm = arms.get((alloc.theme, alloc.hook_type))
+            arm = arms_by_key.get(alloc.arm_key) if alloc.arm_key else None
+            if not arm:
+                arm = next(
+                    (a for a in db.list_bandit_arms()
+                     if a.theme == alloc.theme and a.hook_type == alloc.hook_type),
+                    None,
+                )
             trials = max(int((arm.alpha + arm.beta) - 2), 0) if arm else 0
             mode = "explore" if trials < 5 else "exploit"
             marker = "\u25c7" if mode == "explore" else "\u25c6"
             learned_rate = (bandit.posterior_mean(arm) * 100) if arm else 50.0
+            combo = f"{alloc.theme}/{alloc.hook_type}"
             lines.append(
-                f"  {marker} {alloc.theme}/{alloc.hook_type} ({mode})"
+                f"  {marker} {combo} ({mode})"
                 f" \u2014 mean {learned_rate:.0f}%, score {alloc.score:.3f}, clips {alloc.count}"
             )
 
@@ -762,8 +776,9 @@ def generate_briefing() -> str:
         )
         if weakest_summary.engagement_rate < 0.015:
             theme, hook_type = weakest_combo
+            combo_label = f"{theme}/{hook_type}"
             actions.append(
-                f"Retest {theme}/{hook_type} creative"
+                f"Retest {combo_label} creative"
                 f" (7-day engagement {weakest_summary.engagement_rate:.1%})"
             )
 

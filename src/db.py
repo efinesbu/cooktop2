@@ -55,6 +55,7 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         ("research_snapshot_id", "ALTER TABLE content ADD COLUMN research_snapshot_id TEXT"),
         ("asset_manifest_json", "ALTER TABLE content ADD COLUMN asset_manifest_json TEXT"),
         ("source_content_id", "ALTER TABLE content ADD COLUMN source_content_id TEXT"),
+        ("strategy_metadata_json", "ALTER TABLE content ADD COLUMN strategy_metadata_json TEXT"),
     ):
         if name not in content_columns:
             conn.execute(ddl)
@@ -394,8 +395,8 @@ def insert_content(c: Content) -> None:
                 review_status, review_notes, approved_at, rejected_at,
                 creative_format, cta_type, cta_text, problem_angle,
                 proof_type, script_style, research_snapshot_id, asset_manifest_json,
-                source_content_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                source_content_id, strategy_metadata_json)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (c.id, c.product_sku, c.theme, c.hook_type, c.hook_text,
              c.starting_image_prompt, c.scene_1_desc, c.scene_2_desc,
              c.scene_1_script, c.scene_2_script, c.video_local_path,
@@ -403,7 +404,8 @@ def insert_content(c: Content) -> None:
              c.approved_at, c.rejected_at,
              c.creative_format, c.cta_type, c.cta_text, c.problem_angle,
              c.proof_type, c.script_style, c.research_snapshot_id, c.asset_manifest_json,
-             getattr(c, "source_content_id", None)),
+             getattr(c, "source_content_id", None),
+             getattr(c, "strategy_metadata_json", None)),
         )
 
 
@@ -558,6 +560,7 @@ def _row_to_content(row: sqlite3.Row) -> Content:
         research_snapshot_id=row["research_snapshot_id"] if "research_snapshot_id" in keys else None,
         asset_manifest_json=row["asset_manifest_json"] if "asset_manifest_json" in keys else None,
         source_content_id=row["source_content_id"] if "source_content_id" in keys else None,
+        strategy_metadata_json=row["strategy_metadata_json"] if "strategy_metadata_json" in keys else None,
     )
 
 
@@ -880,6 +883,7 @@ def get_bandit_arm(arm_key: str) -> BanditArm | None:
         ).fetchone()
     if not row:
         return None
+    keys = row.keys()
     return BanditArm(
         arm_key=row["arm_key"],
         theme=row["theme"],
@@ -935,6 +939,29 @@ def has_bandit_observation_for_content(content_id: str) -> bool:
             (content_id,),
         ).fetchone()
     return row is not None
+
+
+def get_bandit_observation_for_content(content_id: str) -> BanditObservation | None:
+    """Return the bandit observation for a content item, if any."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM bandit_observations WHERE content_id=?",
+            (content_id,),
+        ).fetchone()
+    if not row:
+        return None
+    keys = row.keys()
+    return BanditObservation(
+        id=row["id"],
+        content_id=row["content_id"],
+        product_sku=row["product_sku"],
+        arm_key=row["arm_key"],
+        theme=row["theme"],
+        hook_type=row["hook_type"],
+        aggregated_engagement_rate=float(row["aggregated_engagement_rate"]),
+        success=bool(row["success"]),
+        observed_at=row["observed_at"],
+    )
 
 
 def insert_bandit_observation(observation: BanditObservation) -> int:

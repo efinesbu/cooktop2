@@ -20,6 +20,21 @@ def _classify_image_type(filename: str) -> str:
     return "detail"
 
 
+def _list_image_files(image_dir: Path) -> list[Path]:
+    if not image_dir.is_dir():
+        return []
+    return sorted(
+        f for f in image_dir.iterdir()
+        if f.is_file() and f.suffix.lower() in _IMAGE_EXTENSIONS
+    )
+
+
+def _update_product_image_state(existing: Product, image_dir: Path, has_hero: bool) -> None:
+    existing.image_dir = str(image_dir)
+    existing.generation_ready = has_hero
+    db.upsert_product(existing)
+
+
 def register_images(product_sku: str) -> list[ProductImage]:
     existing = db.get_product(product_sku)
     if not existing:
@@ -29,19 +44,19 @@ def register_images(product_sku: str) -> list[ProductImage]:
         )
 
     image_dir = config.product_images_dir() / product_sku
+    files = _list_image_files(image_dir)
+
+    db.clear_product_images(product_sku)
+
     if not image_dir.is_dir():
+        _update_product_image_state(existing, image_dir, has_hero=False)
         logger.warning("Image directory not found: %s", image_dir)
         return []
 
-    files = sorted(
-        f for f in image_dir.iterdir()
-        if f.is_file() and f.suffix.lower() in _IMAGE_EXTENSIONS
-    )
     if not files:
+        _update_product_image_state(existing, image_dir, has_hero=False)
         logger.info("No image files found in %s", image_dir)
         return []
-
-    db.clear_product_images(product_sku)
 
     images: list[ProductImage] = []
     has_hero = False
@@ -59,9 +74,7 @@ def register_images(product_sku: str) -> list[ProductImage]:
         img.id = db.insert_product_image(img)
         images.append(img)
 
-    existing.image_dir = str(image_dir)
-    existing.generation_ready = has_hero
-    db.upsert_product(existing)
+    _update_product_image_state(existing, image_dir, has_hero)
     if has_hero:
         bandit.initialize_arms(product_sku)
 
@@ -70,6 +83,23 @@ def register_images(product_sku: str) -> list[ProductImage]:
         len(images), product_sku, has_hero,
     )
     return images
+
+
+def refresh_images_if_changed(product_sku: str) -> tuple[list[ProductImage], bool]:
+    image_dir = config.product_images_dir() / product_sku
+    disk_snapshot = [
+        (_classify_image_type(path.name), str(path))
+        for path in _list_image_files(image_dir)
+    ]
+    registered_images = db.list_product_images(product_sku)
+    registered_snapshot = [
+        (img.image_type, img.file_path)
+        for img in registered_images
+    ]
+    if disk_snapshot != registered_snapshot:
+        logger.info("Detected product image changes for %s; refreshing registration", product_sku)
+        return register_images(product_sku), True
+    return registered_images, False
 
 
 def get_hero_image(product_sku: str) -> Path | None:
