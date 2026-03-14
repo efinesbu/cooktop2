@@ -116,10 +116,10 @@ def _post_content_to_all(content: Content, product: Product,
         try:
             poster = poster_cls()
             post = poster.post(content, product, captions, hashtags)
-            console.print(f"  [green]✓[/green] Posted to {platform} (post_id={post.post_id})")
+            console.print(f"  [green]OK[/green] Posted to {platform} (post_id={post.post_id})")
             results.append(post)
         except Exception as exc:
-            console.print(f"  [red]✗[/red] Failed to post to {platform}: {exc}")
+            console.print(f"  [red]ERROR[/red] Failed to post to {platform}: {exc}")
         finally:
             _mark_platform_attempt(platform, delay_state)
     return results
@@ -651,7 +651,7 @@ def paid_seed_clone_cmd(content_id: str, variants: int):
         console.print("[red]--variants must be between 1 and 10.[/red]")
         sys.exit(1)
 
-    content = _resolve_content(content_id, use_last_24h=True)
+    content = _resolve_content_for_scope(content_id, "last-24h")
     if not content:
         console.print(f"[red]Content {content_id} not found.[/red]")
         sys.exit(1)
@@ -987,7 +987,7 @@ def _media_type_from_format(creative_format: str | None) -> str:
 
 
 def _review_display_status(content: Content, payloads: list[PlatformPayload]) -> str:
-    """Derive Review column status from content and payloads: pending, approved, rejected, scheduled, posted."""
+    """Derive Review column status from content and payloads."""
     if content.review_status == "rejected":
         return "rejected"
     if content.review_status == "pending":
@@ -1000,9 +1000,33 @@ def _review_display_status(content: Content, payloads: list[PlatformPayload]) ->
         return "posted"
     if "scheduled" in statuses:
         return "scheduled"
+    if statuses <= {"submitted"}:
+        return "submitted"
     if "posted" in statuses:
         return "partial"
+    if "submitted" in statuses:
+        return "partial"
     return "approved"
+
+
+def _list_content_for_row_scope(row_scope: str) -> list[Content]:
+    if row_scope == "today":
+        return db.list_content_today()
+    if row_scope == "last-24h":
+        return db.list_content_last_24h()
+    if row_scope == "all":
+        return db.list_all_content()
+    raise ValueError(f"Unsupported row scope: {row_scope}")
+
+
+def _resolve_content_for_scope(content_id: str, row_scope: str):
+    if content_id.isdigit() and int(content_id) >= 1:
+        idx = int(content_id) - 1
+        items = _list_content_for_row_scope(row_scope)
+        if idx < len(items):
+            return items[idx]
+        return None
+    return db.get_content(content_id)
 
 
 @cli.command()
@@ -1067,21 +1091,30 @@ def preview(today: bool, last_24h: bool, show_all: bool):
 
 def _resolve_content(content_id: str, use_last_24h: bool = True):
     """Resolve --content-id to a Content. Accepts row number (1-based) from preview (today or last-24h).
-    Defaults to last-24h so row numbers match preview --last-24h (the common workflow)."""
+    Defaults to last-24h, but rejects ambiguous numeric rows unless a scope is explicit."""
     if content_id.isdigit() and int(content_id) >= 1:
-        idx = int(content_id) - 1
-        items = db.list_content_last_24h() if use_last_24h else db.list_content_today()
-        if idx < len(items):
-            return items[idx]
-        # If row is out of range for last-24h, try today so row numbers match preview --today
-        if use_last_24h:
-            items_today = db.list_content_today()
-            if idx < len(items_today):
-                return items_today[idx]
-            items_all = db.list_all_content()
-            if idx < len(items_all):
-                return items_all[idx]
-        return None
+        if not use_last_24h:
+            return _resolve_content_for_scope(content_id, "today")
+
+        candidates: list[tuple[str, Content]] = []
+        for row_scope in ("today", "last-24h", "all"):
+            content = _resolve_content_for_scope(content_id, row_scope)
+            if content:
+                candidates.append((row_scope, content))
+
+        if not candidates:
+            return None
+
+        unique_matches = {content.id: content for _, content in candidates}
+        if len(unique_matches) == 1:
+            return next(iter(unique_matches.values()))
+
+        scopes = ", ".join(row_scope for row_scope, _ in candidates)
+        raise click.UsageError(
+            f"Row {content_id} is ambiguous across preview scopes ({scopes}). "
+            "Use the full content ID or pass `--row-scope today`, "
+            "`--row-scope last-24h`, or `--row-scope all`."
+        )
     return db.get_content(content_id)
 
 
@@ -1093,13 +1126,19 @@ def _resolve_content(content_id: str, use_last_24h: bool = True):
     multiple=True,
     help="Row number(s) from preview (e.g. --content-id 1 --content-id 2 --content-id 3)",
 )
-def approve(content_ids: tuple[str, ...]):
+@click.option(
+    "--row-scope",
+    type=click.Choice(["today", "last-24h", "all"]),
+    default=None,
+    help="Preview scope to use when --content-id is a numeric row number.",
+)
+def approve(content_ids: tuple[str, ...], row_scope: str | None):
     """Approve generated content items for scheduling/posting."""
     _init()
     failed = []
     approved = []
     for cid in content_ids:
-        content = _resolve_content(cid)
+        content = _resolve_content_for_scope(cid, row_scope) if row_scope else _resolve_content(cid)
         if not content:
             failed.append(cid)
             continue
@@ -1111,9 +1150,12 @@ def approve(content_ids: tuple[str, ...]):
         sys.exit(1)
     if approved:
         ids_str = ", ".join(approved)
+        next_step = f"python cli.py schedule --content-id {' --content-id '.join(approved)}"
+        if row_scope:
+            next_step += f" --row-scope {row_scope}"
         console.print(
             f"[green]Approved[/green] row(s) {ids_str}. "
-            f"Next step: run `python cli.py schedule --content-id {' --content-id '.join(approved)}`."
+            f"Next step: run `{next_step}`."
         )
 
 
@@ -1154,13 +1196,19 @@ def reject_all_approved_cmd(reason: str | None):
     help="Row number(s) from preview (e.g. --content-id 1 --content-id 2)",
 )
 @click.option("--reason", required=True, help="Reason for rejection")
-def reject(content_ids: tuple[str, ...], reason: str):
+@click.option(
+    "--row-scope",
+    type=click.Choice(["today", "last-24h", "all"]),
+    default=None,
+    help="Preview scope to use when --content-id is a numeric row number.",
+)
+def reject(content_ids: tuple[str, ...], reason: str, row_scope: str | None):
     """Reject generated content items."""
     _init()
     failed = []
     rejected = []
     for cid in content_ids:
-        content = _resolve_content(cid)
+        content = _resolve_content_for_scope(cid, row_scope) if row_scope else _resolve_content(cid)
         if not content:
             failed.append(cid)
             continue
@@ -1182,7 +1230,13 @@ def reject(content_ids: tuple[str, ...], reason: str):
     multiple=True,
     help="Row number(s) from preview (e.g. --content-id 1 --content-id 2)",
 )
-def schedule(today: bool, content_ids: tuple[str, ...]):
+@click.option(
+    "--row-scope",
+    type=click.Choice(["today", "last-24h", "all"]),
+    default=None,
+    help="Preview scope to use when --content-id is a numeric row number.",
+)
+def schedule(today: bool, content_ids: tuple[str, ...], row_scope: str | None):
     """Schedule approved content for staggered posting."""
     _init()
 
@@ -1193,7 +1247,7 @@ def schedule(today: bool, content_ids: tuple[str, ...]):
     if content_ids:
         any_failed = False
         for cid in content_ids:
-            if not _schedule_single(cid):
+            if not _schedule_single(cid, row_scope=row_scope):
                 any_failed = True
         if any_failed:
             sys.exit(1)
@@ -1226,8 +1280,20 @@ def post_due_cmd(allow_quiet_hours: bool):
     is_flag=True,
     help="Allow posting between 10pm and 8am EST (bypass quiet hours)",
 )
+@click.option(
+    "--row-scope",
+    type=click.Choice(["today", "last-24h", "all"]),
+    default=None,
+    help="Preview scope to use when --content-id is a numeric row number.",
+)
 @click.pass_context
-def post_cmd(ctx: click.Context, today: bool, content_ids: tuple[str, ...], allow_quiet_hours: bool):
+def post_cmd(
+    ctx: click.Context,
+    today: bool,
+    content_ids: tuple[str, ...],
+    allow_quiet_hours: bool,
+    row_scope: str | None,
+):
     """Post content to all platforms. Supports `--delay-XXX` and `--nodelay`."""
     _init()
     delay_minutes, no_delay = _parse_post_delay_args(list(ctx.args))
@@ -1242,7 +1308,7 @@ def post_cmd(ctx: click.Context, today: bool, content_ids: tuple[str, ...], allo
     if content_ids:
         any_failed = False
         for cid in content_ids:
-            if not _post_single(cid, delay_state=delay_state):
+            if not _post_single(cid, delay_state=delay_state, row_scope=row_scope):
                 any_failed = True
         if any_failed:
             sys.exit(1)
@@ -1259,8 +1325,8 @@ def post_cmd(ctx: click.Context, today: bool, content_ids: tuple[str, ...], allo
             sys.exit(1)
 
 
-def _schedule_single(content_id: str) -> bool:
-    content = _resolve_content(content_id)
+def _schedule_single(content_id: str, row_scope: str | None = None) -> bool:
+    content = _resolve_content_for_scope(content_id, row_scope) if row_scope else _resolve_content(content_id)
     if not content:
         console.print(f"[red]Content {content_id} not found.[/red]")
         return False
@@ -1300,8 +1366,12 @@ def _schedule_last_24h():
     console.print(f"\n[green]Scheduled {total}[/green] payloads across {len(items)} approved items.")
 
 
-def _post_single(content_id: str, delay_state: dict[str, object] | None = None) -> bool:
-    content = _resolve_content(content_id)
+def _post_single(
+    content_id: str,
+    delay_state: dict[str, object] | None = None,
+    row_scope: str | None = None,
+) -> bool:
+    content = _resolve_content_for_scope(content_id, row_scope) if row_scope else _resolve_content(content_id)
     if not content:
         console.print(f"[red]Content {content_id} not found.[/red]")
         return False
@@ -1315,14 +1385,17 @@ def _post_single(content_id: str, delay_state: dict[str, object] | None = None) 
     if payloads:
         enabled = set(config.enabled_platforms("posting"))
         posted = 0
+        submitted = 0
+        already_posted = 0
         skipped = 0
         console.print(Panel(f"Posting [bold]{content.id}[/bold]", style="blue"))
         for payload in payloads:
             if payload.status == "posted":
+                already_posted += 1
                 continue
             if payload.platform not in enabled:
                 console.print(
-                    f"  [yellow]↷[/yellow] Skipping {payload.platform}: platform not enabled in config"
+                    f"  [yellow]SKIP[/yellow] Skipping {payload.platform}: platform not enabled in config"
                 )
                 skipped += 1
                 continue
@@ -1330,19 +1403,30 @@ def _post_single(content_id: str, delay_state: dict[str, object] | None = None) 
             try:
                 post = _post_platform_payload(payload, content, product)
                 if payload.id is not None:
-                    db.update_platform_payload_status(payload.id, "posted")
-                console.print(
-                    f"  [green]✓[/green] Posted to {payload.platform} (post_id={post.post_id})"
-                )
-                posted += 1
+                    payload_status = db.mark_platform_payload_delivery(payload.id, post.post_id or "")
+                else:
+                    payload_status = "submitted" if (post.post_id or "").startswith("make:") else "posted"
+                if payload_status == "submitted":
+                    console.print(
+                        f"  [green]OK[/green] Submitted {payload.platform} handoff "
+                        f"(post_id={post.post_id})"
+                    )
+                    submitted += 1
+                else:
+                    console.print(
+                        f"  [green]OK[/green] Posted to {payload.platform} (post_id={post.post_id})"
+                    )
+                    posted += 1
             except Exception as exc:
                 if payload.id is not None:
                     db.update_platform_payload_status(payload.id, "failed", str(exc))
-                console.print(f"  [red]✗[/red] Failed to post to {payload.platform}: {exc}")
+                console.print(f"  [red]ERROR[/red] Failed to post to {payload.platform}: {exc}")
             finally:
                 _mark_platform_attempt(payload.platform, delay_state)
         console.print(
             f"\n[green]Posted {posted}[/green] payloads for {content.id[:12]}. "
+            f"[cyan]Submitted {submitted}[/cyan]. "
+            f"[yellow]Already posted {already_posted}[/yellow]. "
             f"[yellow]Skipped {skipped}[/yellow]."
         )
         return True
@@ -1366,6 +1450,7 @@ def _post_due():
 
     enabled = set(config.enabled_platforms("posting"))
     posted = 0
+    submitted = 0
     skipped = 0
     for payload in payloads:
         if payload.platform not in enabled:
@@ -1400,18 +1485,28 @@ def _post_due():
             )
             post = _post_platform_payload(payload, content, product)
             if payload.id is not None:
-                db.update_platform_payload_status(payload.id, "posted")
-            console.print(
-                f"  [green]✓[/green] Posted to {payload.platform} (post_id={post.post_id})"
-            )
-            posted += 1
+                payload_status = db.mark_platform_payload_delivery(payload.id, post.post_id or "")
+            else:
+                payload_status = "submitted" if (post.post_id or "").startswith("make:") else "posted"
+            if payload_status == "submitted":
+                console.print(
+                    f"  [green]OK[/green] Submitted {payload.platform} handoff "
+                    f"(post_id={post.post_id})"
+                )
+                submitted += 1
+            else:
+                console.print(
+                    f"  [green]OK[/green] Posted to {payload.platform} (post_id={post.post_id})"
+                )
+                posted += 1
         except Exception as exc:
             if payload.id is not None:
                 db.update_platform_payload_status(payload.id, "failed", str(exc))
-            console.print(f"  [red]✗[/red] Failed to post to {payload.platform}: {exc}")
+            console.print(f"  [red]ERROR[/red] Failed to post to {payload.platform}: {exc}")
 
     console.print(
         f"\n[green]Posted {posted}[/green] scheduled payloads. "
+        f"[cyan]Submitted {submitted}[/cyan]. "
         f"[yellow]Skipped {skipped}[/yellow]."
     )
 

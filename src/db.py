@@ -666,6 +666,16 @@ def update_platform_payload_status(
         )
 
 
+def mark_platform_payload_delivery(payload_id: int, remote_post_id: str) -> str:
+    remote_post_id = remote_post_id.strip()
+    if not remote_post_id:
+        raise ValueError("remote_post_id must not be empty")
+
+    status = "submitted" if remote_post_id.startswith("make:") else "posted"
+    update_platform_payload_status(payload_id, status, None)
+    return status
+
+
 def _row_to_platform_payload(row: sqlite3.Row) -> PlatformPayload:
     return PlatformPayload(
         id=row["id"],
@@ -749,7 +759,7 @@ def sync_instagram_post_id(
 
         if handoff_id:
             target_row = conn.execute(
-                """SELECT id, post_id
+                """SELECT id, post_id, content_id
                    FROM posts
                    WHERE platform='instagram' AND post_id=?""",
                 (handoff_id,),
@@ -757,7 +767,7 @@ def sync_instagram_post_id(
 
         if target_row is None and content_id:
             rows = conn.execute(
-                """SELECT id, post_id
+                """SELECT id, post_id, content_id
                    FROM posts
                    WHERE platform='instagram' AND content_id=?
                    ORDER BY id DESC""",
@@ -783,6 +793,15 @@ def sync_instagram_post_id(
         conn.execute(
             "UPDATE posts SET post_id=? WHERE id=?",
             (instagram_post_id, target_row["id"]),
+        )
+        conn.execute(
+            """UPDATE platform_payloads
+               SET status='posted',
+                   last_error=NULL,
+                   updated_at=datetime('now')
+               WHERE content_id=?
+                 AND platform='instagram'""",
+            (target_row["content_id"],),
         )
         return 1
 

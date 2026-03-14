@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from src import db, instagram_sheet_sync
-from src.models import Content, Post, Product
+from src.models import Content, PlatformPayload, Post, Product
 
 
 def test_sync_instagram_post_ids_from_sheet_uses_handoff_id(
@@ -14,6 +14,9 @@ def test_sync_instagram_post_ids_from_sheet_uses_handoff_id(
     content = Content(id="content-1", product_sku=product.sku, theme="benefit", hook_type="question")
     db.upsert_product(product)
     db.insert_content(content)
+    db.upsert_platform_payload(
+        PlatformPayload(content_id=content.id, platform="instagram", status="submitted")
+    )
     post_id = db.insert_post(
         Post(content_id=content.id, platform="instagram", post_id="make:videos/clip-123.mp4")
     )
@@ -45,6 +48,9 @@ def test_sync_instagram_post_ids_from_sheet_uses_handoff_id(
     updated_post = db.get_post(post_id)
     assert updated_post is not None
     assert updated_post.post_id == "179000111222333"
+    payload = db.get_platform_payload(content.id, "instagram")
+    assert payload is not None
+    assert payload.status == "posted"
     assert result.rows_read == 1
     assert result.rows_considered == 1
     assert result.rows_updated == 1

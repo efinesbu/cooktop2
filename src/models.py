@@ -143,7 +143,7 @@ IMAGE_TYPES = ["hero", "lifestyle", "detail"]
 
 REVIEW_STATUSES = ["pending", "approved", "rejected", "posted", "partial_failure"]
 
-PAYLOAD_STATUSES = ["pending", "scheduled", "posted", "failed"]
+PAYLOAD_STATUSES = ["pending", "scheduled", "submitted", "posted", "failed"]
 
 
 @dataclass

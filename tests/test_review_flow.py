@@ -155,7 +155,7 @@ def test_approve_schedule_and_post_due(
     assert payload.status == "scheduled"
     assert payload.publish_at is not None
 
-    posted = runner.invoke(cli_module.cli, ["post-due"])
+    posted = runner.invoke(cli_module.cli, ["post-due", "--allow-quiet-hours"])
     assert posted.exit_code == 0
 
     payload = db.get_platform_payload(content.id, "youtube")
@@ -209,6 +209,60 @@ def test_preview_all_shows_every_saved_row(tmp_db: Path) -> None:
     assert last_24h_result.exit_code == 0
     assert "benefit" in last_24h_result.output
     assert "problem" not in last_24h_result.output
+
+
+def _seed_recent_content_rows(product: Product, total: int = 23) -> list[str]:
+    content_ids: list[str] = []
+    for index in range(1, total + 1):
+        content_id = f"content-row-{index:02d}"
+        content_ids.append(content_id)
+        db.insert_content(
+            Content(
+                id=content_id,
+                product_sku=product.sku,
+                theme="benefit",
+                hook_type="question",
+            )
+        )
+
+    with db._connect() as conn:
+        for index, content_id in enumerate(content_ids, start=1):
+            conn.execute(
+                "UPDATE content SET created_at=datetime('now', ?) WHERE id=?",
+                (f"-{total - index + 1} minutes", content_id),
+            )
+
+    return content_ids
+
+
+def test_approve_numeric_row_requires_scope_when_preview_views_disagree(tmp_db: Path) -> None:
+    product = Product(sku="serum-rows", name="Serum Rows")
+    db.upsert_product(product)
+    content_ids = _seed_recent_content_rows(product)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_module.cli, ["approve", "--content-id", "23"])
+
+    assert result.exit_code != 0
+    assert "ambiguous across preview scopes" in result.output
+    assert db.get_content(content_ids[0]).review_status == "pending"
+    assert db.get_content(content_ids[-1]).review_status == "pending"
+
+
+def test_approve_numeric_row_uses_explicit_today_scope(tmp_db: Path) -> None:
+    product = Product(sku="serum-scope", name="Serum Scope")
+    db.upsert_product(product)
+    content_ids = _seed_recent_content_rows(product)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        ["approve", "--content-id", "23", "--row-scope", "today"],
+    )
+
+    assert result.exit_code == 0
+    assert db.get_content(content_ids[0]).review_status == "pending"
+    assert db.get_content(content_ids[-1]).review_status == "approved"
 
 
 def test_schedule_and_post_due_skip_disabled_platform_payloads(
@@ -278,7 +332,7 @@ def test_schedule_and_post_due_skip_disabled_platform_payloads(
     assert instagram_payload.publish_at is None
     assert instagram_payload.last_error == "Platform not enabled in config"
 
-    posted = runner.invoke(cli_module.cli, ["post-due"])
+    posted = runner.invoke(cli_module.cli, ["post-due", "--allow-quiet-hours"])
     assert posted.exit_code == 0
 
     youtube_payload = db.get_platform_payload(content.id, "youtube")
@@ -369,12 +423,12 @@ def test_approve_schedule_and_post_due_instagram_via_make_bridge(
     assert payload.status == "scheduled"
     assert payload.publish_at is not None
 
-    posted = runner.invoke(cli_module.cli, ["post-due"])
+    posted = runner.invoke(cli_module.cli, ["post-due", "--allow-quiet-hours"])
     assert posted.exit_code == 0
 
     payload = db.get_platform_payload(content.id, "instagram")
     assert payload is not None
-    assert payload.status == "posted"
+    assert payload.status == "submitted"
 
     assert calls == [(
         video_path,
@@ -429,6 +483,7 @@ def test_post_command_delays_repeated_platform_posts(
             "content-delay-1",
             "--content-id",
             "content-delay-2",
+            "--allow-quiet-hours",
             "--delay-1",
         ],
     )
@@ -484,6 +539,7 @@ def test_post_command_nodelay_skips_repeated_platform_waits(
             "content-fast-1",
             "--content-id",
             "content-fast-2",
+            "--allow-quiet-hours",
             "--nodelay",
         ],
     )
