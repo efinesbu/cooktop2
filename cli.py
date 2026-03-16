@@ -24,14 +24,15 @@ from src.instagram_sheet_sync import (
     sync_instagram_post_ids_from_sheet,
 )
 from src.models import (
-    Content, CREATIVE_FORMATS, HOOK_TYPES, PLATFORMS, PlatformPayload, Post,
-    Product, ResearchSnapshot, THEMES,
+    Content, CREATIVE_FORMATS, CTA_TYPES, HOOK_TYPES, PLATFORMS, PlatformPayload,
+    Post, Product, PROOF_TYPES, ResearchSnapshot, SCRIPT_STYLES, THEMES,
 )
 from src.morning_briefing import display_briefing, email_briefing, generate_briefing
 from src.posters.instagram import InstagramPoster
 from src.posters.tiktok import TikTokPoster
 from src.posters.x import XPoster
 from src.posters.youtube import YouTubePoster
+from src.creative_strategy import resolve_deterministic_fields
 from src.product_images import refresh_images_if_changed, register_images
 from src.prompt_generator import generate_content
 from src.renderers import render_media
@@ -364,42 +365,51 @@ def _format_strategy_label(theme: str | None, hook_type: str | None) -> str:
 
 
 def _run_generation_job(
-    job: tuple[Product, str | None, str | None],
+    job: tuple[Product, str | None, str | None, int],
     should_post: bool,
     creative_format: str | None = None,
     video_v2: bool = False,
+    cta_type: str | None = None,
+    proof_type: str | None = None,
+    script_style: str | None = None,
 ) -> Optional[Content]:
-    product, theme, hook_type = job
-    return _generate_single(product, theme, hook_type, should_post, creative_format, video_v2)
+    product, theme, hook_type, generation_index = job
+    return _generate_single(product, theme, hook_type, generation_index, should_post, creative_format, video_v2,
+                           cta_type, proof_type, script_style)
 
 
 def _generate_batch(
-    jobs: list[tuple[Product, str | None, str | None]],
+    jobs: list[tuple[Product, str | None, str | None, int]],
     should_post: bool,
     requested_count: int,
     creative_format: str | None = None,
     video_v2: bool = False,
+    cta_type: str | None = None,
+    proof_type: str | None = None,
+    script_style: str | None = None,
 ) -> int:
     if not jobs:
         return 0
 
+    def run_job(job):
+        return _run_generation_job(job, should_post, creative_format, video_v2, cta_type, proof_type, script_style)
+
     if requested_count < PARALLEL_GENERATION_THRESHOLD and len(jobs) > 1:
         max_workers = min(len(jobs), requested_count)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            results = executor.map(
-                lambda job: _run_generation_job(job, should_post, creative_format, video_v2),
-                jobs,
-            )
+            results = executor.map(run_job, jobs)
             return sum(1 for result in results if result)
 
     return sum(
-        1 for product, theme, hook_type in jobs
-        if _generate_single(product, theme, hook_type, should_post, creative_format, video_v2)
+        1 for product, theme, hook_type, idx in jobs
+        if _generate_single(product, theme, hook_type, idx, should_post, creative_format, video_v2,
+                            cta_type, proof_type, script_style)
     )
 
 
-def _generate_single(product: Product, theme: str | None, hook_type: str | None,
-                     should_post: bool, creative_format: str | None = None, video_v2: bool = False) -> Optional[Content]:
+def _generate_single(product: Product, theme: str | None, hook_type: str | None, generation_index: int,
+                     should_post: bool, creative_format: str | None = None, video_v2: bool = False,
+                     cta_type: str | None = None, proof_type: str | None = None, script_style: str | None = None) -> Optional[Content]:
     spent, budget, within = check_budget()
     if not within:
         console.print(
@@ -413,8 +423,13 @@ def _generate_single(product: Product, theme: str | None, hook_type: str | None,
     if not images:
         console.print(f"[yellow]{product.sku}: no images registered, continuing anyway.[/yellow]")
 
-    console.print(f"  {product.sku}: generating prompt … ({_format_strategy_label(theme, hook_type)})")
-    content, extras = generate_content(product, theme, hook_type, images, creative_format, video_v2=video_v2)
+    resolved = resolve_deterministic_fields(theme, hook_type, cta_type, proof_type, script_style, generation_index)
+    console.print(f"  {product.sku}: generating prompt … ({_format_strategy_label(resolved['theme'], resolved['hook_type'])})")
+    content, extras = generate_content(
+        product, resolved["theme"], resolved["hook_type"], images,
+        creative_format, video_v2=video_v2,
+        cta_type=resolved["cta_type"], proof_type=resolved["proof_type"], script_style=resolved["script_style"],
+    )
     if "prompt_input" in extras:
         console.print(Panel(extras["prompt_input"], title="Prompt", border_style="dim"))
     if "prompt_output" in extras:
@@ -505,12 +520,14 @@ def sync_products_cmd():
 @click.option("--category", default=None, help="Optional category")
 @click.option("--price", type=float, default=None, help="Optional price")
 @click.option("--url", "product_url", default=None, help="Optional full storefront product URL")
+@click.option("--description", default=None, help="Product description for content generation prompts")
 def add_product_cmd(
     sku: str,
     name: str,
     category: Optional[str],
     price: Optional[float],
     product_url: Optional[str],
+    description: Optional[str],
 ):
     """Create or update a product without Shopify sync."""
     _init()
@@ -520,6 +537,7 @@ def add_product_cmd(
         name=name.strip(),
         category=category.strip() if category else None,
         price=price,
+        description=description.strip() if description else None,
         product_url=_normalize_product_url(product_url),
     )
     db.upsert_product(product)
@@ -828,10 +846,14 @@ def briefing_diagnose_cmd():
     is_flag=True,
     help="Manual mode: when count > 1, cycle through provided --theme/--hook values per clip.",
 )
+@click.option("--cta-type", "cta_type", type=click.Choice(CTA_TYPES), default=None, help="CTA type (see_product, shop_now)")
+@click.option("--proof-type", "proof_type", type=click.Choice(PROOF_TYPES), default=None, help="Proof type (test_result, testimonial, before_after, ingredient, none)")
+@click.option("--script-style", "script_style", type=click.Choice(SCRIPT_STYLES), default=None, help="Script style (conversational, direct, storytelling, tip_based)")
 @click.option("--post", "should_post", is_flag=True, help="Deprecated: use preview, approve, schedule, and post-due")
 def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
         hooks: tuple[str, ...], creative_format: str | None, video_v2: bool,
-        count: int, rotate_theme_hook: bool, should_post: bool):
+        count: int, rotate_theme_hook: bool, cta_type: str | None, proof_type: str | None,
+        script_style: str | None, should_post: bool):
     """Generate content — manually or via bandit recommendations."""
     _init()
 
@@ -859,12 +881,13 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
         sys.exit(1)
 
     if auto_mode:
-        _run_auto(count, should_post, creative_format, video_v2)
+        _run_auto(count, should_post, creative_format, video_v2, cta_type, proof_type, script_style)
     else:
-        _run_manual(slugs, themes, hooks, count, should_post, creative_format, rotate_theme_hook, video_v2)
+        _run_manual(slugs, themes, hooks, count, should_post, creative_format, rotate_theme_hook, video_v2, cta_type, proof_type, script_style)
 
 
-def _run_auto(count: int, should_post: bool, creative_format: str | None = None, video_v2: bool = False):
+def _run_auto(count: int, should_post: bool, creative_format: str | None = None, video_v2: bool = False,
+              cta_type: str | None = None, proof_type: str | None = None, script_style: str | None = None):
     products = db.list_products(
         active_only=True,
         exclude_excluded=True,
@@ -890,20 +913,24 @@ def _run_auto(count: int, should_post: bool, creative_format: str | None = None,
         summary.add_row(alloc.theme, alloc.hook_type, str(alloc.count))
     console.print(summary)
 
-    jobs: list[tuple[Product, str | None, str | None]] = []
+    jobs: list[tuple[Product, str | None, str | None, int]] = []
     grouped_runs: dict[str, list[tuple[str, str]]] = {}
     for product, theme, hook_type in queued_runs:
         grouped_runs.setdefault(product.sku, []).append((theme, hook_type))
 
+    idx = 0
     ordered_products = products[starting_product_index:] + products[:starting_product_index]
     for product in ordered_products:
         product_runs = grouped_runs.get(product.sku, [])
         if not product_runs:
             continue
         console.print(Panel(f"[bold]{product.name}[/bold] ({product.sku})", style="blue"))
-        jobs.extend((product, theme, hook_type) for theme, hook_type in product_runs)
+        for theme, hook_type in product_runs:
+            jobs.append((product, theme, hook_type, idx))
+            idx += 1
 
-    total = _generate_batch(jobs, should_post, requested_count=count, creative_format=creative_format, video_v2=video_v2)
+    total = _generate_batch(jobs, should_post, requested_count=count, creative_format=creative_format, video_v2=video_v2,
+                           cta_type=cta_type, proof_type=proof_type, script_style=script_style)
 
     piece = "piece" if total == 1 else "pieces"
     console.print(f"\n[green]{total}[/green] {piece} of content generated ({len(products)} products eligible).")
@@ -911,12 +938,20 @@ def _run_auto(count: int, should_post: bool, creative_format: str | None = None,
 
 def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
                 hooks: tuple[str, ...], count: int, should_post: bool,
-                creative_format: str | None = None, rotate_theme_hook: bool = False, video_v2: bool = False):
+                creative_format: str | None = None, rotate_theme_hook: bool = False, video_v2: bool = False,
+                cta_type: str | None = None, proof_type: str | None = None, script_style: str | None = None):
     if not slugs:
         console.print("[red]Provide at least one --product or use --auto.[/red]")
         sys.exit(1)
 
-    jobs: list[tuple[Product, str | None, str | None]] = []
+    jobs: list[tuple[Product, str | None, str | None, int]] = []
+    if not themes and not hooks:
+        rec = bandit.recommend(total_slots=count)
+        strategy_pairs = [(alloc.theme, alloc.hook_type) for alloc in rec.allocations for _ in range(alloc.count)]
+    else:
+        strategy_pairs = _manual_strategy_runs(themes, hooks, count, rotate_theme_hook)
+
+    idx = 0
     for slug in slugs:
         product = db.get_product(slug)
         if not product:
@@ -924,17 +959,12 @@ def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
             continue
 
         console.print(Panel(f"[bold]{product.name}[/bold] ({product.sku})", style="blue"))
-        if not themes and not hooks:
-            rec = bandit.recommend(total_slots=count)
-            strategy_pairs = []
-            for alloc in rec.allocations:
-                for _ in range(alloc.count):
-                    strategy_pairs.append((alloc.theme, alloc.hook_type))
-        else:
-            strategy_pairs = _manual_strategy_runs(themes, hooks, count, rotate_theme_hook)
-        jobs.extend((product, theme, hook) for theme, hook in strategy_pairs)
+        for theme, hook in strategy_pairs:
+            jobs.append((product, theme, hook, idx))
+            idx += 1
 
-    total = _generate_batch(jobs, should_post, requested_count=count, creative_format=creative_format, video_v2=video_v2)
+    total = _generate_batch(jobs, should_post, requested_count=count, creative_format=creative_format, video_v2=video_v2,
+                           cta_type=cta_type, proof_type=proof_type, script_style=script_style)
 
     console.print(f"\n[green]{total}[/green] pieces of content generated.")
 
@@ -945,6 +975,19 @@ def _manual_strategy_runs(
     count: int,
     rotate_theme_hook: bool,
 ) -> list[tuple[str | None, str | None]]:
+    has_themes = bool(themes)
+    has_hooks = bool(hooks)
+
+    if has_themes and not has_hooks:
+        rec = bandit.recommend(total_slots=count)
+        allocs_flat = [(a.theme, a.hook_type) for a in rec.allocations for _ in range(a.count)]
+        return [(themes[i % len(themes)], allocs_flat[i][1]) for i in range(count)]
+
+    if has_hooks and not has_themes:
+        rec = bandit.recommend(total_slots=count)
+        allocs_flat = [(a.theme, a.hook_type) for a in rec.allocations for _ in range(a.count)]
+        return [(allocs_flat[i][0], hooks[i % len(hooks)]) for i in range(count)]
+
     theme_values: tuple[str | None, ...] = themes or (None,)
     hook_values: tuple[str | None, ...] = hooks or (None,)
     if not rotate_theme_hook or count <= 1:
@@ -1401,11 +1444,15 @@ def _post_single(
         posted = 0
         submitted = 0
         already_posted = 0
+        already_submitted = 0
         skipped = 0
         console.print(Panel(f"Posting [bold]{content.id}[/bold]", style="blue"))
         for payload in payloads:
             if payload.status == "posted":
                 already_posted += 1
+                continue
+            if payload.status == "submitted":
+                already_submitted += 1
                 continue
             if payload.platform not in enabled:
                 console.print(
@@ -1441,6 +1488,7 @@ def _post_single(
             f"\n[green]Posted {posted}[/green] payloads for {content.id[:12]}. "
             f"[cyan]Submitted {submitted}[/cyan]. "
             f"[yellow]Already posted {already_posted}[/yellow]. "
+            f"[yellow]Already submitted {already_submitted}[/yellow]. "
             f"[yellow]Skipped {skipped}[/yellow]."
         )
         return True

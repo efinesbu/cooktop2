@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS products (
     price           REAL,
     product_url     TEXT,
     shopify_image_url TEXT,
+    description     TEXT,
     image_dir       TEXT,
     generation_ready INTEGER DEFAULT 0,
     active          INTEGER DEFAULT 1,

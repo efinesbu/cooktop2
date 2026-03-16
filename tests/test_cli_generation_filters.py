@@ -80,7 +80,7 @@ def test_run_manual_uses_bandit_when_no_theme_or_hook(monkeypatch) -> None:
 
     calls: list[tuple[str | None, str | None]] = []
 
-    def fake_generate_single(product, theme, hook_type, should_post, creative_format=None, video_v2=False):
+    def fake_generate_single(product, theme, hook_type, generation_index, should_post, creative_format=None, video_v2=False, cta_type=None, proof_type=None, script_style=None):
         calls.append((theme, hook_type))
         return object()
 
@@ -97,10 +97,19 @@ def test_run_manual_supports_partial_overrides(monkeypatch) -> None:
         "get_product",
         lambda sku: Product(sku=sku, name=f"Product {sku}"),
     )
+    monkeypatch.setattr(
+        cli_module.bandit,
+        "recommend",
+        lambda total_slots: BanditRecommendation(
+            allocations=[
+                ThemeHookAllocation(theme="benefit", hook_type="bold_claim", count=1, score=0.7),
+            ]
+        ),
+    )
 
     calls: list[tuple[str | None, str | None]] = []
 
-    def fake_generate_single(product, theme, hook_type, should_post, creative_format=None, video_v2=False):
+    def fake_generate_single(product, theme, hook_type, generation_index, should_post, creative_format=None, video_v2=False, cta_type=None, proof_type=None, script_style=None):
         calls.append((theme, hook_type))
         return object()
 
@@ -109,7 +118,7 @@ def test_run_manual_supports_partial_overrides(monkeypatch) -> None:
     cli_module._run_manual(("sku-1",), ("benefit",), (), count=1, should_post=False)
     cli_module._run_manual(("sku-1",), (), ("question",), count=1, should_post=False)
 
-    assert calls == [("benefit", None), (None, "question")]
+    assert calls == [("benefit", "bold_claim"), ("benefit", "question")]
 
 
 def test_run_manual_repeats_same_locked_pair_without_rotation(monkeypatch) -> None:
@@ -121,7 +130,7 @@ def test_run_manual_repeats_same_locked_pair_without_rotation(monkeypatch) -> No
 
     calls: list[tuple[str | None, str | None]] = []
 
-    def fake_generate_single(product, theme, hook_type, should_post, creative_format=None, video_v2=False):
+    def fake_generate_single(product, theme, hook_type, generation_index, should_post, creative_format=None, video_v2=False, cta_type=None, proof_type=None, script_style=None):
         calls.append((theme, hook_type))
         return object()
 
@@ -163,7 +172,7 @@ def test_run_manual_parallelizes_generation_when_count_below_threshold(monkeypat
             for item in iterable:
                 yield fn(item)
 
-    def fake_generate_single(product, theme, hook_type, should_post, creative_format=None, video_v2=False):
+    def fake_generate_single(product, theme, hook_type, generation_index, should_post, creative_format=None, video_v2=False, cta_type=None, proof_type=None, script_style=None):
         calls.append((theme, hook_type))
         return object()
 
@@ -191,7 +200,7 @@ def test_run_manual_stays_serial_at_parallel_threshold(monkeypatch) -> None:
 
     calls: list[tuple[str | None, str | None]] = []
 
-    def fake_generate_single(product, theme, hook_type, should_post, creative_format=None, video_v2=False):
+    def fake_generate_single(product, theme, hook_type, generation_index, should_post, creative_format=None, video_v2=False, cta_type=None, proof_type=None, script_style=None):
         calls.append((theme, hook_type))
         return object()
 
@@ -222,7 +231,7 @@ def test_run_manual_rotates_theme_and_hook_when_enabled(monkeypatch) -> None:
 
     calls: list[tuple[str | None, str | None]] = []
 
-    def fake_generate_single(product, theme, hook_type, should_post, creative_format=None, video_v2=False):
+    def fake_generate_single(product, theme, hook_type, generation_index, should_post, creative_format=None, video_v2=False, cta_type=None, proof_type=None, script_style=None):
         calls.append((theme, hook_type))
         return object()
 
@@ -282,7 +291,7 @@ def test_run_auto_parallelizes_across_products_below_threshold(monkeypatch) -> N
             for item in iterable:
                 yield fn(item)
 
-    def fake_generate_single(product, theme, hook_type, should_post, creative_format=None, video_v2=False):
+    def fake_generate_single(product, theme, hook_type, generation_index, should_post, creative_format=None, video_v2=False, cta_type=None, proof_type=None, script_style=None):
         calls.append((product.sku, theme, hook_type))
         return object()
 
@@ -318,7 +327,7 @@ def test_run_auto_uses_global_allocation_and_round_robin_product_split(monkeypat
 
     calls: list[tuple[str, str, str]] = []
 
-    def fake_generate_single(product, theme, hook_type, should_post, creative_format=None, video_v2=False):
+    def fake_generate_single(product, theme, hook_type, generation_index, should_post, creative_format=None, video_v2=False, cta_type=None, proof_type=None, script_style=None):
         calls.append((product.sku, theme, hook_type))
         return object()
 
@@ -351,7 +360,7 @@ def test_run_auto_randomizes_round_robin_starting_product(monkeypatch) -> None:
 
     calls: list[tuple[str, str, str]] = []
 
-    def fake_generate_single(product, theme, hook_type, should_post, creative_format=None, video_v2=False):
+    def fake_generate_single(product, theme, hook_type, generation_index, should_post, creative_format=None, video_v2=False, cta_type=None, proof_type=None, script_style=None):
         calls.append((product.sku, theme, hook_type))
         return object()
 
@@ -399,6 +408,7 @@ def test_generate_single_refreshes_registered_images_when_disk_changes(
         images,
         creative_format=None,
         video_v2=False,
+        **kwargs,
     ):
         captured["paths"] = [img.file_path for img in images]
         return (
@@ -417,6 +427,7 @@ def test_generate_single_refreshes_registered_images_when_disk_changes(
         product,
         theme="benefit",
         hook_type="question",
+        generation_index=0,
         should_post=False,
     )
 

@@ -59,7 +59,7 @@ sys.modules.setdefault(
 import cli as cli_module
 from src import db
 from src.make_bridge import BridgeResult
-from src.models import Content, PlatformPayload, Product
+from src.models import Content, PlatformPayload, Post, Product
 
 
 class FakeYouTubePoster:
@@ -547,6 +547,81 @@ def test_post_command_nodelay_skips_repeated_platform_waits(
     assert posted.exit_code == 0
     assert sleep_calls == []
     assert "Next youtube post in" not in posted.output
+
+
+def test_post_command_skips_already_submitted_payloads_without_delay(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    client_secrets = tmp_path / "youtube_client_secrets.json"
+    client_secrets.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "platforms": {"enabled": ["youtube"]},
+            "youtube": {"client_secrets_file": str(client_secrets)},
+            "data_root": str(tmp_path / "velura-data"),
+        },
+    )
+
+    product = Product(sku="serum-submitted", name="Serum Submitted")
+    db.upsert_product(product)
+    video_path = tmp_path / "clip-submitted.mp4"
+    video_path.write_bytes(b"video")
+
+    _seed_approved_youtube_content("content-submitted", product, video_path)
+    submitted_payload = db.get_platform_payload("content-submitted", "youtube")
+    assert submitted_payload is not None
+    db.update_platform_payload_status(submitted_payload.id, "submitted")
+    db.insert_post(
+        Post(
+            content_id="content-submitted",
+            platform="youtube",
+            post_id="make:videos/content-submitted.mp4",
+            caption="Launch caption",
+            hashtags="launch,velura",
+            utm_url=f"https://example.com/products/{product.sku}?utm_content=content-submitted",
+        )
+    )
+
+    _seed_approved_youtube_content("content-pending", product, video_path)
+
+    sleep_calls: list[int] = []
+
+    def fake_sleep(seconds: int) -> None:
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(cli_module.time, "sleep", fake_sleep)
+    monkeypatch.setattr(cli_module.random, "uniform", lambda a, b: 1.0)
+    monkeypatch.setitem(cli_module.POSTERS, "youtube", FakeYouTubePoster)
+
+    runner = CliRunner()
+    posted = runner.invoke(
+        cli_module.cli,
+        [
+            "post",
+            "--content-id",
+            "content-submitted",
+            "--content-id",
+            "content-pending",
+            "--allow-quiet-hours",
+            "--delay-1",
+        ],
+    )
+
+    assert posted.exit_code == 0
+    assert sleep_calls == []
+    assert "Posting content-submitted" in posted.output
+    assert "Posting content-pending" in posted.output
+    assert db.get_platform_payload("content-submitted", "youtube").status == "submitted"
+    assert db.get_platform_payload("content-pending", "youtube").status == "posted"
+
+    submitted_posts = db.list_posts_for_content("content-submitted")
+    pending_posts = db.list_posts_for_content("content-pending")
+    assert len(submitted_posts) == 1
+    assert len(pending_posts) == 1
+    assert pending_posts[0].post_id == "yt-123"
 
 
 def test_post_command_rejects_delay_above_999_minutes(tmp_db: Path) -> None:

@@ -39,6 +39,8 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     product_columns = set(_table_columns(conn, "products"))
     if "product_url" not in product_columns:
         conn.execute("ALTER TABLE products ADD COLUMN product_url TEXT")
+    if "description" not in product_columns:
+        conn.execute("ALTER TABLE products ADD COLUMN description TEXT")
 
     content_columns = set(_table_columns(conn, "content"))
     for name, ddl in (
@@ -267,23 +269,99 @@ def upsert_product(p: Product) -> None:
     with _connect() as conn:
         conn.execute(
             """INSERT INTO products
-               (sku, name, category, price, product_url, shopify_image_url, image_dir,
+               (sku, name, category, price, description, product_url, shopify_image_url, image_dir,
                 generation_ready, active, excluded, exclude_reason,
                 last_content_date, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?, datetime('now'))
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, datetime('now'))
                ON CONFLICT(sku) DO UPDATE SET
                  name=excluded.name,
                  category=excluded.category,
                  price=excluded.price,
+                 description=excluded.description,
                  product_url=excluded.product_url,
                  shopify_image_url=excluded.shopify_image_url,
                  image_dir=excluded.image_dir,
                  generation_ready=excluded.generation_ready,
                  active=excluded.active,
                  updated_at=datetime('now')""",
-            (p.sku, p.name, p.category, p.price, p.product_url, p.shopify_image_url,
+            (p.sku, p.name, p.category, p.price, p.description, p.product_url, p.shopify_image_url,
              p.image_dir, int(p.generation_ready), int(p.active),
              int(p.excluded), p.exclude_reason, p.last_content_date),
+        )
+
+
+def upsert_shopify_product(p: Product) -> None:
+    normalized_product_url = _normalize_product_url(p.product_url)
+    cleaned_product_url = _clean_product_url(p.product_url)
+
+    with _connect() as conn:
+        target_sku = None
+        if normalized_product_url:
+            row = conn.execute(
+                """
+                SELECT sku
+                FROM products
+                WHERE sku != ?
+                  AND lower(rtrim(coalesce(product_url, ''), '/')) = ?
+                ORDER BY
+                  CASE
+                    WHEN generation_ready = 1 OR coalesce(image_dir, '') != '' THEN 0
+                    ELSE 1
+                  END,
+                  updated_at DESC,
+                  created_at DESC,
+                  sku ASC
+                LIMIT 1
+                """,
+                (p.sku, normalized_product_url),
+            ).fetchone()
+            if row:
+                target_sku = row["sku"]
+
+        if target_sku is None:
+            row = conn.execute("SELECT sku FROM products WHERE sku=?", (p.sku,)).fetchone()
+            if row:
+                target_sku = row["sku"]
+
+        if target_sku is None:
+            conn.execute(
+                """INSERT INTO products
+                   (sku, name, category, price, description, product_url, shopify_image_url, image_dir,
+                    generation_ready, active, excluded, exclude_reason,
+                    last_content_date, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, datetime('now'))""",
+                (p.sku, p.name, p.category, p.price, p.description, cleaned_product_url, p.shopify_image_url,
+                 p.image_dir, int(p.generation_ready), int(p.active),
+                 int(p.excluded), p.exclude_reason, p.last_content_date),
+            )
+            return
+
+        conn.execute(
+            """
+            UPDATE products
+               SET name=?,
+                   category=?,
+                   price=?,
+                   description=?,
+                   product_url=CASE
+                       WHEN ? IS NOT NULL AND trim(?) != '' THEN ?
+                       ELSE product_url
+                   END,
+                   shopify_image_url=?,
+                   updated_at=datetime('now')
+             WHERE sku=?
+            """,
+            (
+                p.name,
+                p.category,
+                p.price,
+                p.description,
+                cleaned_product_url,
+                cleaned_product_url,
+                cleaned_product_url,
+                p.shopify_image_url,
+                target_sku,
+            ),
         )
 
 
@@ -337,9 +415,12 @@ def update_last_content_date(sku: str, dt: str | None = None) -> None:
 
 
 def _row_to_product(row: sqlite3.Row) -> Product:
+    keys = row.keys()
     return Product(
         sku=row["sku"], name=row["name"], category=row["category"],
-        price=row["price"], product_url=row["product_url"],
+        price=row["price"],
+        description=row["description"] if "description" in keys else None,
+        product_url=row["product_url"],
         shopify_image_url=row["shopify_image_url"],
         image_dir=row["image_dir"],
         generation_ready=bool(row["generation_ready"]),
@@ -348,6 +429,18 @@ def _row_to_product(row: sqlite3.Row) -> Product:
         last_content_date=row["last_content_date"],
         created_at=row["created_at"], updated_at=row["updated_at"],
     )
+
+
+def _normalize_product_url(url: str | None) -> str | None:
+    cleaned = _clean_product_url(url)
+    return cleaned.lower() if cleaned else None
+
+
+def _clean_product_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    cleaned = url.strip().rstrip("/")
+    return cleaned or None
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 
 import httpx
@@ -73,19 +74,42 @@ def _parse_next_link(link_header: str | None) -> str | None:
     return None
 
 
+def _strip_html(html: str) -> str:
+    """Strip HTML tags and collapse whitespace."""
+    if not html or not html.strip():
+        return ""
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = " ".join(text.split())
+    return text.strip()
+
+
+def _product_url_from_handle(handle: str | None) -> str | None:
+    cleaned_handle = (handle or "").strip().strip("/")
+    store_url = str(config.get("shopify.store_url", "")).strip().rstrip("/")
+    if not cleaned_handle or not store_url:
+        return None
+    return f"{store_url}/products/{cleaned_handle}"
+
+
 def _product_from_shopify(item: dict) -> Product:
     variants = item.get("variants") or [{}]
     first_variant = variants[0]
-    sku = first_variant.get("sku") or item.get("handle", "")
+    handle = item.get("handle", "")
+    sku = first_variant.get("sku") or handle
 
     image = item.get("image") or {}
     image_url = image.get("src")
+
+    body_html = item.get("body_html") or ""
+    description = _strip_html(body_html) if body_html else None
 
     return Product(
         sku=sku,
         name=item.get("title", ""),
         category=item.get("product_type") or None,
         price=float(first_variant["price"]) if first_variant.get("price") else None,
+        description=description or None,
+        product_url=_product_url_from_handle(handle),
         shopify_image_url=image_url,
     )
 
@@ -105,7 +129,7 @@ def sync_products() -> list[Product]:
                 if not product.sku:
                     logger.warning("Skipping product '%s' — no SKU or handle", product.name)
                     continue
-                db.upsert_product(product)
+                db.upsert_shopify_product(product)
                 products.append(product)
 
             url = _parse_next_link(resp.headers.get("link"))

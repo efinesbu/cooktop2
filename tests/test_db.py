@@ -54,6 +54,107 @@ def test_list_products_active_only(tmp_db: Path) -> None:
     assert "excluded-1" not in skus
 
 
+def test_upsert_shopify_product_preserves_local_registration_state(tmp_db: Path) -> None:
+    db.upsert_product(
+        Product(
+            sku="eye-cream",
+            name="Eye Cream",
+            description="Manual description",
+            product_url="https://veluraesthetics.com/products/active-eye-cream",
+            image_dir="C:/tmp/eye-cream",
+            generation_ready=True,
+            active=False,
+            excluded=True,
+            exclude_reason="manual hold",
+            last_content_date="2026-03-01",
+        )
+    )
+
+    db.upsert_shopify_product(
+        Product(
+            sku="eye-cream",
+            name="Eye Cream",
+            description="Synced website description",
+            product_url="https://veluraesthetics.com/products/active-eye-cream/",
+            shopify_image_url="https://cdn.example.com/eye-cream.jpg",
+        )
+    )
+
+    fetched = db.get_product("eye-cream")
+    assert fetched is not None
+    assert fetched.description == "Synced website description"
+    assert fetched.shopify_image_url == "https://cdn.example.com/eye-cream.jpg"
+    assert fetched.product_url == "https://veluraesthetics.com/products/active-eye-cream"
+    assert fetched.image_dir == "C:/tmp/eye-cream"
+    assert fetched.generation_ready is True
+    assert fetched.active is False
+    assert fetched.excluded is True
+    assert fetched.exclude_reason == "manual hold"
+    assert fetched.last_content_date == "2026-03-01"
+
+
+def test_upsert_shopify_product_merges_exact_product_url_match(tmp_db: Path) -> None:
+    db.upsert_product(
+        Product(
+            sku="eye-cream",
+            name="Eye Cream",
+            product_url="https://veluraesthetics.com/products/active-eye-cream",
+            generation_ready=True,
+            image_dir="C:/tmp/eye-cream",
+        )
+    )
+
+    db.upsert_shopify_product(
+        Product(
+            sku="92852-BLNK-PC-03-04-CR-AEC",
+            name="Eye Cream",
+            description="Featherweight under-eye hydration",
+            product_url="https://veluraesthetics.com/products/active-eye-cream/",
+            shopify_image_url="https://cdn.example.com/eye-cream.jpg",
+        )
+    )
+
+    fetched = db.get_product("eye-cream")
+    assert fetched is not None
+    assert fetched.description == "Featherweight under-eye hydration"
+    assert fetched.shopify_image_url == "https://cdn.example.com/eye-cream.jpg"
+    assert fetched.generation_ready is True
+    assert fetched.image_dir == "C:/tmp/eye-cream"
+    assert db.get_product("92852-BLNK-PC-03-04-CR-AEC") is None
+
+
+def test_upsert_shopify_product_keeps_similar_products_separate_when_urls_differ(tmp_db: Path) -> None:
+    db.upsert_product(
+        Product(
+            sku="eye-cream",
+            name="Active Retinol Eye Cream",
+            description="Retinol eye cream description",
+            product_url="https://veluraesthetics.com/products/active-retinol-eye-cream",
+            generation_ready=True,
+            image_dir="C:/tmp/eye-cream",
+        )
+    )
+
+    db.upsert_shopify_product(
+        Product(
+            sku="92852-BLNK-PC-03-04-CR-AEC",
+            name="Eye Cream",
+            description="Featherweight eye cream description",
+            product_url="https://veluraesthetics.com/products/active-eye-cream",
+            shopify_image_url="https://cdn.example.com/eye-cream.jpg",
+        )
+    )
+
+    registered = db.get_product("eye-cream")
+    synced = db.get_product("92852-BLNK-PC-03-04-CR-AEC")
+    assert registered is not None
+    assert synced is not None
+    assert registered.description == "Retinol eye cream description"
+    assert synced.description == "Featherweight eye cream description"
+    assert registered.product_url == "https://veluraesthetics.com/products/active-retinol-eye-cream"
+    assert synced.product_url == "https://veluraesthetics.com/products/active-eye-cream"
+
+
 def test_exclude_include_product(
     db_with_product: Path, sample_product: Product
 ) -> None:

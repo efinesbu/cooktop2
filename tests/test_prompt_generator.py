@@ -111,6 +111,9 @@ def test_generate_content_uses_openai_and_persists_outputs(
                 image_type="hero",
             )
         ],
+        cta_type="see_product",
+        proof_type="ingredient",
+        script_style="conversational",
     )
 
     assert captured["api_key"] == "test-openai-key"
@@ -143,6 +146,99 @@ def test_generate_content_uses_openai_and_persists_outputs(
     # 120 input @ $2.50/1M + 80 output @ $15/1M = 0.0003 + 0.0012 = 0.0015
     assert costs[0].cost_usd is not None
     assert abs(costs[0].cost_usd - 0.0015) < 1e-6
+
+
+def test_generate_content_retries_on_empty_openai_response(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    call_count = 0
+
+    response_payload = {
+        "theme": "benefit",
+        "hook_type": "question",
+        "hook_text": "Want your skin to look fresher by morning?",
+        "creative_format": "ai_video_15s",
+        "cta_type": "see_product",
+        "cta_text": "try me today",
+        "problem_angle": None,
+        "proof_type": "ingredient",
+        "script_style": "conversational",
+        "starting_image_prompt": "A cinematic 3D closeup of an anthropomorphic Serum X.",
+        "scene_1_desc": "Hook closeup as the bottle smiles.",
+        "scene_2_desc": "HARD CUT to side angle with texture detail.",
+        "scene_1_script": "I show up worried and tired.",
+        "scene_2_script": "I help skin look fresh and confident by morning.",
+        "platform_captions": {
+            "youtube": "Glow faster with Serum X",
+            "instagram": "Meet your shortcut to brighter skin.",
+            "tiktok": "POV: your skin finally looks awake",
+            "x": "Serum X helps tired skin look camera-ready fast.",
+        },
+        "hashtags": ["skincare", "glow", "serumx"],
+    }
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            content = "   " if call_count == 1 else json.dumps(response_payload)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+                usage=SimpleNamespace(prompt_tokens=120, completion_tokens=80),
+            )
+
+    class FakeOpenAIClient:
+        def __init__(self, api_key: str) -> None:
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    fake_openai = SimpleNamespace(
+        OpenAI=FakeOpenAIClient,
+        APIConnectionError=Exception,
+        RateLimitError=Exception,
+        APIStatusError=Exception,
+    )
+
+    client_secrets = tmp_path / "youtube_client_secrets.json"
+    client_secrets.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "openai": {"api_key": "test-openai-key", "model": "gpt-4.1-mini"},
+            "site_url": "https://example.com",
+            "platforms": {"enabled": ["youtube"]},
+            "youtube": {"client_secrets_file": str(client_secrets)},
+        },
+    )
+    monkeypatch.setattr("src.config.load_dotenv", lambda: None)
+    monkeypatch.setattr(prompt_generator, "_load_openai_module", lambda: fake_openai)
+    monkeypatch.setattr(prompt_generator.time, "sleep", lambda _: None)
+
+    product = Product(
+        sku="serum-x",
+        name="Serum X",
+        product_url="https://example.com/products/serum-x",
+    )
+    db.upsert_product(product)
+
+    content, extras = prompt_generator.generate_content(
+        product=product,
+        theme="benefit",
+        hook_type="question",
+        product_images=[],
+        cta_type="see_product",
+        proof_type="ingredient",
+        script_style="conversational",
+    )
+
+    assert call_count == 2
+    assert content.hook_text == response_payload["hook_text"]
+    assert extras["hashtags"] == response_payload["hashtags"]
 
 
 def test_generate_content_allows_prompt_selected_labels_without_overrides(
@@ -228,9 +324,12 @@ def test_generate_content_allows_prompt_selected_labels_without_overrides(
 
     content, _ = prompt_generator.generate_content(
         product=product,
-        theme=None,
-        hook_type=None,
+        theme="routine",
+        hook_type="quick_tip",
         product_images=[],
+        cta_type="shop_now",
+        proof_type="none",
+        script_style="tip_based",
     )
 
     assert "Locked creative constraints:" in captured["messages"][1]["content"]
@@ -324,17 +423,19 @@ def test_generate_content_rejects_invalid_metadata(
             theme="benefit",
             hook_type="question",
             product_images=[],
+            proof_type="ingredient",
         )
 
     response_payload["creative_format"] = "ai_video_15s"
     response_payload["cta_type"] = "invalid_cta"
 
-    with pytest.raises(ValueError, match="cta_type.*not in whitelist"):
+    with pytest.raises(ValueError, match="cta_type"):
         prompt_generator.generate_content(
             product=product,
             theme="benefit",
             hook_type="question",
             product_images=[],
+            proof_type="ingredient",
         )
 
 
@@ -434,6 +535,7 @@ def test_generate_content_injects_research_and_persists_snapshot_id(
         theme="benefit",
         hook_type="question",
         product_images=[],
+        proof_type="ingredient",
     )
 
     user_msg = captured["messages"][1]["content"]
@@ -575,6 +677,7 @@ def test_generate_content_image_motion_15s_persists_image_plan(
         hook_type="question",
         product_images=[],
         creative_format="image_motion_15s",
+        proof_type="ingredient",
     )
 
     assert content.creative_format == "image_motion_15s"
@@ -719,11 +822,11 @@ def test_generate_content_image_motion_voice_uses_marin(
     product = Product(sku="serum-x", name="Serum X", product_url="https://x.com/serum-x")
     db.upsert_product(product)
 
-    content1, _ = prompt_generator.generate_content(product=product, theme="benefit", hook_type="question", product_images=[], creative_format="image_motion_15s")
+    content1, _ = prompt_generator.generate_content(product=product, theme="benefit", hook_type="question", product_images=[], creative_format="image_motion_15s", proof_type="none")
     manifest1 = json.loads(content1.asset_manifest_json or "{}")
     voice1 = manifest1.get("voiceover_plan", {}).get("voice")
 
-    content2, _ = prompt_generator.generate_content(product=product, theme="benefit", hook_type="question", product_images=[], creative_format="image_motion_15s")
+    content2, _ = prompt_generator.generate_content(product=product, theme="benefit", hook_type="question", product_images=[], creative_format="image_motion_15s", proof_type="none")
     manifest2 = json.loads(content2.asset_manifest_json or "{}")
     voice2 = manifest2.get("voiceover_plan", {}).get("voice")
 
@@ -780,9 +883,9 @@ def test_image_motion_voiceover_budget_leaves_end_buffer() -> None:
         "Lux Lipstick",
         8.0,
     )
-    assert "Voiceover should finish 0.5 to 1.0 seconds before clip end." in user_message
-    assert "Preferred spoken duration: 7.0-7.5 seconds" in user_message
-    assert "Target word count: 17" in user_message
+    assert "Voiceover should finish 1.0 to 1.5 seconds before clip end." in user_message
+    assert "Preferred spoken duration: 6.5-7.0 seconds" in user_message
+    assert "Target word count: 16" in user_message
     assert "Brand guardrails:" in user_message
     assert "Forbidden terms:" in user_message
     assert "instant" in user_message
@@ -790,7 +893,7 @@ def test_image_motion_voiceover_budget_leaves_end_buffer() -> None:
 
     script = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen"
     trimmed = prompt_generator._trim_script_to_duration(script, 8.0)
-    assert len(trimmed.split()) == 17
+    assert len(trimmed.split()) == 16
 
 
 def test_generate_content_image_motion_retries_voiceover_guardrail_failures(
@@ -929,6 +1032,7 @@ def test_generate_content_image_motion_retries_voiceover_guardrail_failures(
         hook_type="question",
         product_images=[],
         creative_format="image_motion_15s",
+        proof_type="ingredient",
     )
 
     manifest = json.loads(content.asset_manifest_json or "{}")
@@ -938,7 +1042,9 @@ def test_generate_content_image_motion_retries_voiceover_guardrail_failures(
     assert "Retry instruction:" in captured_calls[2]["messages"][1]["content"]
     assert "instant" in captured_calls[2]["messages"][1]["content"]
     assert "overnight" in captured_calls[3]["messages"][1]["content"]
-    assert voiceover_plan["voiceover_script"] == voiceover_payloads[2]["voiceover_script"]
+    assert "Serum X brings polished glow" in voiceover_plan["voiceover_script"]
+    assert "instant" not in voiceover_plan["voiceover_script"]
+    assert "overnight" not in voiceover_plan["voiceover_script"]
 
 
 def test_generate_content_image_motion_raises_after_third_voiceover_guardrail_failure(
@@ -1066,6 +1172,7 @@ def test_generate_content_image_motion_raises_after_third_voiceover_guardrail_fa
             hook_type="question",
             product_images=[],
             creative_format="image_motion_15s",
+            proof_type="ingredient",
         )
 
     assert len(captured_calls) == 4
@@ -1334,6 +1441,7 @@ def test_generate_content_ai_video_flex_15s_persists_video_plan(
         hook_type="question",
         product_images=[],
         creative_format="ai_video_flex_15s",
+        proof_type="ingredient",
     )
 
     assert content.creative_format == "ai_video_flex_15s"
@@ -1411,7 +1519,7 @@ def test_generate_content_ai_video_flex_rejects_invalid_video_plan(
     }}
     monkeypatch.setattr(prompt_generator, "_load_openai_module", lambda: make_fake(payload))
     with pytest.raises(ValueError, match="3–7 entries"):
-        prompt_generator.generate_content(product=product, theme="benefit", hook_type="question", product_images=[], creative_format="ai_video_flex_15s")
+        prompt_generator.generate_content(product=product, theme="benefit", hook_type="question", product_images=[], creative_format="ai_video_flex_15s", proof_type="ingredient")
 
     # Scene duration 4.0 out of range (1.5–3.0): clamped and total normalized
     payload = {**base_payload, "video_plan": {
@@ -1427,7 +1535,7 @@ def test_generate_content_ai_video_flex_rejects_invalid_video_plan(
     }}
     monkeypatch.setattr(prompt_generator, "_load_openai_module", lambda: make_fake(payload))
     content, _ = prompt_generator.generate_content(
-        product=product, theme="benefit", hook_type="question", product_images=[], creative_format="ai_video_flex_15s"
+        product=product, theme="benefit", hook_type="question", product_images=[], creative_format="ai_video_flex_15s", proof_type="ingredient"
     )
     manifest = json.loads(content.asset_manifest_json)
     plan = manifest["video_plan"]
@@ -1464,6 +1572,70 @@ def test_build_user_message_video_v2_preserves_branding_from_hero_references() -
 
     assert "preserve the real package silhouette, label layout, and visible brand wordmark" in message
     assert "Do not genericize or omit the on-pack Velura branding" in message
+
+
+def test_build_user_message_includes_all_locked_constraints() -> None:
+    """_build_user_message always includes locked theme, hook_type, cta_type, proof_type, script_style."""
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    product = Product(sku="test", name="Test Product")
+    message = prompt_generator._build_user_message(
+        product=product,
+        theme="curiosity",
+        hook_type="question",
+        product_images=[],
+        cta_type="shop_now",
+        proof_type="ingredient",
+        script_style="tip_based",
+    )
+
+    assert "Locked creative constraints:" in message
+    assert "Theme must be: curiosity" in message
+    assert "Hook type must be: question" in message
+    assert "CTA type must be: shop_now" in message
+    assert "Proof type must be: ingredient" in message
+    assert "Script style must be: tip_based" in message
+
+
+def test_validate_response_shape_rejects_mismatched_locked_cta_proof_script() -> None:
+    """_validate_response_shape raises when LLM returns cta_type, proof_type, or script_style that does not match locked value."""
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    data = {
+        "theme": "benefit",
+        "hook_type": "question",
+        "hook_text": "Want fresher skin?",
+        "platform_captions": {"youtube": "X", "instagram": "X", "tiktok": "X", "x": "X"},
+        "hashtags": ["skincare"],
+    }
+
+    with pytest.raises(ValueError, match="cta_type.*did not match locked"):
+        prompt_generator._validate_response_shape(
+            {**data, "cta_type": "shop_now"},
+            theme="benefit",
+            hook_type="question",
+            cta_type="see_product",
+        )
+
+    with pytest.raises(ValueError, match="proof_type.*did not match locked"):
+        prompt_generator._validate_response_shape(
+            {**data, "cta_type": "see_product", "proof_type": "testimonial"},
+            theme="benefit",
+            hook_type="question",
+            proof_type="ingredient",
+        )
+
+    with pytest.raises(ValueError, match="script_style.*did not match locked"):
+        prompt_generator._validate_response_shape(
+            {**data, "cta_type": "see_product", "proof_type": "ingredient", "script_style": "storytelling"},
+            theme="benefit",
+            hook_type="question",
+            cta_type="see_product",
+            proof_type="ingredient",
+            script_style="conversational",
+        )
 
 
 # ---------------------------------------------------------------------------

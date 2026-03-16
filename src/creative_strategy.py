@@ -3,9 +3,12 @@ from __future__ import annotations
 from typing import Iterable
 
 from src.models import (
+    CTA_TYPES,
     HOOK_DEFINITIONS,
     HOOK_TYPE_MAP,
     HOOK_TYPES,
+    PROOF_TYPES,
+    SCRIPT_STYLES,
     THEME_DEFINITIONS,
     THEME_MAP,
     THEMES,
@@ -62,6 +65,45 @@ def base_weight(theme_id: str, hook_id: str) -> float:
     theme = get_theme(theme_id)
     hook = get_hook(hook_id)
     return theme.default_weight * hook.default_weight
+
+
+def resolve_deterministic_fields(
+    theme: str | None,
+    hook_type: str | None,
+    cta_type: str | None,
+    proof_type: str | None,
+    script_style: str | None,
+    generation_index: int = 0,
+) -> dict[str, str]:
+    """Resolve all deterministic strategy fields before the LLM call.
+
+    Priority: CLI-provided value > round-robin over whitelist.
+    Bandit recommendations are passed in by the caller as theme/hook_type.
+    """
+    resolved: dict[str, str] = {}
+
+    resolved["theme"] = (
+        theme.strip() if theme and theme.strip() in THEMES else
+        THEMES[generation_index % len(THEMES)]
+    )
+    resolved["hook_type"] = (
+        hook_type.strip() if hook_type and hook_type.strip() in HOOK_TYPES else
+        HOOK_TYPES[generation_index % len(HOOK_TYPES)]
+    )
+    resolved["cta_type"] = (
+        cta_type.strip() if cta_type and cta_type.strip() in CTA_TYPES else
+        CTA_TYPES[generation_index % len(CTA_TYPES)]
+    )
+    resolved["proof_type"] = (
+        proof_type.strip() if proof_type and proof_type.strip() in PROOF_TYPES else
+        PROOF_TYPES[generation_index % len(PROOF_TYPES)]
+    )
+    resolved["script_style"] = (
+        script_style.strip() if script_style and script_style.strip() in SCRIPT_STYLES else
+        SCRIPT_STYLES[generation_index % len(SCRIPT_STYLES)]
+    )
+
+    return resolved
 
 
 def whitelist_prompt_lines(

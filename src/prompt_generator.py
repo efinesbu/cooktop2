@@ -25,11 +25,13 @@ You are an expert creative director and AI video prompt engineer specializing in
 
 TARGET PRODUCT: provided in the user message.
 
+PRODUCT TRUTH: Base all product claims, benefits, and ingredient references ONLY on the product description provided in the user message. Do not invent features, ingredients, or benefits not mentioned in the description. If no product description is provided, keep claims generic and avoid specific ingredient or benefit references.
+
 CORE DIRECTIVE
 Generate exactly 1 unique creative variation for the target product. Output an image generation prompt and a 30-word video script featuring an anthropomorphic version of this product speaking in the first person.
 - The single variation may be fear-based or positive, but it must stay FTC-compliant and visually simple.
-- Pick a `theme` and `hook_type` from the allowed whitelist supplied in the user message unless a value is explicitly locked.
-- Use the selected `theme` and `hook_type` as real creative direction, not as bookkeeping metadata.
+- Use the theme, hook_type, cta_type, proof_type, and script_style from the locked constraints in the user message. Echo them exactly in your response.
+- Use these values as real creative direction, not as bookkeeping metadata.
 - Return a concise `hook_text` that captures the opening hook in natural spoken language.
 
 STRICT RULES AND CONSTRAINTS
@@ -48,15 +50,15 @@ STRICT RULES AND CONSTRAINTS
 RESPOND WITH ONLY valid JSON matching this exact schema — no markdown fences, no commentary:
 
 {
-  "theme": "string — chosen from allowed themes in the user message",
-  "hook_type": "string — chosen from allowed hook types in the user message",
+  "theme": "string — must match the locked theme in the user message",
+  "hook_type": "string — must match the locked hook type in the user message",
   "hook_text": "string — short opening hook line for overlay/caption fallback",
   "creative_format": "string — must be 'ai_video_15s' for this generation",
-  "cta_type": "string — chosen from: see_product, shop_now",
+  "cta_type": "string — must match the locked cta_type in the user message",
   "cta_text": "string — the exact CTA phrase used in scene_2_script (e.g. 'try me today', 'shop now')",
   "problem_angle": "string — one-line description of the problem/angle if theme is problem_solution, else null",
-  "proof_type": "string — chosen from: test_result, testimonial, before_after, ingredient, none",
-  "script_style": "string — chosen from: conversational, direct, storytelling, tip_based",
+  "proof_type": "string — must match the locked proof_type in the user message",
+  "script_style": "string — must match the locked script_style in the user message",
   "starting_image_prompt": "string — must describe a cinematic 3D closeup of an anthropomorphic target product standing on a luxury bathroom counter. Include a high-quality Pixar-style face with large expressive eyes and an articulated mouth, soft focus luxury bathroom background, volumetric lighting, octane render, unreal engine 5, 4k, and the brand 'velura' in brown writing using font style Cormorant Garamond, Georgia, Times New Roman, serif. Add 1-2 sentences of variation-specific visual detail.",
   "scene_1_desc": "string — 7.5-second shot description that starts with a strong hook and focuses on expression plus minimal, slow movements. accurate lipsync with the voiceover script.",
   "scene_2_desc": "string — 7.5-second shot description that starts with 'HARD CUT' and moves to a new angle with subtle product demo visuals. accurate lipsync with the voiceover script.",
@@ -72,12 +74,8 @@ RESPOND WITH ONLY valid JSON matching this exact schema — no markdown fences, 
 }
 
 RULES:
-- `theme` must exactly match one allowed theme from the user message.
-- `hook_type` must exactly match one allowed hook type from the user message.
+- `theme`, `hook_type`, `cta_type`, `proof_type`, and `script_style` must exactly match the locked values in the user message.
 - `creative_format` must be exactly 'ai_video_15s'.
-- `cta_type` must be one of: see_product, shop_now.
-- `proof_type` must be one of: test_result, testimonial, before_after, ingredient, none.
-- `script_style` must be one of: conversational, direct, storytelling, tip_based.
 - Voiceover scripts must sound natural when spoken aloud.
 - `scene_1_script` must be 10-20 words.
 - `scene_2_script` must be 10-20 words.
@@ -92,9 +90,11 @@ You are an expert creative director for cosmetic advertising.
 
 TARGET PRODUCT: provided in the user message.
 
+PRODUCT TRUTH: Base all product claims, benefits, and ingredient references ONLY on the product description provided in the user message. Do not invent features, ingredients, or benefits not mentioned in the description. If no product description is provided, keep claims generic and avoid specific ingredient or benefit references.
+
 CORE DIRECTIVE
 Generate exactly 1 unique creative variation for the target product. Output a short hook and platform captions for a slideshow or image-motion format (no AI video generation).
-- Pick a `theme` and `hook_type` from the allowed whitelist unless locked.
+- Use the theme, hook_type, cta_type, proof_type, and script_style from the locked constraints in the user message. Echo them exactly in your response.
 - Return a concise `hook_text` that captures the opening hook.
 - No medical or health claims. Use only approved softeners: "appears to", "feels like", "helps skin look".
 - Use plain ASCII characters only in every field. No emoji or Unicode punctuation.
@@ -102,15 +102,15 @@ Generate exactly 1 unique creative variation for the target product. Output a sh
 RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
 
 {
-  "theme": "string — from allowed themes",
-  "hook_type": "string — from allowed hook types",
+  "theme": "string — must match locked theme in user message",
+  "hook_type": "string — must match locked hook type in user message",
   "hook_text": "string — short opening hook line",
   "creative_format": "string — must match the locked format in user message",
-  "cta_type": "string — see_product or shop_now",
+  "cta_type": "string — must match locked cta_type in user message",
   "cta_text": "string — CTA phrase (e.g. 'try me today', 'shop now')",
   "problem_angle": "string or null",
-  "proof_type": "string — test_result, testimonial, before_after, ingredient, none",
-  "script_style": "string — conversational, direct, storytelling, tip_based",
+  "proof_type": "string — must match locked proof_type in user message",
+  "script_style": "string — must match locked script_style in user message",
   "platform_captions": {
     "youtube": "string — max 100 chars, end with 'Link in bio'",
     "instagram": "string — conversational plain text, no emoji",
@@ -146,9 +146,11 @@ You are an expert creative director for cosmetic image-motion ads.
 
 TARGET PRODUCT: provided in the user message.
 
+PRODUCT TRUTH: Base all product claims, benefits, and ingredient references ONLY on the product description provided in the user message. Do not invent features, ingredients, or benefits not mentioned in the description. If no product description is provided, keep claims generic and avoid specific ingredient or benefit references.
+
 CORE DIRECTIVE
 Generate exactly 1 unique creative for image_motion_15s: a 5-7 frame vertical (9:16) image sequence.
-- Pick theme and hook_type from the allowed whitelist unless locked.
+- Use the theme, hook_type, cta_type, proof_type, and script_style from the locked constraints in the user message. Echo them exactly in your response.
 - Return hook_text, platform_captions, hashtags.
 - Choose content_goal: "conversion" or "engagement".
 - Also return an image_plan: a structured multi-frame plan for Gemini to generate 5-7 images.
@@ -193,15 +195,15 @@ PLANNER RULES:
 RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
 
 {
-  "theme": "string — from allowed themes",
-  "hook_type": "string — from allowed hook types",
+  "theme": "string — must match locked theme in user message",
+  "hook_type": "string — must match locked hook type in user message",
   "hook_text": "string — short opening hook line",
   "creative_format": "image_motion_15s",
-  "cta_type": "string — see_product or shop_now",
+  "cta_type": "string — must match locked cta_type in user message",
   "cta_text": "string — CTA phrase",
   "problem_angle": "string or null",
-  "proof_type": "string — test_result, testimonial, before_after, ingredient, none",
-  "script_style": "string — conversational, direct, storytelling, tip_based",
+  "proof_type": "string — must match locked proof_type in user message",
+  "script_style": "string — must match locked script_style in user message",
   "platform_captions": {
     "youtube": "string — max 100 chars, end with 'Link in bio'",
     "instagram": "string — conversational plain text, no emoji",
@@ -697,9 +699,11 @@ You are an expert creative director and AI video prompt engineer specializing in
 
 TARGET PRODUCT: provided in the user message.
 
+PRODUCT TRUTH: Base all product claims, benefits, and ingredient references ONLY on the product description provided in the user message. Do not invent features, ingredients, or benefits not mentioned in the description. If no product description is provided, keep claims generic and avoid specific ingredient or benefit references.
+
 CORE DIRECTIVE
 Generate exactly 1 unique creative for ai_video_flex_15s: a flexible multi-scene video plan (3–7 scenes, 6–15 seconds total).
-- Pick theme and hook_type from the allowed whitelist unless locked.
+- Use the theme, hook_type, cta_type, proof_type, and script_style from the locked constraints in the user message. Echo them exactly in your response.
 - Return hook_text, platform_captions, hashtags.
 - Return a video_plan: structured scene list with durations, visual descriptions, and voiceover scripts.
  - Choose a style_family that fits the product and creative direction. Supported options are anamorphic and realistic_cinematic.
@@ -720,15 +724,15 @@ PLANNER RULES:
 RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
 
 {
-  "theme": "string — from allowed themes",
-  "hook_type": "string — from allowed hook types",
+  "theme": "string — must match locked theme in user message",
+  "hook_type": "string — must match locked hook type in user message",
   "hook_text": "string — short opening hook line",
   "creative_format": "ai_video_flex_15s",
-  "cta_type": "string — see_product or shop_now",
+  "cta_type": "string — must match locked cta_type in user message",
   "cta_text": "string — CTA phrase",
   "problem_angle": "string or null",
-  "proof_type": "string — test_result, testimonial, before_after, ingredient, none",
-  "script_style": "string — conversational, direct, storytelling, tip_based",
+  "proof_type": "string — must match locked proof_type in user message",
+  "script_style": "string — must match locked script_style in user message",
   "starting_image_prompt": "string — flexible starting frame for the video; when anamorphic, use luxury bathroom + anthropomorphic product per style reference above",
   "platform_captions": {
     "youtube": "string — max 100 chars, end with 'Link in bio'",
@@ -767,6 +771,8 @@ You are an expert creative director and AI video prompt engineer for premium bea
 
 TARGET PRODUCT: provided in the user message.
 
+PRODUCT TRUTH: Base all product claims, benefits, and ingredient references ONLY on the product description provided in the user message. Do not invent features, ingredients, or benefits not mentioned in the description. If no product description is provided, keep claims generic and avoid specific ingredient or benefit references.
+
 VISUAL DIRECTORY (apply to scene descriptions when style_family matches):
 - anamorphic: Cinematic 3D closeup of anthropomorphic product on luxury bathroom counter. Pixar-style face, large expressive eyes, articulated mouth, soft focus background, volumetric lighting, octane render, unreal engine 5, 4k, brand "velura" in brown serif (Cormorant Garamond, Georgia, Times New Roman).
 - realistic_cinematic: Natural proportions, realistic hands and skin, soft diffusion, premium product hero shot.
@@ -790,7 +796,7 @@ Choose ONE question from this list and build the open loop around it: """ + "; "
 
 CORE DIRECTIVE
 Generate exactly 1 unique creative for a 15-second video. Output MUST use a timeline with exactly 4 scenes and absolute timestamps. Total duration is LOCKED at 15 seconds.
-- Pick theme and hook_type from the allowed whitelist unless locked.
+- Use the theme, hook_type, cta_type, proof_type, and script_style from the locked constraints in the user message. Echo them exactly in your response.
 - Return hook_text, platform_captions, hashtags.
 - Choose content_goal: "conversion" (direct-response) or "engagement" (saves, shares, follows, watch-through).
 - When content_goal is "engagement", CTA can be softer; prioritize stopping the scroll and earning a save or follow.
@@ -834,15 +840,15 @@ FTC COMPLIANCE
 RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
 
 {
-  "theme": "string — from allowed themes",
-  "hook_type": "string — from allowed hook types",
+  "theme": "string — must match locked theme in user message",
+  "hook_type": "string — must match locked hook type in user message",
   "hook_text": "string — short opening hook line",
   "creative_format": "ai_video_flex_15s",
-  "cta_type": "string — see_product or shop_now",
+  "cta_type": "string — must match locked cta_type in user message",
   "cta_text": "string — CTA phrase",
   "problem_angle": "string or null",
-  "proof_type": "string — test_result, testimonial, before_after, ingredient, none",
-  "script_style": "string — conversational, direct, storytelling, tip_based",
+  "proof_type": "string — must match locked proof_type in user message",
+  "script_style": "string — must match locked script_style in user message",
   "starting_image_prompt": "string — first frame; preserve visible packaging branding/wordmark and label layout from hero reference images when provided; when style_family is anamorphic, MUST use full anamorphic spec per ANAMORPHIC SCENE RULES (cinematic 3D closeup, anthropomorphic product, luxury bathroom counter, Pixar-style face, volumetric lighting, octane render, unreal engine 5, 4k, brand velura in brown serif)",
   "platform_captions": {
     "youtube": "string — max 100 chars, end with 'Link in bio'",
@@ -879,35 +885,34 @@ def _has_model_reference_assets() -> bool:
 
 def _build_user_message(
     product: Product,
-    theme: str | None,
-    hook_type: str | None,
+    theme: str,
+    hook_type: str,
     product_images: list[ProductImage],
     research_summary: str | None = None,
     creative_format: str | None = None,
     performance_summary: str | None = None,
     video_v2: bool = False,
+    cta_type: str = "see_product",
+    proof_type: str = "none",
+    script_style: str = "conversational",
 ) -> str:
-    theme_ids = [theme] if theme else None
-    hook_ids = [hook_type] if hook_type else None
     lines = [
         f"Product: {product.name}",
         f"SKU: {product.sku}",
         f"Category: {product.category or 'general'}",
         f"Price: ${product.price:.2f}" if product.price else "Price: not set",
     ]
-    if theme or hook_type or creative_format:
-        lines.append("Locked creative constraints:")
-        if theme:
-            lines.append(f"  - Theme must be: {theme}")
-        if hook_type:
-            lines.append(f"  - Hook type must be: {hook_type}")
-        if creative_format:
-            lines.append(f"  - Creative format must be: {creative_format}")
-    else:
-        lines.append("Creative selection task:")
-        lines.append("  - Choose the strongest theme and hook type from the whitelist below.")
-        lines.append("  - Avoid picking overlapping strategies just because they sound dramatic.")
-    lines.extend(whitelist_prompt_lines(theme_ids=theme_ids, hook_ids=hook_ids))
+    if product.description:
+        lines.append(f"Description: {product.description}")
+    lines.append("Locked creative constraints:")
+    lines.append(f"  - Theme must be: {theme}")
+    lines.append(f"  - Hook type must be: {hook_type}")
+    if creative_format:
+        lines.append(f"  - Creative format must be: {creative_format}")
+    lines.append(f"  - CTA type must be: {cta_type}")
+    lines.append(f"  - Proof type must be: {proof_type}")
+    lines.append(f"  - Script style must be: {script_style}")
+    lines.extend(whitelist_prompt_lines(theme_ids=[theme], hook_ids=[hook_type]))
     if product_images:
         img_descriptions = [
             f"  - {img.image_type}: {img.file_path}" for img in product_images
@@ -943,11 +948,14 @@ def _build_user_message(
 
 def generate_content(
     product: Product,
-    theme: str | None,
-    hook_type: str | None,
+    theme: str,
+    hook_type: str,
     product_images: list[ProductImage],
     creative_format: str | None = None,
     video_v2: bool = False,
+    cta_type: str = "see_product",
+    proof_type: str = "none",
+    script_style: str = "conversational",
 ) -> tuple[Content, dict]:
     """Call OpenAI to generate a structured content script for a 15-second video ad.
 
@@ -958,6 +966,13 @@ def generate_content(
         raise ValueError(
             "Missing `openai.api_key` in config.yaml. "
             "Copy config.example.yaml to config.yaml and add your OpenAI credentials."
+        )
+
+    if not product.description or not product.description.strip():
+        logger.warning(
+            "Product %s has no description; LLM has no grounding context. "
+            "Add --description when adding products, or ensure Shopify sync pulls body_html.",
+            product.sku,
         )
 
     model = config.get("openai.model", "gpt-5.4")
@@ -989,6 +1004,9 @@ def generate_content(
         creative_format=fmt,
         performance_summary=performance_summary,
         video_v2=video_v2,
+        cta_type=cta_type,
+        proof_type=proof_type,
+        script_style=script_style,
     )
     content_id = uuid.uuid4().hex[:16]
 
@@ -1014,7 +1032,8 @@ def generate_content(
     prompt_output_raw = _response_text(response)
 
     parsed = _parse_response(
-        response, theme=theme, hook_type=hook_type, creative_format=fmt, video_v2=video_v2
+        response, theme=theme, hook_type=hook_type, creative_format=fmt, video_v2=video_v2,
+        cta_type=cta_type, proof_type=proof_type, script_style=script_style,
     )
 
     asset_manifest_json = None
@@ -1120,11 +1139,11 @@ def generate_content(
         hook_type=parsed["hook_type"],
         hook_text=parsed["hook_text"],
         creative_format=parsed.get("creative_format") or fmt or "ai_video_15s",
-        cta_type=parsed.get("cta_type", "see_product"),
+        cta_type=cta_type,
         cta_text=parsed.get("cta_text"),
         problem_angle=parsed.get("problem_angle"),
-        proof_type=parsed.get("proof_type"),
-        script_style=parsed.get("script_style"),
+        proof_type=proof_type,
+        script_style=script_style,
         research_snapshot_id=snapshot.id if snapshot else None,
         starting_image_prompt=parsed.get("starting_image_prompt"),
         scene_1_desc=parsed.get("scene_1_desc") if fmt != "ai_video_flex_15s" else None,
@@ -1228,7 +1247,7 @@ def _call_with_retries(
     prompt = system_prompt or _SYSTEM_PROMPT
     for attempt in range(1, max_attempts + 1):
         try:
-            return client.chat.completions.create(
+            response = client.chat.completions.create(
                 model=model,
                 max_completion_tokens=1500,
                 response_format={"type": "json_object"},
@@ -1237,6 +1256,9 @@ def _call_with_retries(
                     {"role": "user", "content": user_msg},
                 ],
             )
+            # Treat empty model output as transient so generation can recover.
+            _response_text(response)
+            return response
         except (
             openai_module.APIConnectionError,
             openai_module.RateLimitError,
@@ -1247,6 +1269,16 @@ def _call_with_retries(
             logger.warning("OpenAI API attempt %d/%d failed: %s", attempt, max_attempts, exc)
             time.sleep(delay)
             delay *= 2
+        except ValueError as exc:
+            if attempt == max_attempts:
+                raise ValueError("OpenAI returned an empty response after multiple retry attempts.") from exc
+            logger.warning(
+                "OpenAI API attempt %d/%d returned empty content; retrying.",
+                attempt,
+                max_attempts,
+            )
+            time.sleep(delay)
+            delay *= 2
 
 
 def _parse_response(
@@ -1255,6 +1287,9 @@ def _parse_response(
     hook_type: str | None = None,
     creative_format: str | None = None,
     video_v2: bool = False,
+    cta_type: str = "see_product",
+    proof_type: str = "none",
+    script_style: str = "conversational",
 ) -> dict:
     raw = _response_text(response)
     if raw.startswith("```"):
@@ -1291,7 +1326,7 @@ def _parse_response(
     missing = [k for k in required if k not in data]
     if missing:
         raise ValueError(f"OpenAI response missing required fields: {missing}")
-    _validate_response_shape(data, theme=theme, hook_type=hook_type)
+    _validate_response_shape(data, theme=theme, hook_type=hook_type, cta_type=cta_type, proof_type=proof_type, script_style=script_style)
     if use_image_motion:
         _validate_and_normalize_image_motion_plan(data)
     if use_ai_video_v2:
@@ -1530,6 +1565,9 @@ def _validate_response_shape(
     data: dict[str, Any],
     theme: str | None = None,
     hook_type: str | None = None,
+    cta_type: str = "see_product",
+    proof_type: str = "none",
+    script_style: str = "conversational",
 ) -> None:
     if not isinstance(data["theme"], str) or not data["theme"].strip():
         raise ValueError("OpenAI response field `theme` must be a non-empty string.")
@@ -1558,6 +1596,22 @@ def _validate_response_shape(
             f"OpenAI response hook_type '{returned_hook}' did not match locked hook_type '{hook_type}'."
         )
 
+    returned_cta = (data.get("cta_type") or "").strip()
+    if returned_cta and returned_cta != cta_type:
+        raise ValueError(
+            f"OpenAI response cta_type '{returned_cta}' did not match locked cta_type '{cta_type}'."
+        )
+    returned_proof = (data.get("proof_type") or "").strip() if data.get("proof_type") else ""
+    if returned_proof and returned_proof != proof_type:
+        raise ValueError(
+            f"OpenAI response proof_type '{returned_proof}' did not match locked proof_type '{proof_type}'."
+        )
+    returned_script = (data.get("script_style") or "").strip() if data.get("script_style") else ""
+    if returned_script and returned_script != script_style:
+        raise ValueError(
+            f"OpenAI response script_style '{returned_script}' did not match locked script_style '{script_style}'."
+        )
+
     if not isinstance(data["platform_captions"], dict):
         raise ValueError("OpenAI response field `platform_captions` must be an object.")
 
@@ -1573,32 +1627,12 @@ def _validate_response_shape(
         raise ValueError("OpenAI response field `hashtags` must be a list.")
 
     # Phase 2: metadata validation
-    creative_format = (data.get("creative_format") or "").strip()
-    if creative_format and creative_format not in CREATIVE_FORMATS:
+    creative_format_val = (data.get("creative_format") or "").strip()
+    if creative_format_val and creative_format_val not in CREATIVE_FORMATS:
         raise ValueError(
-            f"OpenAI response creative_format '{creative_format}' not in whitelist. "
+            f"OpenAI response creative_format '{creative_format_val}' not in whitelist. "
             f"Allowed: {', '.join(CREATIVE_FORMATS)}"
         )
-    cta_type_val = (data.get("cta_type") or "").strip()
-    if cta_type_val and cta_type_val not in CTA_TYPES:
-        raise ValueError(
-            f"OpenAI response cta_type '{cta_type_val}' not in whitelist. "
-            f"Allowed: {', '.join(CTA_TYPES)}"
-        )
-    proof_type_val = data.get("proof_type")
-    if proof_type_val is not None and str(proof_type_val).strip():
-        if str(proof_type_val).strip() not in PROOF_TYPES:
-            raise ValueError(
-                f"OpenAI response proof_type '{proof_type_val}' not in whitelist. "
-                f"Allowed: {', '.join(PROOF_TYPES)}"
-            )
-    script_style_val = data.get("script_style")
-    if script_style_val is not None and str(script_style_val).strip():
-        if str(script_style_val).strip() not in SCRIPT_STYLES:
-            raise ValueError(
-                f"OpenAI response script_style '{script_style_val}' not in whitelist. "
-                f"Allowed: {', '.join(SCRIPT_STYLES)}"
-            )
 
 
 def _response_text(response: Any) -> str:

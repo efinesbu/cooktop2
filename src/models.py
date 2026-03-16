@@ -152,6 +152,7 @@ class Product:
     name: str
     category: Optional[str] = None
     price: Optional[float] = None
+    description: Optional[str] = None
     product_url: Optional[str] = None
     shopify_image_url: Optional[str] = None
     image_dir: Optional[str] = None
