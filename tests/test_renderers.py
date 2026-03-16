@@ -249,10 +249,37 @@ def test_render_media_image_motion_uses_plan_when_present(
         "strategy_summary": "Hero-led sequence",
         "total_duration_seconds": 6.0,
         "performance_rationale": "default",
+        "strategy_metadata": {
+            "content_goal": "engagement",
+            "primary_engagement_intent": "save",
+            "audience_question_cluster": "Which ingredient actually matters?",
+            "audience_fear_cluster": None,
+        },
         "frames": [
-            {"role": "hero_macro", "duration_seconds": 2.0, "image_prompt": "Frame 1"},
-            {"role": "hero_tabletop", "duration_seconds": 2.0, "image_prompt": "Frame 2"},
-            {"role": "texture_detail", "duration_seconds": 2.0, "image_prompt": "Frame 3"},
+            {
+                "role": "hero_macro",
+                "narrative_role": "hook",
+                "frame_intent": "Open with a premium macro reveal.",
+                "mood": "intrigue",
+                "duration_seconds": 2.0,
+                "image_prompt": "Frame 1",
+            },
+            {
+                "role": "hero_tabletop",
+                "narrative_role": "proof",
+                "frame_intent": "Ground the sequence in a believable routine context.",
+                "mood": "calm_confidence",
+                "duration_seconds": 2.0,
+                "image_prompt": "Frame 2",
+            },
+            {
+                "role": "texture_detail",
+                "narrative_role": "cta",
+                "frame_intent": "Close with a tactile payoff that invites action.",
+                "mood": "invitation",
+                "duration_seconds": 2.0,
+                "image_prompt": "Frame 3",
+            },
         ],
     }
     content = Content(
@@ -308,6 +335,7 @@ def test_render_media_image_motion_uses_plan_when_present(
     manifest = json.loads(updated.asset_manifest_json or "{}")
     assert "generated_frame_paths" in manifest
     assert manifest["total_duration_seconds"] == 6.0
+    assert manifest["image_plan"]["frames"][0]["narrative_role"] == "hook"
     assert len(frame_output_dirs) == 1
     assert frame_output_dirs[0] is not None
     assert frame_output_dirs[0] != video_dir
@@ -344,10 +372,37 @@ def test_render_media_image_motion_with_voiceover_generates_tts_and_muxes(
         "strategy_summary": "Hero-led sequence",
         "total_duration_seconds": 6.0,
         "performance_rationale": "default",
+        "strategy_metadata": {
+            "content_goal": "conversion",
+            "primary_engagement_intent": "click",
+            "audience_question_cluster": None,
+            "audience_fear_cluster": "Wasting money on hype",
+        },
         "frames": [
-            {"role": "hero_macro", "duration_seconds": 2.0, "image_prompt": "Frame 1"},
-            {"role": "hero_tabletop", "duration_seconds": 2.0, "image_prompt": "Frame 2"},
-            {"role": "texture_detail", "duration_seconds": 2.0, "image_prompt": "Frame 3"},
+            {
+                "role": "hero_macro",
+                "narrative_role": "hook",
+                "frame_intent": "Lead with a clear hero closeup.",
+                "mood": "intrigue",
+                "duration_seconds": 2.0,
+                "image_prompt": "Frame 1",
+            },
+            {
+                "role": "hero_tabletop",
+                "narrative_role": "proof",
+                "frame_intent": "Make the product feel credible and premium.",
+                "mood": "delight",
+                "duration_seconds": 2.0,
+                "image_prompt": "Frame 2",
+            },
+            {
+                "role": "texture_detail",
+                "narrative_role": "cta",
+                "frame_intent": "Close with a tactile invitation.",
+                "mood": "invitation",
+                "duration_seconds": 2.0,
+                "image_prompt": "Frame 3",
+            },
         ],
     }
     voiceover_plan = {

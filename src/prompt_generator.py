@@ -121,19 +121,56 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
 }
 """
 
+_AUDIENCE_QUESTIONS = [
+    "Does it work for my skin type?",
+    "How fast will I see results?",
+    "Will it irritate sensitive skin?",
+    "Which ingredient actually matters?",
+    "How does it fit into my routine?",
+    "Is it worth the price? (yes)",
+    "Will it help with dark spots, acne, dryness, or texture?",
+]
+_AUDIENCE_FEARS = [
+    "Breakouts or purging",
+    "Irritation or barrier damage",
+    "Wasting money on hype",
+    "Fake before-and-afters",
+    "Buying the wrong product for the skin concern",
+    "Overcomplicated routines",
+    "Results that do not last",
+    "Actives being too harsh for daily use",
+]
+
 _IMAGE_MOTION_SYSTEM_PROMPT = """\
 You are an expert creative director for cosmetic image-motion ads.
 
 TARGET PRODUCT: provided in the user message.
 
 CORE DIRECTIVE
-Generate exactly 1 unique creative for image_motion_15s: a 3–5 frame vertical (9:16) image sequence.
+Generate exactly 1 unique creative for image_motion_15s: a 5-7 frame vertical (9:16) image sequence.
 - Pick theme and hook_type from the allowed whitelist unless locked.
 - Return hook_text, platform_captions, hashtags.
-- Also return an image_plan: a structured multi-frame plan for Gemini to generate 3–5 images.
+- Choose content_goal: "conversion" or "engagement".
+- Also return an image_plan: a structured multi-frame plan for Gemini to generate 5-7 images.
 - Use plain ASCII characters only in every field. No emoji or Unicode punctuation.
 
-CONTROLLED VARIETY (use this vocabulary; vary at most 1–2 axes per creative):
+VISUAL DIRECTORY
+- style_family: anamorphic, realistic_cinematic
+- frame_role: hero_macro, hero_tabletop, texture_detail, lifestyle_portrait, lifestyle_in_use
+- lighting: golden_window_light, soft_diffused_daylight, clean_studio_backlight
+- camera_distance: macro_closeup, closeup, medium_shot
+
+NARRATIVE DIRECTORY
+- narrative_role: hook, problem, proof, cta
+- mood: intrigue, concern, delight, invitation, calm_confidence, soft_curiosity
+
+AUDIENCE INSIGHT - when theme is fear:
+Choose ONE realistic fear from this list and frame it gently and compliantly: """ + "; ".join(_AUDIENCE_FEARS) + """.
+
+AUDIENCE INSIGHT - when theme is curiosity:
+Choose ONE question from this list and build the open loop around it: """ + "; ".join(_AUDIENCE_QUESTIONS) + """.
+
+CONTROLLED VARIETY (use this vocabulary; vary at most 1-2 axes per creative):
 - style_family: anamorphic, realistic_cinematic
 - frame_role: hero_macro, hero_tabletop, texture_detail, lifestyle_portrait, lifestyle_in_use
 - lighting: golden_window_light, soft_diffused_daylight, clean_studio_backlight
@@ -145,6 +182,13 @@ PLANNER RULES:
 - total_duration_seconds must be <= 15; shorter clips are allowed (e.g. 9–12 seconds).
 - Each frame duration_seconds: 1.5–2.0.
 - Bias style/role mix from PERFORMANCE_SUMMARY when provided.
+- Build a mini-story across frames. Use at least 3 distinct narrative_role beats, and end on cta.
+- Each frame must introduce a NEW idea. Do not repeat the same concept with different wording.
+- Each image_prompt must include at least one visual detail that directly reinforces that frame's narrative beat.
+- Consecutive frames must not use the same mood.
+- Consecutive frames must not share the exact same combination of style_family, lighting, and camera_distance.
+- If content_goal is engagement, prioritize intrigue, saves, and follows before the final CTA.
+- If content_goal is conversion, make the final frame a clear product-led payoff with a warmer CTA visual.
 
 RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
 
@@ -169,14 +213,23 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
     "strategy_summary": "string — one-line creative strategy for this sequence",
     "total_duration_seconds": number — sum of frame durations, <= 15,
     "performance_rationale": "string — product_winners, global_winners, or default",
+    "strategy_metadata": {
+      "content_goal": "string — conversion | engagement",
+      "primary_engagement_intent": "string — follow | save | share | comment | click",
+      "audience_question_cluster": "string or null — if theme is curiosity, which question cluster",
+      "audience_fear_cluster": "string or null — if theme is fear, which fear cluster"
+    },
     "frames": [
       {
         "role": "string — hero_macro | hero_tabletop | texture_detail | lifestyle_portrait | lifestyle_in_use",
+        "narrative_role": "string — hook | problem | proof | cta",
+        "frame_intent": "string — what the viewer should feel or understand from this frame",
+        "mood": "string — intrigue | concern | delight | invitation | calm_confidence | soft_curiosity",
         "duration_seconds": number — 1.5 to 2.0,
         "style_family": "string — anamorphic | realistic_cinematic",
         "lighting": "string — golden_window_light | soft_diffused_daylight | clean_studio_backlight",
         "camera_distance": "string — macro_closeup | closeup | medium_shot",
-        "image_prompt": "string — exact prompt for Gemini to generate this frame; include product name, style, lighting, composition"
+        "image_prompt": "string — exact prompt for Gemini to generate this frame; include product name, style, lighting, composition, and at least one concrete visual detail that reinforces the frame_intent"
       }
     ]
   }
@@ -193,9 +246,9 @@ TTS_SCRIPT_TEMPLATES = ("caption_led", "strategy_led", "proof_led")
 TTS_WORDS_PER_SECOND_MAX = 2.5
 TTS_WORDS_PER_SECOND_MIN = 2.1
 VOICEOVER_TARGET_WORDS_PER_SECOND = 2.3
-VOICEOVER_END_BUFFER_MIN_SECONDS = 0.5
-VOICEOVER_END_BUFFER_TARGET_SECONDS = 0.75
-VOICEOVER_END_BUFFER_MAX_SECONDS = 1.0
+VOICEOVER_END_BUFFER_MIN_SECONDS = 1.0
+VOICEOVER_END_BUFFER_TARGET_SECONDS = 1.25
+VOICEOVER_END_BUFFER_MAX_SECONDS = 1.5
 VOICEOVER_GUARDRAIL_MAX_ATTEMPTS = 3
 # Patterns to reject or normalize (brand guardrails)
 TTS_GUARDRAIL_FORBIDDEN = (
@@ -206,6 +259,34 @@ TTS_GUARDRAIL_FORBIDDEN = (
     "before and after", "transformation", "dramatic results",
 )
 TTS_GUARDRAIL_SOFTENERS = ("appears to", "feels like", "helps skin look", "designed to")
+IMAGE_MOTION_FRAME_ROLES = (
+    "hero_macro",
+    "hero_tabletop",
+    "texture_detail",
+    "lifestyle_portrait",
+    "lifestyle_in_use",
+)
+IMAGE_MOTION_HERO_FRAME_ROLES = ("hero_macro", "hero_tabletop", "texture_detail")
+IMAGE_MOTION_LIFESTYLE_FRAME_ROLES = ("lifestyle_portrait", "lifestyle_in_use")
+IMAGE_MOTION_STYLE_FAMILIES = ("anamorphic", "realistic_cinematic")
+IMAGE_MOTION_LIGHTING_OPTIONS = (
+    "golden_window_light",
+    "soft_diffused_daylight",
+    "clean_studio_backlight",
+)
+IMAGE_MOTION_CAMERA_DISTANCES = ("macro_closeup", "closeup", "medium_shot")
+IMAGE_MOTION_NARRATIVE_ROLES = ("hook", "problem", "proof", "cta")
+IMAGE_MOTION_MOODS = (
+    "intrigue",
+    "concern",
+    "delight",
+    "invitation",
+    "calm_confidence",
+    "soft_curiosity",
+)
+IMAGE_MOTION_CONTENT_GOALS = ("conversion", "engagement")
+IMAGE_MOTION_PRIMARY_ENGAGEMENT_INTENTS = ("follow", "save", "share", "comment", "click")
+IMAGE_MOTION_PERFORMANCE_RATIONALES = ("product_winners", "global_winners", "default")
 
 _UNICODE_TEXT_REPLACEMENTS = {
     "\u00a0": " ",
@@ -371,23 +452,47 @@ def _build_voiceover_plan(
 
 _IMAGE_MOTION_VOICEOVER_SYSTEM_PROMPT = """\
 You are an expert short-form ad scriptwriter for premium cosmetic image-motion ads.
+Your scripts will be read aloud by a single voice actor. Every word must earn its place.
 
 TASK
 Write exactly 1 voiceover script for an already-planned `image_motion_15s` clip.
 - The visual plan is final. Do not invent scenes that are not represented in the provided frame plan.
 - The script must fit the exact clip duration supplied in the user message.
-- Aim for the spoken line to finish 0.5 to 1.0 seconds before the clip ends.
+- Aim for the spoken line to finish 1.0 to 1.5 seconds before the clip ends.
 - The script must feel natural when read aloud in one continuous take.
 
 TIMING RULES
 - Keep the full script within the provided word budget.
 - Target a natural premium read pace of about 2.1 to 2.5 words per second.
-- Do not write right up to the final frame or last half-second.
+- Do not write right up to the final frame or last second.
 - Do not add filler just to hit the maximum duration.
+- When the frame plan includes per-frame durations, distribute words roughly proportionally. A 2.0s frame gets ~4-5 words; a 1.5s frame gets ~3-4 words. Brief pauses between beats are better than cramming.
+
+EMOTIONAL ARC — match the frame plan's mood progression
+- The user message includes a mood and narrative_role for each frame. Your script's emotional register MUST mirror this progression.
+- hook frames: confident, attention-grabbing, slightly bold. Lead with the strongest idea.
+- problem frames: shift to a contrasting register — empathetic concern, conspiratorial knowing, or gentle tension. Name the viewer's pain point without restating the hook.
+- proof frames: warm credibility — calm confidence, quiet pride, or sensory delight. Deliver one specific reason to believe.
+- cta frames: inviting, open, unhurried. Close with a clear call to action using fresh language.
+- Do NOT flatten all beats to the same emotional register. The arc should feel like a mini-story: attention → tension → credibility → invitation.
+
+SCRIPT STYLE — the user message specifies one of four styles. Write accordingly:
+- conversational: casual, warm, as if talking to a close friend. Use contractions. Short sentences. Can start with "So," or "You know what?"
+- direct: clean, assertive, minimal. No hedging. Declarative sentences. Gets to the point fast.
+- storytelling: slightly narrative. Build a tiny arc. "I used to... then I found... now I..." transitions.
+- tip_based: educational, gently authoritative. "Here's something most people miss..." framing.
+
+CONTENT GOAL — the user message specifies "conversion" or "engagement":
+- conversion: make the final CTA specific and action-oriented. Use "try", "shop", "see" language. The proof beat should focus on a concrete product benefit.
+- engagement: favor curiosity and emotional resonance over direct selling. The CTA can be softer — "follow for more", "save this", "you'll want to see this again". The proof beat can lean into sensory or aspirational language.
+
+AUDIENCE INSIGHT — when provided:
+- If an audience_fear_cluster is present, gently acknowledge the underlying concern in the problem beat. Do not name the fear explicitly — hint at it, then pivot to reassurance.
+- If an audience_question_cluster is present, echo the viewer's curiosity in the hook or problem beat. Leave the answer for the proof beat.
 
 CONTENT RULES
 - Reflect the actual frame order, visual details, and strategy summary from the provided image plan.
-- Keep the tone calm, premium, warm, and confident.
+- The overall tone is calm, premium, warm, and confident — but modulated beat by beat per the emotional arc above.
 - End with the provided CTA if it fits naturally.
 - No medical or health claims.
 - Do not use hypey urgency, slang, exaggerated promises, or forbidden phrasing.
@@ -436,9 +541,15 @@ def _build_image_motion_voiceover_user_message(
         f"Proof type: {(parsed.get('proof_type') or '').strip() or 'none'}",
         f"Script style: {(parsed.get('script_style') or '').strip() or 'direct'}",
         f"Strategy summary: {(plan.get('strategy_summary') or '').strip()}",
+        f"Content goal: {((plan.get('strategy_metadata') or {}).get('content_goal') or '').strip() or 'conversion'}",
+        f"Primary engagement intent: {((plan.get('strategy_metadata') or {}).get('primary_engagement_intent') or '').strip() or 'click'}",
+        "Audience question cluster: "
+        f"{(((plan.get('strategy_metadata') or {}).get('audience_question_cluster')) or '').strip() or 'none'}",
+        "Audience fear cluster: "
+        f"{(((plan.get('strategy_metadata') or {}).get('audience_fear_cluster')) or '').strip() or 'none'}",
         "",
         f"Exact clip duration seconds: {total_duration_seconds:.1f}",
-        "Voiceover should finish 0.5 to 1.0 seconds before clip end.",
+        "Voiceover should finish 1.0 to 1.5 seconds before clip end.",
         f"Preferred spoken duration: {min_spoken_duration:.1f}-{max_spoken_duration:.1f} seconds",
         f"Preferred spoken word range: {min_words}-{max_words} words",
         f"Target word count: {target_words}",
@@ -453,16 +564,29 @@ def _build_image_motion_voiceover_user_message(
             "Return a new script that avoids every forbidden term listed above.",
             "",
         ])
-    lines.extend([
-        "Frame plan:",
-    ])
+    mood_sequence = [
+        str(frame.get("mood", "")).strip()
+        for frame in frames
+        if isinstance(frame, dict) and frame.get("mood")
+    ]
+    if mood_sequence:
+        lines.append(f"Emotional arc (mood per frame): {' -> '.join(mood_sequence)}")
+        lines.append("Mirror this progression in the script's emotional register.")
+        lines.append("")
+
+    lines.append("Frame plan:")
     for idx, frame in enumerate(frames, start=1):
         if not isinstance(frame, dict):
             continue
+        dur = float(frame.get("duration_seconds", 0))
+        approx_words = max(1, round(dur * VOICEOVER_TARGET_WORDS_PER_SECOND))
         lines.extend([
             f"Frame {idx}:",
-            f"  - duration_seconds: {float(frame.get('duration_seconds', 0)):.1f}",
+            f"  - duration_seconds: {dur:.1f} (~{approx_words} words)",
             f"  - role: {frame.get('role', '')}",
+            f"  - narrative_role: {frame.get('narrative_role', '')}",
+            f"  - frame_intent: {(frame.get('frame_intent') or '').strip()}",
+            f"  - mood: {frame.get('mood', '')}",
             f"  - style_family: {frame.get('style_family', '')}",
             f"  - lighting: {frame.get('lighting', '')}",
             f"  - camera_distance: {frame.get('camera_distance', '')}",
@@ -631,26 +755,6 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
 """
 
 # Video V2: Audience research clusters for fear and curiosity style buckets
-_AUDIENCE_QUESTIONS = [
-    "Does it work for my skin type?",
-    "How fast will I see results?",
-    "Will it irritate sensitive skin?",
-    "Which ingredient actually matters?",
-    "How does it fit into my routine?",
-    "Is it worth the price? (yes)",
-    "Will it help with dark spots, acne, dryness, or texture?",    
-]
-_AUDIENCE_FEARS = [
-    "Breakouts or purging",
-    "Irritation or barrier damage",
-    "Wasting money on hype",
-    "Fake before-and-afters",
-    "Buying the wrong product for the skin concern",
-    "Overcomplicated routines",
-    "Results that do not last",
-    "Actives being too harsh for daily use",
-]
-
 STYLE_BUCKETS = [
     "fear_non_user",
     "aspirational_luxury",
@@ -856,7 +960,7 @@ def generate_content(
             "Copy config.example.yaml to config.yaml and add your OpenAI credentials."
         )
 
-    model = config.get("openai.model", "gpt-4.1-mini")
+    model = config.get("openai.model", "gpt-5.4")
     openai_module = _load_openai_module()
     client = openai_module.OpenAI(api_key=api_key)
 
@@ -928,10 +1032,11 @@ def generate_content(
         if not isinstance(total, (int, float)) or total > 15:
             raise ValueError("image_plan.total_duration_seconds must be <= 15")
         plan["performance_rationale"] = plan.get("performance_rationale", performance_rationale)
+        voiceover_model = config.get("openai.voiceover_model", "gpt-4.1")
         voiceover_plan, voice_prompt_input, voice_prompt_output, voiceover_response = _generate_image_motion_voiceover_plan(
             client,
             openai_module,
-            model,
+            voiceover_model,
             parsed,
             content_id,
             product.name,
@@ -1000,7 +1105,12 @@ def generate_content(
         asset_manifest_json = json.dumps(manifest_payload)
 
     strategy_metadata_json = None
-    if video_v2 and "strategy_metadata" in parsed:
+    if fmt == "image_motion_15s" and "image_plan" in parsed:
+        plan = parsed["image_plan"]
+        strategy_metadata = plan.get("strategy_metadata") if isinstance(plan, dict) else None
+        if isinstance(strategy_metadata, dict):
+            strategy_metadata_json = json.dumps(strategy_metadata)
+    elif video_v2 and "strategy_metadata" in parsed:
         strategy_metadata_json = json.dumps(parsed["strategy_metadata"])
 
     content = Content(
@@ -1182,9 +1292,186 @@ def _parse_response(
     if missing:
         raise ValueError(f"OpenAI response missing required fields: {missing}")
     _validate_response_shape(data, theme=theme, hook_type=hook_type)
+    if use_image_motion:
+        _validate_and_normalize_image_motion_plan(data)
     if use_ai_video_v2:
         _validate_and_normalize_v2_timeline(data)
     return data
+
+
+def _validate_and_normalize_image_motion_plan(data: dict[str, Any]) -> None:
+    """Validate image_motion_15s plans while preserving the existing render contract."""
+    plan = data.get("image_plan")
+    if not isinstance(plan, dict):
+        raise ValueError("OpenAI response image_plan must be an object")
+
+    strategy_summary = str(plan.get("strategy_summary") or "").strip()
+    if not strategy_summary:
+        raise ValueError("image_plan.strategy_summary is required")
+    plan["strategy_summary"] = strategy_summary
+
+    total_duration = plan.get("total_duration_seconds")
+    if not isinstance(total_duration, (int, float)):
+        raise ValueError("image_plan.total_duration_seconds must be a number")
+    total_duration = float(total_duration)
+    if total_duration <= 0 or total_duration > 15:
+        raise ValueError("image_plan.total_duration_seconds must be > 0 and <= 15")
+    plan["total_duration_seconds"] = total_duration
+
+    performance_rationale = str(plan.get("performance_rationale") or "default").strip() or "default"
+    if performance_rationale not in IMAGE_MOTION_PERFORMANCE_RATIONALES:
+        raise ValueError(
+            "image_plan.performance_rationale must be one of: "
+            f"{', '.join(IMAGE_MOTION_PERFORMANCE_RATIONALES)}"
+        )
+    plan["performance_rationale"] = performance_rationale
+
+    strategy_metadata = plan.get("strategy_metadata")
+    if strategy_metadata is None:
+        strategy_metadata = {}
+        plan["strategy_metadata"] = strategy_metadata
+    if not isinstance(strategy_metadata, dict):
+        raise ValueError("image_plan.strategy_metadata must be an object")
+
+    content_goal = str(strategy_metadata.get("content_goal") or "conversion").strip() or "conversion"
+    if content_goal not in IMAGE_MOTION_CONTENT_GOALS:
+        raise ValueError(
+            "image_plan.strategy_metadata.content_goal must be one of: "
+            f"{', '.join(IMAGE_MOTION_CONTENT_GOALS)}"
+        )
+    strategy_metadata["content_goal"] = content_goal
+
+    primary_engagement_intent = (
+        str(strategy_metadata.get("primary_engagement_intent") or "click").strip() or "click"
+    )
+    if primary_engagement_intent not in IMAGE_MOTION_PRIMARY_ENGAGEMENT_INTENTS:
+        raise ValueError(
+            "image_plan.strategy_metadata.primary_engagement_intent must be one of: "
+            f"{', '.join(IMAGE_MOTION_PRIMARY_ENGAGEMENT_INTENTS)}"
+        )
+    strategy_metadata["primary_engagement_intent"] = primary_engagement_intent
+
+    audience_question_cluster = strategy_metadata.get("audience_question_cluster")
+    if audience_question_cluster is not None:
+        audience_question_cluster = str(audience_question_cluster).strip() or None
+    strategy_metadata["audience_question_cluster"] = audience_question_cluster
+
+    audience_fear_cluster = strategy_metadata.get("audience_fear_cluster")
+    if audience_fear_cluster is not None:
+        audience_fear_cluster = str(audience_fear_cluster).strip() or None
+    strategy_metadata["audience_fear_cluster"] = audience_fear_cluster
+
+    frames = plan.get("frames")
+    if not isinstance(frames, list) or len(frames) < 3 or len(frames) > 5:
+        raise ValueError("image_plan.frames must have 3-5 entries")
+
+    has_models = _has_model_reference_assets()
+    seen_narrative_roles: list[str] = []
+    total_frame_duration = 0.0
+    hero_frames = 0
+    previous_mood: str | None = None
+    previous_visual_signature: tuple[str, str, str] | None = None
+
+    for idx, frame in enumerate(frames):
+        if not isinstance(frame, dict):
+            raise ValueError(f"image_plan.frames[{idx}] must be an object")
+
+        role = str(frame.get("role") or "").strip()
+        if role not in IMAGE_MOTION_FRAME_ROLES:
+            raise ValueError(
+                f"image_plan.frames[{idx}].role must be one of: {', '.join(IMAGE_MOTION_FRAME_ROLES)}"
+            )
+        frame["role"] = role
+        if role in IMAGE_MOTION_HERO_FRAME_ROLES:
+            hero_frames += 1
+        if role in IMAGE_MOTION_LIFESTYLE_FRAME_ROLES and not has_models:
+            raise ValueError(
+                f"image_plan.frames[{idx}].role {role!r} requires model reference assets"
+            )
+
+        narrative_role = str(frame.get("narrative_role") or "").strip()
+        if narrative_role not in IMAGE_MOTION_NARRATIVE_ROLES:
+            raise ValueError(
+                f"image_plan.frames[{idx}].narrative_role must be one of: "
+                f"{', '.join(IMAGE_MOTION_NARRATIVE_ROLES)}"
+            )
+        frame["narrative_role"] = narrative_role
+        seen_narrative_roles.append(narrative_role)
+
+        frame_intent = str(frame.get("frame_intent") or "").strip()
+        if not frame_intent:
+            raise ValueError(f"image_plan.frames[{idx}].frame_intent is required")
+        frame["frame_intent"] = frame_intent
+
+        mood = str(frame.get("mood") or "").strip()
+        if mood not in IMAGE_MOTION_MOODS:
+            raise ValueError(
+                f"image_plan.frames[{idx}].mood must be one of: {', '.join(IMAGE_MOTION_MOODS)}"
+            )
+        if previous_mood and mood == previous_mood:
+            raise ValueError(
+                f"image_plan.frames[{idx}].mood must differ from the previous frame"
+            )
+        frame["mood"] = mood
+        previous_mood = mood
+
+        duration_seconds = frame.get("duration_seconds")
+        if not isinstance(duration_seconds, (int, float)):
+            raise ValueError(f"image_plan.frames[{idx}].duration_seconds must be a number")
+        duration_seconds = float(duration_seconds)
+        if duration_seconds < 1.5 or duration_seconds > 2.0:
+            raise ValueError(
+                f"image_plan.frames[{idx}].duration_seconds must be between 1.5 and 2.0"
+            )
+        frame["duration_seconds"] = duration_seconds
+        total_frame_duration += duration_seconds
+
+        style_family = str(frame.get("style_family") or "").strip()
+        if style_family not in IMAGE_MOTION_STYLE_FAMILIES:
+            raise ValueError(
+                f"image_plan.frames[{idx}].style_family must be one of: "
+                f"{', '.join(IMAGE_MOTION_STYLE_FAMILIES)}"
+            )
+        frame["style_family"] = style_family
+
+        lighting = str(frame.get("lighting") or "").strip()
+        if lighting not in IMAGE_MOTION_LIGHTING_OPTIONS:
+            raise ValueError(
+                f"image_plan.frames[{idx}].lighting must be one of: {', '.join(IMAGE_MOTION_LIGHTING_OPTIONS)}"
+            )
+        frame["lighting"] = lighting
+
+        camera_distance = str(frame.get("camera_distance") or "").strip()
+        if camera_distance not in IMAGE_MOTION_CAMERA_DISTANCES:
+            raise ValueError(
+                "image_plan.frames[{idx}].camera_distance must be one of: "
+                f"{', '.join(IMAGE_MOTION_CAMERA_DISTANCES)}"
+            )
+        frame["camera_distance"] = camera_distance
+
+        visual_signature = (style_family, lighting, camera_distance)
+        if previous_visual_signature and visual_signature == previous_visual_signature:
+            raise ValueError(
+                "Consecutive image_motion_15s frames must vary at least one of style_family, "
+                "lighting, or camera_distance"
+            )
+        previous_visual_signature = visual_signature
+
+        image_prompt = str(frame.get("image_prompt") or "").strip()
+        if not image_prompt:
+            raise ValueError(f"image_plan.frames[{idx}].image_prompt is required")
+        frame["image_prompt"] = image_prompt
+
+    if hero_frames < 1:
+        raise ValueError("image_plan.frames must include at least one hero-led frame")
+    if len(set(seen_narrative_roles)) < 3:
+        raise ValueError("image_plan.frames must use at least 3 distinct narrative_role values")
+    if seen_narrative_roles[-1] != "cta":
+        raise ValueError("The final image_motion_15s frame must use narrative_role 'cta'")
+    if abs(total_frame_duration - total_duration) > 0.05:
+        raise ValueError(
+            "image_plan.total_duration_seconds must match the sum of frame durations"
+        )
 
 
 def _validate_and_normalize_v2_timeline(data: dict[str, Any]) -> None:

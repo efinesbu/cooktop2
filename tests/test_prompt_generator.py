@@ -475,12 +475,21 @@ def test_generate_content_image_motion_15s_persists_image_plan(
         "hashtags": ["skincare", "glow"],
         "image_plan": {
             "strategy_summary": "Hero-led sequence with texture detail",
-            "total_duration_seconds": 9.0,
+            "total_duration_seconds": 6.0,
             "performance_rationale": "default",
+            "strategy_metadata": {
+                "content_goal": "engagement",
+                "primary_engagement_intent": "save",
+                "audience_question_cluster": "Which ingredient actually matters?",
+                "audience_fear_cluster": None,
+            },
             "frames": [
                 {
                     "role": "hero_macro",
-                    "duration_seconds": 1.5,
+                    "narrative_role": "hook",
+                    "frame_intent": "Open with an intriguing hero detail that sparks curiosity.",
+                    "mood": "soft_curiosity",
+                    "duration_seconds": 2.0,
                     "style_family": "realistic_cinematic",
                     "lighting": "golden_window_light",
                     "camera_distance": "macro_closeup",
@@ -488,6 +497,9 @@ def test_generate_content_image_motion_15s_persists_image_plan(
                 },
                 {
                     "role": "hero_tabletop",
+                    "narrative_role": "proof",
+                    "frame_intent": "Show the premium counter setup as a believable proof point.",
+                    "mood": "calm_confidence",
                     "duration_seconds": 2.0,
                     "style_family": "realistic_cinematic",
                     "lighting": "soft_diffused_daylight",
@@ -496,7 +508,10 @@ def test_generate_content_image_motion_15s_persists_image_plan(
                 },
                 {
                     "role": "texture_detail",
-                    "duration_seconds": 1.5,
+                    "narrative_role": "cta",
+                    "frame_intent": "Close on texture payoff that makes the CTA feel earned.",
+                    "mood": "invitation",
+                    "duration_seconds": 2.0,
                     "style_family": "realistic_cinematic",
                     "lighting": "clean_studio_backlight",
                     "camera_distance": "macro_closeup",
@@ -506,9 +521,9 @@ def test_generate_content_image_motion_15s_persists_image_plan(
         },
     }
     voiceover_payload = {
-        "voiceover_script": "Want fresher-looking skin? Serum X brings a polished glow across every frame, ending with a soft confident try me today.",
-        "estimated_word_count": 18,
-        "timing_rationale": "The line stays concise enough for a calm premium read over a 9-second sequence.",
+        "voiceover_script": "Want fresher-looking skin? Serum X brings polished glow today. Try me.",
+        "estimated_word_count": 9,
+        "timing_rationale": "The line stays concise enough for a calm premium read over a 6-second sequence.",
     }
 
     class FakeCompletions:
@@ -568,12 +583,22 @@ def test_generate_content_image_motion_15s_persists_image_plan(
     assert manifest["format"] == "image_motion_15s"
     assert "image_plan" in manifest
     plan = manifest["image_plan"]
+    persisted = db.get_content(content.id)
+    assert persisted is not None
     assert len(plan["frames"]) == 3
-    assert plan["total_duration_seconds"] == 9.0
+    assert plan["total_duration_seconds"] == 6.0
     assert plan["frames"][0]["role"] == "hero_macro"
+    assert plan["frames"][0]["narrative_role"] == "hook"
+    assert plan["frames"][1]["mood"] == "calm_confidence"
+    assert plan["strategy_metadata"]["content_goal"] == "engagement"
+    assert json.loads(content.strategy_metadata_json or "{}")["primary_engagement_intent"] == "save"
+    assert json.loads(persisted.strategy_metadata_json or "{}")["primary_engagement_intent"] == "save"
     assert len(captured_calls) == 2
-    assert "Exact clip duration seconds: 9.0" in captured_calls[1]["messages"][1]["content"]
+    assert "Exact clip duration seconds: 6.0" in captured_calls[1]["messages"][1]["content"]
     assert "Frame 1:" in captured_calls[1]["messages"][1]["content"]
+    assert "narrative_role: hook" in captured_calls[1]["messages"][1]["content"]
+    assert "frame_intent: Open with an intriguing hero detail that sparks curiosity." in captured_calls[1]["messages"][1]["content"]
+    assert "Content goal: engagement" in captured_calls[1]["messages"][1]["content"]
     assert "scene_description: Close-up of Serum X bottle with golden light." in captured_calls[1]["messages"][1]["content"]
     assert "voice_prompt_input" in extras
     assert "voice_prompt_output" in extras
@@ -582,14 +607,14 @@ def test_generate_content_image_motion_15s_persists_image_plan(
     vp = manifest["voiceover_plan"]
     assert vp["script_template_id"] == "llm_scene_timed"
     assert vp["voice"] == "marin"
-    assert vp["voiceover_script"] != voiceover_payload["voiceover_script"]
-    assert vp["voiceover_script"].endswith("try me")
+    assert vp["voiceover_script"] == voiceover_payload["voiceover_script"]
+    assert vp["voiceover_script"].lower().endswith("try me.")
     assert "calm, premium, reassuring" in vp["voice_instructions"]
     assert vp["language"] == "english"
     assert "guardrail_checks" in vp
     # Script must leave some room before clip end.
     word_count = len(vp["voiceover_script"].split())
-    assert word_count <= 19
+    assert word_count <= 12
 
 
 def test_generate_content_image_motion_voice_uses_marin(
@@ -617,10 +642,46 @@ def test_generate_content_image_motion_voice_uses_marin(
             "strategy_summary": "Hero-led sequence",
             "total_duration_seconds": 6.0,
             "performance_rationale": "default",
+            "strategy_metadata": {
+                "content_goal": "conversion",
+                "primary_engagement_intent": "click",
+                "audience_question_cluster": None,
+                "audience_fear_cluster": None,
+            },
             "frames": [
-                {"role": "hero_macro", "duration_seconds": 2.0, "image_prompt": "F1"},
-                {"role": "hero_tabletop", "duration_seconds": 2.0, "image_prompt": "F2"},
-                {"role": "texture_detail", "duration_seconds": 2.0, "image_prompt": "F3"},
+                {
+                    "role": "hero_macro",
+                    "narrative_role": "hook",
+                    "frame_intent": "Lead with a premium macro reveal.",
+                    "mood": "intrigue",
+                    "duration_seconds": 2.0,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "golden_window_light",
+                    "camera_distance": "macro_closeup",
+                    "image_prompt": "F1",
+                },
+                {
+                    "role": "hero_tabletop",
+                    "narrative_role": "proof",
+                    "frame_intent": "Show the bottle confidently in the routine context.",
+                    "mood": "calm_confidence",
+                    "duration_seconds": 2.0,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "soft_diffused_daylight",
+                    "camera_distance": "closeup",
+                    "image_prompt": "F2",
+                },
+                {
+                    "role": "texture_detail",
+                    "narrative_role": "cta",
+                    "frame_intent": "End on a clear product payoff and invitation.",
+                    "mood": "invitation",
+                    "duration_seconds": 2.0,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "clean_studio_backlight",
+                    "camera_distance": "medium_shot",
+                    "image_prompt": "F3",
+                },
             ],
         },
     }
@@ -691,6 +752,9 @@ def test_image_motion_voiceover_budget_leaves_end_buffer() -> None:
                 {
                     "duration_seconds": 2.0,
                     "role": "hero_macro",
+                    "narrative_role": "hook",
+                    "frame_intent": "Make the texture feel instantly premium and attention-grabbing.",
+                    "mood": "soft_curiosity",
                     "style_family": "realistic_cinematic",
                     "lighting": "soft_diffused_daylight",
                     "camera_distance": "macro_closeup",
@@ -699,6 +763,9 @@ def test_image_motion_voiceover_budget_leaves_end_buffer() -> None:
                 {
                     "duration_seconds": 2.0,
                     "role": "texture_detail",
+                    "narrative_role": "cta",
+                    "frame_intent": "Turn the payoff shot into a calm invitation.",
+                    "mood": "invitation",
                     "style_family": "realistic_cinematic",
                     "lighting": "soft_diffused_daylight",
                     "camera_distance": "closeup",
@@ -754,12 +821,21 @@ def test_generate_content_image_motion_retries_voiceover_guardrail_failures(
         "hashtags": ["skincare", "glow"],
         "image_plan": {
             "strategy_summary": "Hero-led sequence with texture detail",
-            "total_duration_seconds": 9.0,
+            "total_duration_seconds": 6.0,
             "performance_rationale": "default",
+            "strategy_metadata": {
+                "content_goal": "engagement",
+                "primary_engagement_intent": "follow",
+                "audience_question_cluster": "How does it fit into my routine?",
+                "audience_fear_cluster": None,
+            },
             "frames": [
                 {
                     "role": "hero_macro",
-                    "duration_seconds": 1.5,
+                    "narrative_role": "hook",
+                    "frame_intent": "Open with a curiosity-driving closeup.",
+                    "mood": "soft_curiosity",
+                    "duration_seconds": 2.0,
                     "style_family": "realistic_cinematic",
                     "lighting": "golden_window_light",
                     "camera_distance": "macro_closeup",
@@ -767,6 +843,9 @@ def test_generate_content_image_motion_retries_voiceover_guardrail_failures(
                 },
                 {
                     "role": "hero_tabletop",
+                    "narrative_role": "proof",
+                    "frame_intent": "Ground the claim in a premium routine context.",
+                    "mood": "calm_confidence",
                     "duration_seconds": 2.0,
                     "style_family": "realistic_cinematic",
                     "lighting": "soft_diffused_daylight",
@@ -775,7 +854,10 @@ def test_generate_content_image_motion_retries_voiceover_guardrail_failures(
                 },
                 {
                     "role": "texture_detail",
-                    "duration_seconds": 1.5,
+                    "narrative_role": "cta",
+                    "frame_intent": "End with a payoff texture detail that invites action.",
+                    "mood": "invitation",
+                    "duration_seconds": 2.0,
                     "style_family": "realistic_cinematic",
                     "lighting": "clean_studio_backlight",
                     "camera_distance": "macro_closeup",
@@ -786,19 +868,19 @@ def test_generate_content_image_motion_retries_voiceover_guardrail_failures(
     }
     voiceover_payloads = [
         {
-            "voiceover_script": "Serum X delivers instant glow across every frame, then closes with a soft confident try me.",
-            "estimated_word_count": 16,
+            "voiceover_script": "Serum X brings instant glow, then closes with a calm try me.",
+            "estimated_word_count": 11,
             "timing_rationale": "The line is concise enough for a calm premium read.",
         },
         {
-            "voiceover_script": "Serum X keeps skin polished overnight, then ends with a calm confident try me.",
-            "estimated_word_count": 14,
+            "voiceover_script": "Serum X keeps skin polished overnight, then ends with try me.",
+            "estimated_word_count": 11,
             "timing_rationale": "The line remains short for a premium read.",
         },
         {
-            "voiceover_script": "Serum X brings a polished glow across every frame, then closes with a soft confident try me.",
-            "estimated_word_count": 17,
-            "timing_rationale": "The line stays concise enough for a calm premium read over a 9-second sequence.",
+            "voiceover_script": "Serum X brings polished glow, then closes with a calm try me.",
+            "estimated_word_count": 11,
+            "timing_rationale": "The line stays concise enough for a calm premium read over a 6-second sequence.",
         },
     ]
 
@@ -887,12 +969,21 @@ def test_generate_content_image_motion_raises_after_third_voiceover_guardrail_fa
         "hashtags": ["skincare", "glow"],
         "image_plan": {
             "strategy_summary": "Hero-led sequence with texture detail",
-            "total_duration_seconds": 9.0,
+            "total_duration_seconds": 6.0,
             "performance_rationale": "default",
+            "strategy_metadata": {
+                "content_goal": "conversion",
+                "primary_engagement_intent": "click",
+                "audience_question_cluster": None,
+                "audience_fear_cluster": "Wasting money on hype",
+            },
             "frames": [
                 {
                     "role": "hero_macro",
-                    "duration_seconds": 1.5,
+                    "narrative_role": "hook",
+                    "frame_intent": "Open with a premium product hero that implies value.",
+                    "mood": "intrigue",
+                    "duration_seconds": 2.0,
                     "style_family": "realistic_cinematic",
                     "lighting": "golden_window_light",
                     "camera_distance": "macro_closeup",
@@ -900,6 +991,9 @@ def test_generate_content_image_motion_raises_after_third_voiceover_guardrail_fa
                 },
                 {
                     "role": "hero_tabletop",
+                    "narrative_role": "proof",
+                    "frame_intent": "Show the real counter setup as grounded proof.",
+                    "mood": "delight",
                     "duration_seconds": 2.0,
                     "style_family": "realistic_cinematic",
                     "lighting": "soft_diffused_daylight",
@@ -908,7 +1002,10 @@ def test_generate_content_image_motion_raises_after_third_voiceover_guardrail_fa
                 },
                 {
                     "role": "texture_detail",
-                    "duration_seconds": 1.5,
+                    "narrative_role": "cta",
+                    "frame_intent": "End with a tactile payoff that invites the click.",
+                    "mood": "invitation",
+                    "duration_seconds": 2.0,
                     "style_family": "realistic_cinematic",
                     "lighting": "clean_studio_backlight",
                     "camera_distance": "macro_closeup",
@@ -918,8 +1015,8 @@ def test_generate_content_image_motion_raises_after_third_voiceover_guardrail_fa
         },
     }
     invalid_voiceover_payload = {
-        "voiceover_script": "Serum X delivers instant glow across every frame, then closes with a soft confident try me.",
-        "estimated_word_count": 16,
+        "voiceover_script": "Serum X brings instant glow, then closes with a calm try me.",
+        "estimated_word_count": 11,
         "timing_rationale": "The line is concise enough for a calm premium read.",
     }
 
@@ -974,6 +1071,179 @@ def test_generate_content_image_motion_raises_after_third_voiceover_guardrail_fa
     assert len(captured_calls) == 4
     assert "Retry instruction:" in captured_calls[2]["messages"][1]["content"]
     assert "Retry instruction:" in captured_calls[3]["messages"][1]["content"]
+
+
+def test_validate_and_normalize_image_motion_plan_requires_new_narrative_fields(monkeypatch) -> None:
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+    monkeypatch.setattr(prompt_generator, "_has_model_reference_assets", lambda: True)
+
+    data = {
+        "image_plan": {
+            "strategy_summary": "Three-frame story",
+            "total_duration_seconds": 5.0,
+            "performance_rationale": "default",
+            "strategy_metadata": {
+                "content_goal": "engagement",
+                "primary_engagement_intent": "save",
+                "audience_question_cluster": "Which ingredient actually matters?",
+                "audience_fear_cluster": None,
+            },
+            "frames": [
+                {
+                    "role": "hero_macro",
+                    "narrative_role": "hook",
+                    "mood": "intrigue",
+                    "duration_seconds": 1.5,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "golden_window_light",
+                    "camera_distance": "macro_closeup",
+                    "image_prompt": "Frame 1",
+                },
+                {
+                    "role": "hero_tabletop",
+                    "narrative_role": "proof",
+                    "frame_intent": "Ground the frame in a premium routine context.",
+                    "mood": "calm_confidence",
+                    "duration_seconds": 1.5,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "soft_diffused_daylight",
+                    "camera_distance": "closeup",
+                    "image_prompt": "Frame 2",
+                },
+                {
+                    "role": "texture_detail",
+                    "narrative_role": "cta",
+                    "frame_intent": "Close with an inviting texture payoff.",
+                    "mood": "invitation",
+                    "duration_seconds": 2.0,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "clean_studio_backlight",
+                    "camera_distance": "medium_shot",
+                    "image_prompt": "Frame 3",
+                },
+            ],
+        }
+    }
+
+    with pytest.raises(ValueError, match="image_plan.frames\\[0\\]\\.frame_intent is required"):
+        prompt_generator._validate_and_normalize_image_motion_plan(data)
+
+
+def test_validate_and_normalize_image_motion_plan_rejects_lifestyle_without_model_assets(monkeypatch) -> None:
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+    monkeypatch.setattr(prompt_generator, "_has_model_reference_assets", lambda: False)
+
+    data = {
+        "image_plan": {
+            "strategy_summary": "Lifestyle-driven sequence",
+            "total_duration_seconds": 5.0,
+            "performance_rationale": "default",
+            "strategy_metadata": {
+                "content_goal": "engagement",
+                "primary_engagement_intent": "follow",
+                "audience_question_cluster": "How does it fit into my routine?",
+                "audience_fear_cluster": None,
+            },
+            "frames": [
+                {
+                    "role": "hero_macro",
+                    "narrative_role": "hook",
+                    "frame_intent": "Open with a polished product hero.",
+                    "mood": "soft_curiosity",
+                    "duration_seconds": 1.5,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "golden_window_light",
+                    "camera_distance": "macro_closeup",
+                    "image_prompt": "Frame 1",
+                },
+                {
+                    "role": "lifestyle_in_use",
+                    "narrative_role": "proof",
+                    "frame_intent": "Show the product in use.",
+                    "mood": "delight",
+                    "duration_seconds": 1.5,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "soft_diffused_daylight",
+                    "camera_distance": "closeup",
+                    "image_prompt": "Frame 2",
+                },
+                {
+                    "role": "texture_detail",
+                    "narrative_role": "cta",
+                    "frame_intent": "End with a clean payoff and invitation.",
+                    "mood": "invitation",
+                    "duration_seconds": 2.0,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "clean_studio_backlight",
+                    "camera_distance": "medium_shot",
+                    "image_prompt": "Frame 3",
+                },
+            ],
+        }
+    }
+
+    with pytest.raises(ValueError, match="requires model reference assets"):
+        prompt_generator._validate_and_normalize_image_motion_plan(data)
+
+
+def test_validate_and_normalize_image_motion_plan_rejects_repeated_visual_signature(monkeypatch) -> None:
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+    monkeypatch.setattr(prompt_generator, "_has_model_reference_assets", lambda: True)
+
+    data = {
+        "image_plan": {
+            "strategy_summary": "Repeated-look sequence",
+            "total_duration_seconds": 5.0,
+            "performance_rationale": "default",
+            "strategy_metadata": {
+                "content_goal": "conversion",
+                "primary_engagement_intent": "click",
+                "audience_question_cluster": None,
+                "audience_fear_cluster": "Wasting money on hype",
+            },
+            "frames": [
+                {
+                    "role": "hero_macro",
+                    "narrative_role": "hook",
+                    "frame_intent": "Open with a clear hero angle.",
+                    "mood": "intrigue",
+                    "duration_seconds": 1.5,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "golden_window_light",
+                    "camera_distance": "macro_closeup",
+                    "image_prompt": "Frame 1",
+                },
+                {
+                    "role": "hero_tabletop",
+                    "narrative_role": "proof",
+                    "frame_intent": "Support the hook with a second angle.",
+                    "mood": "delight",
+                    "duration_seconds": 1.5,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "golden_window_light",
+                    "camera_distance": "macro_closeup",
+                    "image_prompt": "Frame 2",
+                },
+                {
+                    "role": "texture_detail",
+                    "narrative_role": "cta",
+                    "frame_intent": "Finish with a tactile product invitation.",
+                    "mood": "invitation",
+                    "duration_seconds": 2.0,
+                    "style_family": "realistic_cinematic",
+                    "lighting": "clean_studio_backlight",
+                    "camera_distance": "medium_shot",
+                    "image_prompt": "Frame 3",
+                },
+            ],
+        }
+    }
+
+    with pytest.raises(ValueError, match="Consecutive image_motion_15s frames must vary"):
+        prompt_generator._validate_and_normalize_image_motion_plan(data)
 
 
 def test_generate_content_ai_video_flex_15s_persists_video_plan(

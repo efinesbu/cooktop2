@@ -246,6 +246,20 @@ def _print_prompt(content: Content) -> None:
             voiceover_plan = manifest.get("voiceover_plan") if isinstance(manifest, dict) else None
             if plan and isinstance(plan, dict) and plan.get("strategy_summary"):
                 lines.append(f"[bold]Overall scene:[/bold] {plan['strategy_summary']}")
+            strategy_metadata = plan.get("strategy_metadata") if isinstance(plan, dict) else None
+            if strategy_metadata and isinstance(strategy_metadata, dict):
+                content_goal = (strategy_metadata.get("content_goal") or "").strip()
+                if content_goal:
+                    lines.append(f"[bold]Content goal:[/bold] {content_goal}")
+                primary_intent = (strategy_metadata.get("primary_engagement_intent") or "").strip()
+                if primary_intent:
+                    lines.append(f"[bold]Primary intent:[/bold] {primary_intent}")
+                audience_question = (strategy_metadata.get("audience_question_cluster") or "").strip()
+                if audience_question:
+                    lines.append(f"[bold]Audience question:[/bold] {audience_question}")
+                audience_fear = (strategy_metadata.get("audience_fear_cluster") or "").strip()
+                if audience_fear:
+                    lines.append(f"[bold]Audience fear:[/bold] {audience_fear}")
             if (
                 voiceover_plan
                 and isinstance(voiceover_plan, dict)

@@ -110,6 +110,7 @@ This yields 8 creatives with bandit-recommended strategies (may include `curiosi
 | `include --product SLUG` | Re-include excluded product |
 | `preview --today` | Review today's generated content |
 | `preview --last-24h` | Review generated content in past 24hrs |
+| `preview --all` | Review all content generated |  
 | `approve --content-id ID` | Approve generated content for scheduling/posting |
 | `reject --content-id ID --reason "..."` | Reject generated content with review notes |
 | `schedule --today` | Schedule approved content using staggered platform offsets |
