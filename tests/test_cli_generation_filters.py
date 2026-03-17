@@ -18,10 +18,6 @@ sys.modules.setdefault(
 )
 sys.modules.setdefault("src.analytics", types.SimpleNamespace(PULLERS={}))
 sys.modules.setdefault(
-    "src.image_generator",
-    types.SimpleNamespace(generate_starting_image=lambda *args, **kwargs: None),
-)
-sys.modules.setdefault(
     "src.shopify",
     types.SimpleNamespace(sync_products=lambda *args, **kwargs: []),
 )
@@ -440,3 +436,72 @@ def test_generate_single_refreshes_registered_images_when_disk_changes(
         for img in db.list_product_images(product.sku)
     }
     assert stored_paths == {str(current_hero), str(lifestyle)}
+
+
+def test_generate_single_refreshes_registered_images_from_custom_image_dir(
+    tmp_db,
+    mock_config,
+    monkeypatch,
+) -> None:
+    image_root = Path(mock_config["data_root"]) / "product-images" / "eye-cream"
+    image_root.mkdir(parents=True)
+
+    stale_hero = image_root / "hero-alt-eyecream.jpeg"
+    stale_hero.write_bytes(b"old-hero")
+
+    product = Product(
+        sku="92852-BLNK-PC-03-04-CR-AEC",
+        name="Eye Cream",
+        image_dir=str(image_root),
+    )
+    db.upsert_product(product)
+    product_images.register_images(product.sku)
+
+    stale_hero.unlink()
+    current_hero = image_root / "hero-eyecream.png"
+    current_hero.write_bytes(b"new-hero")
+    lifestyle = image_root / "lifestyle-eyecream.jpeg"
+    lifestyle.write_bytes(b"lifestyle")
+
+    captured: dict[str, list[str]] = {}
+
+    monkeypatch.setattr(cli_module, "check_budget", lambda: (0.0, 100.0, True))
+
+    def fake_generate_content(
+        product_arg,
+        theme,
+        hook_type,
+        images,
+        creative_format=None,
+        video_v2=False,
+        **kwargs,
+    ):
+        captured["paths"] = [img.file_path for img in images]
+        return (
+            Content(
+                id="content-1",
+                product_sku=product_arg.sku,
+                creative_format=creative_format or "ai_video_15s",
+            ),
+            {"platform_captions": {}, "hashtags": []},
+        )
+
+    monkeypatch.setattr(cli_module, "generate_content", fake_generate_content)
+    monkeypatch.setattr(cli_module, "render_media", lambda *args, **kwargs: None)
+
+    result = cli_module._generate_single(
+        product,
+        theme="benefit",
+        hook_type="question",
+        generation_index=0,
+        should_post=False,
+    )
+
+    assert result is not None
+    assert set(captured["paths"]) == {str(current_hero), str(lifestyle)}
+    assert str(stale_hero) not in captured["paths"]
+
+    refreshed_product = db.get_product(product.sku)
+    assert refreshed_product is not None
+    assert refreshed_product.image_dir == str(image_root)
+    assert refreshed_product.generation_ready is True

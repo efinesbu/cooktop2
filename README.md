@@ -25,6 +25,7 @@ cp config.example.yaml config.yaml
 cp .env.example .env
 # Put API keys and tokens in .env (never commit .env). Env vars override config.yaml.
 # Fill in config.yaml for non-secret settings. Set `platforms.enabled` to the platforms you want.
+# `openai.model` is used for content and paid-variant generation; keep `openai.voiceover_model` on `gpt-4.1` for image-motion voiceover planning.
 
 # 6. Add a product to the local catalog
 python cli.py add-product --sku <product-slug> --name "Product Name" --url https://your-site.com/products/<handle>
@@ -121,8 +122,14 @@ This yields 8 creatives with bandit-recommended strategies (may include `curiosi
 | `pull-analytics` | Pull metrics from all platforms |
 | `commerce-ingest PATH` | Ingest commerce facts (sessions, purchases, revenue) from CSV for revenue-aware ranking |
 | `paid-seed-clone --content-id ID [--variants N]` | Clone an organic winner into 3–5 ad-safe variants for paid promotion |
-| `report-product --product SLUG` | Product performance report |
+| `report-product --product SLUG` | Product performance report, including total tracked spend |
 | `archive` | Archive old videos to GCS |
+
+To see tracked costs for a product:
+
+```bash
+python cli.py report-product --product eye-cream
+```
 
 For immediate posting with `post`, Velura now waits 5 minutes between the second and later posts on the same platform during that command. Each delay has a random ±20% variance (e.g. 4–6 minutes for the default 5-minute wait) so repeated posts are less predictable. Use `--delay-XXX` with `XXX` from `0` to `999` to override the base wait, for example `python cli.py post --today --delay-15`. Use `--nodelay` to keep the old behavior and post everything back-to-back. During each wait, the CLI prints a progress line every 30 seconds (or every 15 minutes when the delay is over 15 minutes) so you know when the next same-platform post will start.
 

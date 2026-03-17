@@ -53,9 +53,16 @@ def generate_starting_image(content: Content, product: Product) -> Path:
     return out_path
 
 
+def _product_image_dir(product: Product) -> Path:
+    configured_dir = (product.image_dir or "").strip()
+    if configured_dir:
+        return Path(configured_dir)
+    return config.product_images_dir() / product.sku
+
+
 def _first_hero_image_path(product: Product) -> Path | None:
     """Prefer a hero reference image; fall back to the first supported product image."""
-    image_dir = config.product_images_dir() / product.sku
+    image_dir = _product_image_dir(product)
     if not image_dir.exists():
         return None
 

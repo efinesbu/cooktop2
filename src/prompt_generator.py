@@ -1020,21 +1020,47 @@ def generate_content(
           (_SIMPLIFIED_SYSTEM_PROMPT if fmt != "ai_video_15s" else _SYSTEM_PROMPT)))
     )
 
-    response = _call_with_retries(
-        client,
-        openai_module,
-        model,
-        user_msg,
-        max_attempts=3,
-        system_prompt=system_prompt,
-    )
+    generation_msg = user_msg
+    response = None
+    prompt_output_raw = ""
+    parsed: dict[str, Any] | None = None
+    max_structured_attempts = 3
+    for structured_attempt in range(1, max_structured_attempts + 1):
+        response = _call_with_retries(
+            client,
+            openai_module,
+            model,
+            generation_msg,
+            max_attempts=3,
+            system_prompt=system_prompt,
+            max_output_tokens=4000 if fmt == "image_motion_15s" else 1500,
+        )
 
-    prompt_output_raw = _response_text(response)
+        prompt_output_raw = _response_text(response)
+        try:
+            parsed = _parse_response(
+                response, theme=theme, hook_type=hook_type, creative_format=fmt, video_v2=video_v2,
+                cta_type=cta_type, proof_type=proof_type, script_style=script_style,
+            )
+            break
+        except ValueError as exc:
+            if structured_attempt == max_structured_attempts:
+                raise
+            logger.warning(
+                "OpenAI structured output attempt %d/%d failed validation: %s",
+                structured_attempt,
+                max_structured_attempts,
+                exc,
+            )
+            generation_msg = (
+                f"{user_msg}\n\n"
+                "The previous response was invalid. Regenerate the entire response from scratch and fix this exact issue:\n"
+                f"{exc}\n\n"
+                "Return only valid JSON that satisfies every constraint."
+            )
 
-    parsed = _parse_response(
-        response, theme=theme, hook_type=hook_type, creative_format=fmt, video_v2=video_v2,
-        cta_type=cta_type, proof_type=proof_type, script_style=script_style,
-    )
+    if response is None or parsed is None:
+        raise ValueError("OpenAI generation failed before a valid response was returned.")
 
     asset_manifest_json = None
     voice_prompt_input = None
@@ -1045,8 +1071,8 @@ def generate_content(
         if not isinstance(plan, dict):
             raise ValueError("OpenAI response image_plan must be an object")
         frames = plan.get("frames", [])
-        if not isinstance(frames, list) or len(frames) < 3 or len(frames) > 5:
-            raise ValueError("image_plan.frames must have 3–5 entries")
+        if not isinstance(frames, list) or len(frames) < 5 or len(frames) > 7:
+            raise ValueError("image_plan.frames must have 5-7 entries")
         total = plan.get("total_duration_seconds", 0)
         if not isinstance(total, (int, float)) or total > 15:
             raise ValueError("image_plan.total_duration_seconds must be <= 15")
@@ -1156,9 +1182,7 @@ def generate_content(
     db.insert_content(content)
 
     if voiceover_response is not None:
-        usage = voiceover_response.usage
-        input_tokens = usage.prompt_tokens if usage else 0
-        output_tokens = usage.completion_tokens if usage else 0
+        input_tokens, output_tokens = _usage_token_counts(voiceover_response)
         input_per_m = float(config.get("openai.input_per_million_usd", 2.50))
         output_per_m = float(config.get("openai.output_per_million_usd", 15.0))
         cost_usd = (input_tokens / 1_000_000 * input_per_m) + (output_tokens / 1_000_000 * output_per_m)
@@ -1198,9 +1222,7 @@ def generate_content(
         )
         payload.id = db.upsert_platform_payload(payload)
 
-    usage = response.usage
-    input_tokens = usage.prompt_tokens if usage else 0
-    output_tokens = usage.completion_tokens if usage else 0
+    input_tokens, output_tokens = _usage_token_counts(response)
     input_per_m = float(config.get("openai.input_per_million_usd", 2.50))
     output_per_m = float(config.get("openai.output_per_million_usd", 15.0))
     cost_usd = (input_tokens / 1_000_000 * input_per_m) + (output_tokens / 1_000_000 * output_per_m)
@@ -1235,6 +1257,40 @@ def _load_openai_module() -> Any:
         ) from exc
 
 
+def _uses_responses_api(model: str, client: Any) -> bool:
+    normalized_model = (model or "").strip().lower()
+    return normalized_model.startswith("gpt-5") and hasattr(client, "responses")
+
+
+def _create_openai_response(
+    client: Any,
+    model: str,
+    user_msg: str,
+    prompt: str,
+    max_output_tokens: int,
+) -> Any:
+    if _uses_responses_api(model, client):
+        json_input = user_msg
+        if "json" not in json_input.lower():
+            json_input = f"{user_msg}\n\nReturn valid JSON only."
+        return client.responses.create(
+            model=model,
+            instructions=prompt,
+            input=json_input,
+            max_output_tokens=max_output_tokens,
+            text={"format": {"type": "json_object"}},
+        )
+    return client.chat.completions.create(
+        model=model,
+        max_completion_tokens=max_output_tokens,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_msg},
+        ],
+    )
+
+
 def _call_with_retries(
     client: Any,
     openai_module: Any,
@@ -1242,19 +1298,18 @@ def _call_with_retries(
     user_msg: str,
     max_attempts: int = 3,
     system_prompt: str | None = None,
+    max_output_tokens: int = 1500,
 ) -> Any:
     delay = 2.0
     prompt = system_prompt or _SYSTEM_PROMPT
     for attempt in range(1, max_attempts + 1):
         try:
-            response = client.chat.completions.create(
-                model=model,
-                max_completion_tokens=1500,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": user_msg},
-                ],
+            response = _create_openai_response(
+                client,
+                model,
+                user_msg,
+                prompt,
+                max_output_tokens=max_output_tokens,
             )
             # Treat empty model output as transient so generation can recover.
             _response_text(response)
@@ -1397,8 +1452,8 @@ def _validate_and_normalize_image_motion_plan(data: dict[str, Any]) -> None:
     strategy_metadata["audience_fear_cluster"] = audience_fear_cluster
 
     frames = plan.get("frames")
-    if not isinstance(frames, list) or len(frames) < 3 or len(frames) > 5:
-        raise ValueError("image_plan.frames must have 3-5 entries")
+    if not isinstance(frames, list) or len(frames) < 5 or len(frames) > 7:
+        raise ValueError("image_plan.frames must have 5-7 entries")
 
     has_models = _has_model_reference_assets()
     seen_narrative_roles: list[str] = []
@@ -1504,9 +1559,7 @@ def _validate_and_normalize_image_motion_plan(data: dict[str, Any]) -> None:
     if seen_narrative_roles[-1] != "cta":
         raise ValueError("The final image_motion_15s frame must use narrative_role 'cta'")
     if abs(total_frame_duration - total_duration) > 0.05:
-        raise ValueError(
-            "image_plan.total_duration_seconds must match the sum of frame durations"
-        )
+        plan["total_duration_seconds"] = round(total_frame_duration, 1)
 
 
 def _validate_and_normalize_v2_timeline(data: dict[str, Any]) -> None:
@@ -1636,12 +1689,29 @@ def _validate_response_shape(
 
 
 def _response_text(response: Any) -> str:
-    choice = response.choices[0]
-    message = choice.message
-    raw = message.content or ""
+    raw = getattr(response, "output_text", None)
+    if raw is None and hasattr(response, "choices"):
+        choice = response.choices[0]
+        message = choice.message
+        raw = message.content or ""
+    if raw is None:
+        raw = ""
     if not raw.strip():
         raise ValueError("OpenAI returned an empty response.")
     return raw.strip()
+
+
+def _usage_token_counts(response: Any) -> tuple[int, int]:
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return 0, 0
+    input_tokens = getattr(usage, "prompt_tokens", None)
+    if input_tokens is None:
+        input_tokens = getattr(usage, "input_tokens", 0)
+    output_tokens = getattr(usage, "completion_tokens", None)
+    if output_tokens is None:
+        output_tokens = getattr(usage, "output_tokens", 0)
+    return int(input_tokens or 0), int(output_tokens or 0)
 
 
 # ---------------------------------------------------------------------------
@@ -1701,7 +1771,7 @@ def generate_paid_variant_captions(
             "Copy config.example.yaml to config.yaml and add your OpenAI credentials."
         )
 
-    model = config.get("openai.model", "gpt-4.1-mini")
+    model = config.get("openai.model", "gpt-5.4")
     openai_module = _load_openai_module()
     client = openai_module.OpenAI(api_key=api_key)
 
@@ -1726,9 +1796,7 @@ def generate_paid_variant_captions(
         max_attempts=3,
         system_prompt=_PAID_VARIANT_SYSTEM_PROMPT,
     )
-    usage = response.usage
-    input_tokens = usage.prompt_tokens if usage else 0
-    output_tokens = usage.completion_tokens if usage else 0
+    input_tokens, output_tokens = _usage_token_counts(response)
     input_per_m = float(config.get("openai.input_per_million_usd", 2.50))
     output_per_m = float(config.get("openai.output_per_million_usd", 15.0))
     cost_usd = (input_tokens / 1_000_000 * input_per_m) + (output_tokens / 1_000_000 * output_per_m)

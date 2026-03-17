@@ -48,6 +48,19 @@ POSTERS = {
 }
 POST_DELAY_PATTERN = re.compile(r"^--delay-(\d{1,3})$")
 
+
+def _console_safe_text(text: str) -> str:
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    try:
+        text.encode(encoding)
+        return text
+    except UnicodeEncodeError:
+        return text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+
+
+def _print_debug_panel(text: str, title: str) -> None:
+    console.print(Panel(_console_safe_text(text), title=title, border_style="dim"))
+
 # Posting quiet hours: never post between 10pm EST and 8am EST (Eastern Time)
 EASTERN = ZoneInfo("America/New_York")
 QUIET_START_HOUR = 22  # 10pm
@@ -272,7 +285,7 @@ def _print_prompt(content: Content) -> None:
         except json.JSONDecodeError:
             pass
     if lines:
-        console.print(Panel("\n".join(lines), title="Generated prompt", border_style="dim"))
+        _print_debug_panel("\n".join(lines), "Generated prompt")
 
 
 def _normalize_product_url(url: str | None) -> str | None:
@@ -424,39 +437,39 @@ def _generate_single(product: Product, theme: str | None, hook_type: str | None,
         console.print(f"[yellow]{product.sku}: no images registered, continuing anyway.[/yellow]")
 
     resolved = resolve_deterministic_fields(theme, hook_type, cta_type, proof_type, script_style, generation_index)
-    console.print(f"  {product.sku}: generating prompt … ({_format_strategy_label(resolved['theme'], resolved['hook_type'])})")
+    console.print(f"  {product.sku}: generating prompt ... ({_format_strategy_label(resolved['theme'], resolved['hook_type'])})")
     content, extras = generate_content(
         product, resolved["theme"], resolved["hook_type"], images,
         creative_format, video_v2=video_v2,
         cta_type=resolved["cta_type"], proof_type=resolved["proof_type"], script_style=resolved["script_style"],
     )
     if "prompt_input" in extras:
-        console.print(Panel(extras["prompt_input"], title="Prompt", border_style="dim"))
+        _print_debug_panel(extras["prompt_input"], "Prompt")
     if "prompt_output" in extras:
         try:
             output_json = json.loads(extras["prompt_output"])
             output_str = json.dumps(output_json, indent=2)
         except (json.JSONDecodeError, TypeError):
             output_str = extras["prompt_output"]
-        console.print(Panel(output_str, title="Prompt output", border_style="dim"))
+        _print_debug_panel(output_str, "Prompt output")
     if "voice_prompt_input" in extras:
-        console.print(Panel(extras["voice_prompt_input"], title="Voice prompt", border_style="dim"))
+        _print_debug_panel(extras["voice_prompt_input"], "Voice prompt")
     if "voice_prompt_output" in extras:
         try:
             output_json = json.loads(extras["voice_prompt_output"])
             output_str = json.dumps(output_json, indent=2)
         except (json.JSONDecodeError, TypeError):
             output_str = extras["voice_prompt_output"]
-        console.print(Panel(output_str, title="Voice prompt output", border_style="dim"))
+        _print_debug_panel(output_str, "Voice prompt output")
     _print_prompt(content)
     captions: dict[str, str] = extras["platform_captions"]
     hashtags: list[str] = extras["hashtags"]
 
-    console.print(f"  {product.sku}: rendering media ({content.creative_format}) …")
+    console.print(f"  {product.sku}: rendering media ({content.creative_format}) ...")
     render_media(content, product, images)
 
     db.update_last_content_date(product.sku)
-    console.print(f"  [green]✓[/green] {product.sku}: content [bold]{content.id}[/bold] created")
+    console.print(f"  [green]OK[/green] {product.sku}: content [bold]{content.id}[/bold] created")
 
     if should_post:
         _post_content_to_all(content, product, captions, hashtags)

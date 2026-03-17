@@ -54,6 +54,31 @@ def test_build_prompt_requires_preserving_reference_branding(
     assert "Do not replace, omit, or genericize" in prompt
 
 
+def test_first_hero_image_path_uses_product_image_dir_override(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "velura-data"
+    default_dir = data_root / "product-images" / "92852-BLNK-PC-03-04-CR-AEC"
+    default_dir.mkdir(parents=True)
+    (default_dir / "hero-default.png").write_bytes(b"default")
+
+    custom_dir = data_root / "product-images" / "eye-cream"
+    custom_dir.mkdir(parents=True)
+    expected = custom_dir / "hero-eyecream.png"
+    expected.write_bytes(b"hero")
+
+    monkeypatch.setattr("src.config._config", {"data_root": str(data_root)})
+
+    product = Product(
+        sku="92852-BLNK-PC-03-04-CR-AEC",
+        name="Eye Cream",
+        image_dir=str(custom_dir),
+    )
+
+    assert _first_hero_image_path(product) == expected
+
+
 def test_extract_image_bytes_returns_inline_data() -> None:
     response = SimpleNamespace(
         candidates=[

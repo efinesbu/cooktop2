@@ -54,22 +54,18 @@ def test_generate_content_uses_openai_and_persists_outputs(
         "hashtags": ["skincare", "glow", "serumx"],
     }
 
-    class FakeCompletions:
+    class FakeResponses:
         def create(self, **kwargs):
             captured.update(kwargs)
             return SimpleNamespace(
-                choices=[
-                    SimpleNamespace(
-                        message=SimpleNamespace(content=json.dumps(response_payload))
-                    )
-                ],
-                usage=SimpleNamespace(prompt_tokens=120, completion_tokens=80),
+                output_text=json.dumps(response_payload),
+                usage=SimpleNamespace(input_tokens=120, output_tokens=80),
             )
 
     class FakeOpenAIClient:
         def __init__(self, api_key: str) -> None:
             captured["api_key"] = api_key
-            self.chat = SimpleNamespace(completions=FakeCompletions())
+            self.responses = FakeResponses()
 
     fake_openai = SimpleNamespace(
         OpenAI=FakeOpenAIClient,
@@ -84,7 +80,7 @@ def test_generate_content_uses_openai_and_persists_outputs(
     monkeypatch.setattr(
         "src.config._config",
         {
-            "openai": {"api_key": "test-openai-key", "model": "gpt-4.1-mini"},
+            "openai": {"api_key": "test-openai-key", "model": "gpt-5.4"},
             "site_url": "https://example.com",
             "platforms": {"enabled": ["youtube"]},
             "youtube": {"client_secrets_file": str(client_secrets)},
@@ -117,13 +113,12 @@ def test_generate_content_uses_openai_and_persists_outputs(
     )
 
     assert captured["api_key"] == "test-openai-key"
-    assert captured["model"] == "gpt-4.1-mini"
-    assert captured["max_completion_tokens"] == 1500
-    assert "max_tokens" not in captured
-    assert captured["response_format"] == {"type": "json_object"}
-    assert "expert creative director and AI video prompt engineer" in captured["messages"][0]["content"]
-    assert "Locked creative constraints:" in captured["messages"][1]["content"]
-    assert "Allowed themes:" in captured["messages"][1]["content"]
+    assert captured["model"] == "gpt-5.4"
+    assert captured["max_output_tokens"] == 1500
+    assert captured["text"] == {"format": {"type": "json_object"}}
+    assert "expert creative director and AI video prompt engineer" in captured["instructions"]
+    assert "Locked creative constraints:" in captured["input"]
+    assert "Allowed themes:" in captured["input"]
 
     assert content.theme == "benefit"
     assert content.hook_type == "question"
@@ -146,6 +141,100 @@ def test_generate_content_uses_openai_and_persists_outputs(
     # 120 input @ $2.50/1M + 80 output @ $15/1M = 0.0003 + 0.0012 = 0.0015
     assert costs[0].cost_usd is not None
     assert abs(costs[0].cost_usd - 0.0015) < 1e-6
+
+
+def test_generate_content_defaults_to_gpt_5_4(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    captured: dict[str, object] = {}
+
+    response_payload = {
+        "theme": "benefit",
+        "hook_type": "question",
+        "hook_text": "Want your skin to look fresher by morning?",
+        "creative_format": "ai_video_15s",
+        "cta_type": "see_product",
+        "cta_text": "try me today",
+        "problem_angle": None,
+        "proof_type": "ingredient",
+        "script_style": "conversational",
+        "starting_image_prompt": "A cinematic 3D closeup of an anthropomorphic Serum X.",
+        "scene_1_desc": "Hook closeup as the bottle smiles softly.",
+        "scene_2_desc": "HARD CUT to a cleaner angle with texture detail.",
+        "scene_1_script": "I show up worried, hiding every flaw today.",
+        "scene_2_script": "I help skin look fresh and confident by morning.",
+        "platform_captions": {
+            "youtube": "Glow faster with Serum X",
+            "instagram": "Meet your shortcut to brighter skin.",
+            "tiktok": "POV: your skin finally looks awake",
+            "x": "Serum X helps tired skin look camera-ready fast.",
+        },
+        "hashtags": ["skincare", "glow", "serumx"],
+    }
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                output_text=json.dumps(response_payload),
+                usage=SimpleNamespace(input_tokens=120, output_tokens=80),
+            )
+
+    class FakeOpenAIClient:
+        def __init__(self, api_key: str) -> None:
+            self.responses = FakeResponses()
+
+    fake_openai = SimpleNamespace(
+        OpenAI=FakeOpenAIClient,
+        APIConnectionError=Exception,
+        RateLimitError=Exception,
+        APIStatusError=Exception,
+    )
+
+    client_secrets = tmp_path / "youtube_client_secrets.json"
+    client_secrets.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "openai": {"api_key": "test-openai-key"},
+            "site_url": "https://example.com",
+            "platforms": {"enabled": ["youtube"]},
+            "youtube": {"client_secrets_file": str(client_secrets)},
+        },
+    )
+    monkeypatch.setattr("src.config.load_dotenv", lambda: None)
+    monkeypatch.setattr(prompt_generator, "_load_openai_module", lambda: fake_openai)
+
+    product = Product(
+        sku="serum-x",
+        name="Serum X",
+        product_url="https://example.com/products/serum-x",
+    )
+    db.upsert_product(product)
+
+    prompt_generator.generate_content(
+        product=product,
+        theme="benefit",
+        hook_type="question",
+        product_images=[
+            ProductImage(
+                product_sku=product.sku,
+                file_path="images/serum-x-hero.jpg",
+                image_type="hero",
+            )
+        ],
+        cta_type="see_product",
+        proof_type="ingredient",
+        script_style="conversational",
+    )
+
+    assert captured["model"] == "gpt-5.4"
 
 
 def test_generate_content_retries_on_empty_openai_response(
@@ -182,19 +271,19 @@ def test_generate_content_retries_on_empty_openai_response(
         "hashtags": ["skincare", "glow", "serumx"],
     }
 
-    class FakeCompletions:
+    class FakeResponses:
         def create(self, **kwargs):
             nonlocal call_count
             call_count += 1
             content = "   " if call_count == 1 else json.dumps(response_payload)
             return SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
-                usage=SimpleNamespace(prompt_tokens=120, completion_tokens=80),
+                output_text=content,
+                usage=SimpleNamespace(input_tokens=120, output_tokens=80),
             )
 
     class FakeOpenAIClient:
         def __init__(self, api_key: str) -> None:
-            self.chat = SimpleNamespace(completions=FakeCompletions())
+            self.responses = FakeResponses()
 
     fake_openai = SimpleNamespace(
         OpenAI=FakeOpenAIClient,
@@ -209,7 +298,7 @@ def test_generate_content_retries_on_empty_openai_response(
     monkeypatch.setattr(
         "src.config._config",
         {
-            "openai": {"api_key": "test-openai-key", "model": "gpt-4.1-mini"},
+            "openai": {"api_key": "test-openai-key", "model": "gpt-5.4"},
             "site_url": "https://example.com",
             "platforms": {"enabled": ["youtube"]},
             "youtube": {"client_secrets_file": str(client_secrets)},
@@ -239,6 +328,101 @@ def test_generate_content_retries_on_empty_openai_response(
     assert call_count == 2
     assert content.hook_text == response_payload["hook_text"]
     assert extras["hashtags"] == response_payload["hashtags"]
+
+
+def test_generate_content_retries_on_invalid_structured_output(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    call_count = 0
+
+    invalid_payload = {
+        "theme": "benefit",
+        "hook_type": "question",
+        "hook_text": "Want your skin to look fresher by morning?",
+        "creative_format": "invalid_format",
+        "cta_type": "see_product",
+        "cta_text": "try me today",
+        "problem_angle": None,
+        "proof_type": "ingredient",
+        "script_style": "conversational",
+        "starting_image_prompt": "A cinematic 3D closeup of an anthropomorphic Serum X.",
+        "scene_1_desc": "Hook closeup as the bottle smiles.",
+        "scene_2_desc": "HARD CUT to side angle with texture detail.",
+        "scene_1_script": "I show up worried and tired.",
+        "scene_2_script": "I help skin look fresh and confident by morning.",
+        "platform_captions": {
+            "youtube": "Glow faster with Serum X",
+            "instagram": "Meet your shortcut to brighter skin.",
+            "tiktok": "POV: your skin finally looks awake",
+            "x": "Serum X helps tired skin look camera-ready fast.",
+        },
+        "hashtags": ["skincare", "glow", "serumx"],
+    }
+    valid_payload = dict(invalid_payload)
+    valid_payload["creative_format"] = "ai_video_15s"
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            payload = invalid_payload if call_count == 1 else valid_payload
+            return SimpleNamespace(
+                output_text=json.dumps(payload),
+                usage=SimpleNamespace(input_tokens=120, output_tokens=80),
+            )
+
+    class FakeOpenAIClient:
+        def __init__(self, api_key: str) -> None:
+            self.responses = FakeResponses()
+
+    fake_openai = SimpleNamespace(
+        OpenAI=FakeOpenAIClient,
+        APIConnectionError=Exception,
+        RateLimitError=Exception,
+        APIStatusError=Exception,
+    )
+
+    client_secrets = tmp_path / "youtube_client_secrets.json"
+    client_secrets.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "openai": {"api_key": "test-openai-key", "model": "gpt-5.4"},
+            "site_url": "https://example.com",
+            "platforms": {"enabled": ["youtube"]},
+            "youtube": {"client_secrets_file": str(client_secrets)},
+        },
+    )
+    monkeypatch.setattr("src.config.load_dotenv", lambda: None)
+    monkeypatch.setattr(prompt_generator, "_load_openai_module", lambda: fake_openai)
+    monkeypatch.setattr(prompt_generator.time, "sleep", lambda _: None)
+
+    product = Product(
+        sku="serum-x",
+        name="Serum X",
+        product_url="https://example.com/products/serum-x",
+    )
+    db.upsert_product(product)
+
+    content, extras = prompt_generator.generate_content(
+        product=product,
+        theme="benefit",
+        hook_type="question",
+        product_images=[],
+        cta_type="see_product",
+        proof_type="ingredient",
+        script_style="conversational",
+    )
+
+    assert call_count == 2
+    assert content.creative_format == "ai_video_15s"
+    assert extras["hashtags"] == valid_payload["hashtags"]
 
 
 def test_generate_content_allows_prompt_selected_labels_without_overrides(
@@ -306,7 +490,7 @@ def test_generate_content_allows_prompt_selected_labels_without_overrides(
     monkeypatch.setattr(
         "src.config._config",
         {
-            "openai": {"api_key": "test-openai-key", "model": "gpt-4.1-mini"},
+            "openai": {"api_key": "test-openai-key", "model": "gpt-5.4"},
             "site_url": "https://example.com",
             "platforms": {"enabled": ["youtube"]},
             "youtube": {"client_secrets_file": str(client_secrets)},
@@ -405,7 +589,7 @@ def test_generate_content_rejects_invalid_metadata(
     monkeypatch.setattr(
         "src.config._config",
         {
-            "openai": {"api_key": "test-openai-key", "model": "gpt-4.1-mini"},
+            "openai": {"api_key": "test-openai-key", "model": "gpt-5.4"},
             "site_url": "https://example.com",
             "platforms": {"enabled": ["youtube"]},
             "youtube": {"client_secrets_file": str(client_secrets)},
@@ -502,7 +686,7 @@ def test_generate_content_injects_research_and_persists_snapshot_id(
     monkeypatch.setattr(
         "src.config._config",
         {
-            "openai": {"api_key": "test-openai-key", "model": "gpt-4.1-mini"},
+            "openai": {"api_key": "test-openai-key", "model": "gpt-5.4"},
             "site_url": "https://example.com",
             "platforms": {"enabled": ["youtube"]},
             "youtube": {"client_secrets_file": str(client_secrets)},
@@ -658,7 +842,7 @@ def test_generate_content_image_motion_15s_persists_image_plan(
     monkeypatch.setattr(
         "src.config._config",
         {
-            "openai": {"api_key": "test-openai-key", "model": "gpt-4.1-mini"},
+            "openai": {"api_key": "test-openai-key", "model": "gpt-5.4"},
             "site_url": "https://example.com",
             "platforms": {"enabled": ["youtube"]},
             "youtube": {"client_secrets_file": str(client_secrets)},
@@ -1013,7 +1197,7 @@ def test_generate_content_image_motion_retries_voiceover_guardrail_failures(
     monkeypatch.setattr(
         "src.config._config",
         {
-            "openai": {"api_key": "test-openai-key", "model": "gpt-4.1-mini"},
+            "openai": {"api_key": "test-openai-key", "model": "gpt-5.4"},
             "site_url": "https://example.com",
             "platforms": {"enabled": ["youtube"]},
             "youtube": {"client_secrets_file": str(client_secrets)},
@@ -1152,7 +1336,7 @@ def test_generate_content_image_motion_raises_after_third_voiceover_guardrail_fa
     monkeypatch.setattr(
         "src.config._config",
         {
-            "openai": {"api_key": "test-openai-key", "model": "gpt-4.1-mini"},
+            "openai": {"api_key": "test-openai-key", "model": "gpt-5.4"},
             "site_url": "https://example.com",
             "platforms": {"enabled": ["youtube"]},
             "youtube": {"client_secrets_file": str(client_secrets)},
@@ -1423,7 +1607,7 @@ def test_generate_content_ai_video_flex_15s_persists_video_plan(
     monkeypatch.setattr(
         "src.config._config",
         {
-            "openai": {"api_key": "test-openai-key", "model": "gpt-4.1-mini"},
+            "openai": {"api_key": "test-openai-key", "model": "gpt-5.4"},
             "site_url": "https://example.com",
             "platforms": {"enabled": ["youtube"]},
             "youtube": {"client_secrets_file": str(client_secrets)},

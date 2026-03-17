@@ -29,6 +29,13 @@ def _list_image_files(image_dir: Path) -> list[Path]:
     )
 
 
+def _product_image_dir(product: Product) -> Path:
+    configured_dir = (product.image_dir or "").strip()
+    if configured_dir:
+        return Path(configured_dir)
+    return config.product_images_dir() / product.sku
+
+
 def _update_product_image_state(existing: Product, image_dir: Path, has_hero: bool) -> None:
     existing.image_dir = str(image_dir)
     existing.generation_ready = has_hero
@@ -43,7 +50,7 @@ def register_images(product_sku: str) -> list[ProductImage]:
             "`python cli.py add-product --sku ... --name ...`."
         )
 
-    image_dir = config.product_images_dir() / product_sku
+    image_dir = _product_image_dir(existing)
     files = _list_image_files(image_dir)
 
     db.clear_product_images(product_sku)
@@ -86,7 +93,11 @@ def register_images(product_sku: str) -> list[ProductImage]:
 
 
 def refresh_images_if_changed(product_sku: str) -> tuple[list[ProductImage], bool]:
-    image_dir = config.product_images_dir() / product_sku
+    existing = db.get_product(product_sku)
+    if not existing:
+        return [], False
+
+    image_dir = _product_image_dir(existing)
     disk_snapshot = [
         (_classify_image_type(path.name), str(path))
         for path in _list_image_files(image_dir)

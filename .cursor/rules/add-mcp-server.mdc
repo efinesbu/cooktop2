@@ -1,0 +1,19 @@
+---
+description: Guide for configuring a new MCP server in Cursor with auth and verification steps
+globs: "{.cursor/mcp.json,**/.cursor/mcp.json,README.md,.env.example}"
+alwaysApply: false
+---
+
+# Add MCP Server
+
+- Configure MCP servers in `.cursor/mcp.json` (project-level) or `~/.cursor/mcp.json` (user-level).
+- Add a new `mcpServers` entry with either `url` or `command` and `args`.
+- Provide secrets through `env` variables and never hardcode API keys.
+- Verify setup by checking tool discovery, URL or command validity, env vars, and connectivity.
+- If tools do not appear, reload config or restart Cursor.
+- Document required environment variables and add a short note in project docs.
+
+Example:
+
+- Bad: commit a plain-text API key inside MCP config.
+- Good: reference `${MY_API_KEY}` from environment variables and document setup steps.
