@@ -74,11 +74,16 @@ def resolve_deterministic_fields(
     proof_type: str | None,
     script_style: str | None,
     generation_index: int = 0,
+    video_v3: bool = False,
 ) -> dict[str, str]:
     """Resolve all deterministic strategy fields before the LLM call.
 
     Priority: CLI-provided value > round-robin over whitelist.
     Bandit recommendations are passed in by the caller as theme/hook_type.
+
+    When video_v3=True, only theme is resolved upfront. The remaining fields
+    (hook_type, cta_type, proof_type, script_style) are classified
+    post-generation and set to placeholders here.
     """
     resolved: dict[str, str] = {}
 
@@ -86,6 +91,14 @@ def resolve_deterministic_fields(
         theme.strip() if theme and theme.strip() in THEMES else
         THEMES[generation_index % len(THEMES)]
     )
+
+    if video_v3:
+        resolved["hook_type"] = "bold_claim"
+        resolved["cta_type"] = "soft_cta"
+        resolved["proof_type"] = "none"
+        resolved["script_style"] = "conversational"
+        return resolved
+
     resolved["hook_type"] = (
         hook_type.strip() if hook_type and hook_type.strip() in HOOK_TYPES else
         HOOK_TYPES[generation_index % len(HOOK_TYPES)]

@@ -1791,6 +1791,24 @@ def test_build_user_message_includes_all_locked_constraints() -> None:
     assert "Script style must be: tip_based" in message
 
 
+def test_build_user_message_video_v3_includes_theme_guidance() -> None:
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    product = Product(sku="test", name="Test Product")
+    message = prompt_generator._build_user_message(
+        product=product,
+        theme="mythbust",
+        hook_type="question",
+        product_images=[],
+        video_v3=True,
+    )
+
+    assert "Theme must be: mythbust" in message
+    assert "THEME GUIDANCE: Challenge a common assumption and replace it with a sharper truth." in message
+    assert "What you've been told is wrong. Here's the truth." in message
+
+
 def test_validate_response_shape_rejects_mismatched_locked_cta_proof_script() -> None:
     """_validate_response_shape raises when LLM returns cta_type, proof_type, or script_style that does not match locked value."""
     sys.modules.pop("src.prompt_generator", None)

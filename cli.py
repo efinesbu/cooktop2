@@ -383,13 +383,14 @@ def _run_generation_job(
     should_post: bool,
     creative_format: str | None = None,
     video_v2: bool = False,
+    video_v3: bool = False,
     cta_type: str | None = None,
     proof_type: str | None = None,
     script_style: str | None = None,
 ) -> Optional[Content]:
     product, theme, hook_type, generation_index = job
     return _generate_single(product, theme, hook_type, generation_index, should_post, creative_format, video_v2,
-                           cta_type, proof_type, script_style)
+                           video_v3, cta_type, proof_type, script_style)
 
 
 def _generate_batch(
@@ -398,6 +399,7 @@ def _generate_batch(
     requested_count: int,
     creative_format: str | None = None,
     video_v2: bool = False,
+    video_v3: bool = False,
     cta_type: str | None = None,
     proof_type: str | None = None,
     script_style: str | None = None,
@@ -406,7 +408,7 @@ def _generate_batch(
         return 0
 
     def run_job(job):
-        return _run_generation_job(job, should_post, creative_format, video_v2, cta_type, proof_type, script_style)
+        return _run_generation_job(job, should_post, creative_format, video_v2, video_v3, cta_type, proof_type, script_style)
 
     if requested_count < PARALLEL_GENERATION_THRESHOLD and len(jobs) > 1:
         max_workers = min(len(jobs), requested_count)
@@ -417,12 +419,13 @@ def _generate_batch(
     return sum(
         1 for product, theme, hook_type, idx in jobs
         if _generate_single(product, theme, hook_type, idx, should_post, creative_format, video_v2,
-                            cta_type, proof_type, script_style)
+                            video_v3, cta_type, proof_type, script_style)
     )
 
 
 def _generate_single(product: Product, theme: str | None, hook_type: str | None, generation_index: int,
                      should_post: bool, creative_format: str | None = None, video_v2: bool = False,
+                     video_v3: bool = False,
                      cta_type: str | None = None, proof_type: str | None = None, script_style: str | None = None) -> Optional[Content]:
     spent, budget, within = check_budget()
     if not within:
@@ -437,11 +440,14 @@ def _generate_single(product: Product, theme: str | None, hook_type: str | None,
     if not images:
         console.print(f"[yellow]{product.sku}: no images registered, continuing anyway.[/yellow]")
 
-    resolved = resolve_deterministic_fields(theme, hook_type, cta_type, proof_type, script_style, generation_index)
-    console.print(f"  {product.sku}: generating prompt ... ({_format_strategy_label(resolved['theme'], resolved['hook_type'])})")
+    resolved = resolve_deterministic_fields(theme, hook_type, cta_type, proof_type, script_style, generation_index, video_v3=video_v3)
+    if video_v3:
+        console.print(f"  {product.sku}: generating V3 prompt ... (theme: {resolved['theme']})")
+    else:
+        console.print(f"  {product.sku}: generating prompt ... ({_format_strategy_label(resolved['theme'], resolved['hook_type'])})")
     content, extras = generate_content(
         product, resolved["theme"], resolved["hook_type"], images,
-        creative_format, video_v2=video_v2,
+        creative_format, video_v2=video_v2, video_v3=video_v3,
         cta_type=resolved["cta_type"], proof_type=resolved["proof_type"], script_style=resolved["script_style"],
     )
     if "prompt_input" in extras:
@@ -462,6 +468,12 @@ def _generate_single(product: Product, theme: str | None, hook_type: str | None,
         except (json.JSONDecodeError, TypeError):
             output_str = extras["voice_prompt_output"]
         _print_debug_panel(output_str, "Voice prompt output")
+    if "v3_classification" in extras:
+        cls = extras["v3_classification"]
+        _print_debug_panel(
+            f"hook_type: {cls.get('hook_type')}\nscript_style: {cls.get('script_style')}\nproof_type: {cls.get('proof_type')}",
+            "V3 post-gen classification",
+        )
     _print_prompt(content)
     captions: dict[str, str] = extras["platform_captions"]
     hashtags: list[str] = extras["hashtags"]
@@ -918,6 +930,12 @@ def briefing_diagnose_cmd():
     is_flag=True,
     help="Use video-v2 prompts (forces ai_video_flex_15s). Incompatible with --format image_motion_15s.",
 )
+@click.option(
+    "--video-v3",
+    "video_v3",
+    is_flag=True,
+    help="Use video-v3 theme-driven prompts (forces ai_video_flex_15s, 6-8 scenes, third-person narrator, post-gen classification). Incompatible with --video-v2 and --format image_motion_15s.",
+)
 @click.option("--count", default=8, show_default=True, help="Total clips across all products in --auto mode")
 @click.option(
     "--rotate-theme-hook",
@@ -930,10 +948,15 @@ def briefing_diagnose_cmd():
 @click.option("--post", "should_post", is_flag=True, help="Deprecated: use preview, approve, schedule, and post-due")
 def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
         hooks: tuple[str, ...], creative_format: str | None, video_v2: bool,
+        video_v3: bool,
         count: int, rotate_theme_hook: bool, cta_type: str | None, proof_type: str | None,
         script_style: str | None, should_post: bool):
     """Generate content — manually or via bandit recommendations."""
     _init()
+
+    if video_v2 and video_v3:
+        console.print("[red]--video-v2 and --video-v3 cannot be used together.[/red]")
+        sys.exit(1)
 
     if video_v2 and creative_format == "image_motion_15s":
         console.print(
@@ -942,7 +965,16 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
         )
         sys.exit(1)
 
+    if video_v3 and creative_format == "image_motion_15s":
+        console.print(
+            "[red]--video-v3 cannot be combined with --format image_motion_15s.[/red] "
+            "Use --video-v3 alone (it forces ai_video_flex_15s) or omit --video-v3."
+        )
+        sys.exit(1)
+
     if video_v2:
+        creative_format = "ai_video_flex_15s"
+    if video_v3:
         creative_format = "ai_video_flex_15s"
 
     if should_post:
@@ -959,12 +991,13 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
         sys.exit(1)
 
     if auto_mode:
-        _run_auto(count, should_post, creative_format, video_v2, cta_type, proof_type, script_style)
+        _run_auto(count, should_post, creative_format, video_v2, video_v3, cta_type, proof_type, script_style)
     else:
-        _run_manual(slugs, themes, hooks, count, should_post, creative_format, rotate_theme_hook, video_v2, cta_type, proof_type, script_style)
+        _run_manual(slugs, themes, hooks, count, should_post, creative_format, rotate_theme_hook, video_v2, video_v3, cta_type, proof_type, script_style)
 
 
 def _run_auto(count: int, should_post: bool, creative_format: str | None = None, video_v2: bool = False,
+              video_v3: bool = False,
               cta_type: str | None = None, proof_type: str | None = None, script_style: str | None = None):
     products = db.list_products(
         active_only=True,
@@ -985,10 +1018,14 @@ def _run_auto(count: int, should_post: bool, creative_format: str | None = None,
 
     summary = Table(title="Global Bandit Allocation")
     summary.add_column("Theme", style="cyan")
-    summary.add_column("Hook Type")
+    if not video_v3:
+        summary.add_column("Hook Type")
     summary.add_column("Clips", justify="right")
     for alloc in recommendation.allocations:
-        summary.add_row(alloc.theme, alloc.hook_type, str(alloc.count))
+        if video_v3:
+            summary.add_row(alloc.theme, str(alloc.count))
+        else:
+            summary.add_row(alloc.theme, alloc.hook_type, str(alloc.count))
     console.print(summary)
 
     jobs: list[tuple[Product, str | None, str | None, int]] = []
@@ -1008,7 +1045,7 @@ def _run_auto(count: int, should_post: bool, creative_format: str | None = None,
             idx += 1
 
     total = _generate_batch(jobs, should_post, requested_count=count, creative_format=creative_format, video_v2=video_v2,
-                           cta_type=cta_type, proof_type=proof_type, script_style=script_style)
+                           video_v3=video_v3, cta_type=cta_type, proof_type=proof_type, script_style=script_style)
 
     piece = "piece" if total == 1 else "pieces"
     console.print(f"\n[green]{total}[/green] {piece} of content generated ({len(products)} products eligible).")
@@ -1017,6 +1054,7 @@ def _run_auto(count: int, should_post: bool, creative_format: str | None = None,
 def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
                 hooks: tuple[str, ...], count: int, should_post: bool,
                 creative_format: str | None = None, rotate_theme_hook: bool = False, video_v2: bool = False,
+                video_v3: bool = False,
                 cta_type: str | None = None, proof_type: str | None = None, script_style: str | None = None):
     if not slugs:
         console.print("[red]Provide at least one --product or use --auto.[/red]")
@@ -1042,7 +1080,7 @@ def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
             idx += 1
 
     total = _generate_batch(jobs, should_post, requested_count=count, creative_format=creative_format, video_v2=video_v2,
-                           cta_type=cta_type, proof_type=proof_type, script_style=script_style)
+                           video_v3=video_v3, cta_type=cta_type, proof_type=proof_type, script_style=script_style)
 
     console.print(f"\n[green]{total}[/green] pieces of content generated.")
 

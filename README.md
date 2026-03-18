@@ -26,6 +26,7 @@ cp .env.example .env
 # Put API keys and tokens in .env (never commit .env). Env vars override config.yaml.
 # Fill in config.yaml for non-secret settings. Set `platforms.enabled` to the platforms you want.
 # `openai.model` is used for content and paid-variant generation; keep `openai.voiceover_model` on `gpt-4.1` for image-motion voiceover planning.
+# Optional: `openai.classify_model` defaults to `gpt-4.1-mini` for `--video-v3` post-generation classification.
 
 # 6. Add a product to the local catalog
 python cli.py add-product --sku <product-slug> --name "Product Name" --url https://your-site.com/products/<handle>
@@ -96,6 +97,40 @@ python cli.py run --product moisturizer --product eye-cream --count 4 --format i
 
 This yields 8 creatives with bandit-recommended strategies from the current theme taxonomy (for example `hidden_knowledge`, `identity_tribe`, or `stakes_cost_of_inaction`) and the current hook whitelist.
 
+## Video V3
+
+`--video-v3` is a theme-first prompt flow for fast-cut anamorphic product videos.
+
+- Theme is the only locked creative input during generation.
+- The LLM generates the scene script first, then a smaller model classifies the finished script into the closest `hook_type`, `script_style`, and `proof_type`.
+- The product stays the only on-screen character and remains the center of attention.
+- The narrator is third-person, not the product speaking in first person.
+- The starting frame stays anamorphic and is still animated with Grok.
+- Environments are flexible and chosen from the script and theme instead of being locked to a luxury bathroom counter.
+- The final CTA is soft and engagement-oriented.
+- Background music is generated as metadata for later use and should support, not overpower, the voice script.
+
+Behavior:
+
+- Format is forced to `ai_video_flex_15s`.
+- Timeline uses 6-8 scenes.
+- Each scene targets 1.5-2.5 seconds.
+- Total duration targets 13-15 seconds.
+- Scenes after the first must start with `HARD CUT:`.
+- Output includes scene-level tone, platform captions, and background music metadata.
+
+Recommended test command for a product with SKU `skincare`:
+
+```bash
+python cli.py run --product skincare --video-v3 --count 1
+```
+
+If you want to lock the theme while testing one variation:
+
+```bash
+python cli.py run --product skincare --video-v3 --theme hidden_knowledge --count 1
+```
+
 ## CLI Commands
 
 | Command | Purpose |
@@ -108,6 +143,7 @@ This yields 8 creatives with bandit-recommended strategies from the current them
 | `run --product SLUG --count N` | Generate N clips using shared bandit theme/hook recommendations (starter arms) |
 | `run --product SLUG --theme T --hook H --count N` | Generate with manual strategy overrides |
 | `run --product SLUG --product SLUG2 --theme T --theme T2 --hook H --hook H2 --count N --rotate-theme-hook` | Cycle through provided theme/hook pairs; repeat `--product`, `--theme`, `--hook` for each value |
+| `run --product SLUG --video-v3 --count N` | Generate theme-first anamorphic flex videos with post-generation classification of hook/proof/style |
 | `exclude --product SLUG --reason "..."` | Exclude product from generation |
 | `include --product SLUG` | Re-include excluded product |
 | `preview --today` | Review today's generated content |
@@ -161,6 +197,13 @@ Velura now treats `theme` and `hook_type` as real creative strategy labels inste
 - `run --auto` now uses one shared global bandit across eligible products, allocates a daily total number of clips, and learns once per creative instead of once per platform post.
 - Reporting, UTM campaign naming, morning briefing recommendations, and bandit learning all use the persisted labels returned by generation.
 
+`--video-v3` changes that flow slightly:
+
+- The bandit still chooses the theme up front.
+- `hook_type`, `script_style`, and `proof_type` are not used to generate the script.
+- After the script is generated, Velura classifies it into the closest hook, script style, and proof labels using `gpt-4.1-mini` by default.
+- Those classified labels are then persisted so reporting and learning stay consistent with the final creative.
+
 Current curated whitelist:
 
 - Themes: `problem_solution`, `benefit_spotlight`, `stakes_cost_of_inaction`, `hidden_knowledge`, `identity_tribe`, `mechanism_reveal`, `mythbust`, `contrast_versus`
@@ -177,7 +220,7 @@ Prompt reuse and feedback:
 
 - `research-add` stores scoped `RESEARCH INSIGHT` text for future generations.
 - `review-text` analyzes recent posts with metrics and stores one scoped `TEXT_LEVEL_INSIGHTS` paragraph focused on hook wording, framing, proof language, and CTA phrasing.
-- When a matching research snapshot or text insight exists, generation automatically injects it into the prompt for `ai_video_15s`, `ai_video_flex_15s`, `video-v2`, and `image_motion_15s`.
+- When a matching research snapshot or text insight exists, generation automatically injects it into the prompt for `ai_video_15s`, `ai_video_flex_15s`, `video-v2`, `video-v3`, and `image_motion_15s`.
 
 ### Commerce and Revenue-Aware Ranking
 
@@ -245,7 +288,7 @@ Copy `config.example.yaml` to `config.yaml` and fill in:
 - **Site URL** — public storefront base URL used to build product links and UTMs
 - **Platforms** — optional `platforms.enabled` list to limit the workflow to only the platforms you are ready to test, e.g. `["youtube"]`
 - **Shopify** — optional store URL + Client ID + Client Secret if you want automatic product sync
-- **OpenAI** — API key + model for script generation. For image_motion_15s voiceover, TTS uses the same key; optional `openai.tts_model` (default `gpt-4o-mini-tts`), `openai.tts_voice_cycle` (default `[marin]`), `openai.tts_response_format` (default `wav`), `openai.tts_language` (default `english`), and `openai.tts_enabled_formats` (default `[image_motion_15s]`)
+- **OpenAI** — API key + model for script generation. For image_motion_15s voiceover, TTS uses the same key; optional `openai.voiceover_model` for image-motion voiceover planning, optional `openai.classify_model` for `--video-v3` post-generation classification (default `gpt-4.1-mini`), optional `openai.tts_model` (default `gpt-4o-mini-tts`), `openai.tts_voice_cycle` (default `[marin]`), `openai.tts_response_format` (default `wav`), `openai.tts_language` (default `english`), and `openai.tts_enabled_formats` (default `[image_motion_15s]`)
 - **Gemini** — Google AI API key, optional `gemini.aspect_ratio` (default `9:16` for vertical short-form)
 - **xAI** — Video generation API key, optional `xai.model` (default `grok-imagine-video`), optional `xai.resolution`/`xai.aspect_ratio` (default `9:16` for vertical short-form), and polling controls via `xai.poll_interval_seconds` and `xai.poll_timeout_seconds`
 - **YouTube** — Google OAuth Desktop app client secrets JSON for posting, optional `youtube.token_file` for the cached login token, optional `youtube.login_hint` to suggest the correct Google account during auth, plus `youtube.api_key` for analytics pulls
@@ -404,6 +447,7 @@ For the full runbook, see `tiktok-demo/README.md`.
 - **Product images:** `~/.velura/product-images/{product-slug}/`
 - **image_motion_15s reference folders:** `~/.velura/brand/` (brand-kit images, always used), `~/.velura/models/` (human-model images for lifestyle frames only). When TTS is enabled, voiceover WAV and silent MP4 sidecars are stored alongside the final voiced `{content-id}.mp4`.
 - **ai_video_flex_15s:** Experimental format; uses the same Gemini + xAI pipeline as ai_video_15s but with a flexible multi-scene plan (3–7 scenes, 6–15 seconds) stored in `asset_manifest_json`
+- **video-v3:** Uses `ai_video_flex_15s` under the hood but with a 6-8 scene, 13-15 second theme-first timeline. `asset_manifest_json` stores the normalized timeline, strategy metadata, and background music metadata.
 
 On Windows, `~` resolves to `%USERPROFILE%`.
 

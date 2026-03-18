@@ -132,6 +132,7 @@ PLATFORMS = ["youtube", "instagram", "tiktok", "x"]
 GENERATION_STEPS = [
     "prompt_gen",
     "voiceover_plan_gen",
+    "v3_classify",
     "paid_variant_gen",
     "image_gen",
     "video_gen",
@@ -142,7 +143,7 @@ GENERATION_STEPS = [
 
 # Phase 2: creative metadata for reporting and learning
 CREATIVE_FORMATS = ["ai_video_15s", "ai_video_flex_15s", "image_motion_15s"]
-CTA_TYPES = ["see_product", "shop_now"]
+CTA_TYPES = ["see_product", "shop_now", "soft_cta"]
 PROOF_TYPES = ["test_result", "testimonial", "before_after", "ingredient", "none"]
 SCRIPT_STYLES = ["conversational", "direct", "storytelling", "tip_based"]
 
