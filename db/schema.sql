@@ -168,6 +168,19 @@ CREATE INDEX IF NOT EXISTS idx_research_platform  ON research_snapshots(platform
 CREATE INDEX IF NOT EXISTS idx_research_format    ON research_snapshots(creative_format);
 CREATE INDEX IF NOT EXISTS idx_research_created   ON research_snapshots(created_at);
 
+-- Phase 4A: durable text-level insights for later prompt injection
+CREATE TABLE IF NOT EXISTS text_insights (
+    id                TEXT PRIMARY KEY,
+    product_sku       TEXT,
+    platform          TEXT,
+    creative_format   TEXT,
+    insight_text      TEXT NOT NULL,
+    source_post_count INTEGER DEFAULT 0,
+    created_at        TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_text_insights_scope   ON text_insights(product_sku, platform, creative_format);
+CREATE INDEX IF NOT EXISTS idx_text_insights_created ON text_insights(created_at DESC);
+
 -- Phase 6: Commerce facts for revenue-aware ranking (sessions, purchases, revenue)
 -- Attribution via content_id (utm_content) and platform (utm_source).
 -- Events arrive on different cadence than social metrics; prefer separate table.

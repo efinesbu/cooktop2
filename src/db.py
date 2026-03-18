@@ -9,10 +9,22 @@ from typing import Generator, Optional
 from src import config
 from src.models import (
     Product, ProductImage, Content, PlatformPayload, Post, Metric, BanditArm,
-    BanditObservation, Cost, CommerceFact, ResearchSnapshot,
+    BanditObservation, Cost, CommerceFact, ResearchSnapshot, TextInsight,
+    HOOK_TYPES, THEMES,
 )
 
 _DB_PATH: Path | None = None
+_BANDIT_ARM_KEY_SEPARATOR = "__"
+_LEGACY_THEME_ID_MAP = {
+    "problem_solution": "problem_solution",
+    "benefit": "benefit_spotlight",
+    "fear": "stakes_cost_of_inaction",
+    "curiosity": "hidden_knowledge",
+    "social_proof": "identity_tribe",
+    "urgency": "stakes_cost_of_inaction",
+    "routine": "benefit_spotlight",
+}
+_NEW_THEME_IDS = {theme for theme in THEMES if theme in {"mechanism_reveal", "mythbust", "contrast_versus"}}
 
 
 def _db_path() -> Path:
@@ -108,6 +120,8 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
             """
         )
 
+    _create_text_insights_table(conn)
+
     # Phase 4: expand costs.step for slideshow and image_motion renderers
     _migrate_costs_step(conn)
 
@@ -157,6 +171,7 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         """
     )
     _migrate_bandit_tables(conn)
+    _migrate_phase_1_theme_taxonomy(conn)
 
 
 def _table_columns(conn: sqlite3.Connection, table_name: str) -> list[str]:
@@ -170,6 +185,26 @@ def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
         (table_name,),
     ).fetchone()
     return row is not None
+
+
+def _create_text_insights_table(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS text_insights (
+            id                TEXT PRIMARY KEY,
+            product_sku       TEXT,
+            platform          TEXT,
+            creative_format   TEXT,
+            insight_text      TEXT NOT NULL,
+            source_post_count INTEGER DEFAULT 0,
+            created_at        TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_text_insights_scope
+            ON text_insights(product_sku, platform, creative_format);
+        CREATE INDEX IF NOT EXISTS idx_text_insights_created
+            ON text_insights(created_at DESC);
+        """
+    )
 
 
 def _costs_step_has_legacy_check(conn: sqlite3.Connection) -> bool:
@@ -241,6 +276,153 @@ def _migrate_bandit_tables(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_bandit_obs_product ON bandit_observations(product_sku);
         """
     )
+
+
+def _canonical_theme_id(theme: str | None) -> str:
+    value = (theme or "").strip()
+    return _LEGACY_THEME_ID_MAP.get(value, value)
+
+
+def _build_bandit_arm_key(theme: str, hook_type: str) -> str:
+    return f"{theme}{_BANDIT_ARM_KEY_SEPARATOR}{hook_type}"
+
+
+def _parse_bandit_arm_key(key: str | None) -> tuple[str, str] | None:
+    parts = (key or "").split(_BANDIT_ARM_KEY_SEPARATOR)
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return None
+    return parts[0], parts[1]
+
+
+def _pick_latest_timestamp(current: str | None, candidate: str | None) -> str | None:
+    if current is None:
+        return candidate
+    if candidate is None:
+        return current
+    return max(current, candidate)
+
+
+def _migrate_phase_1_theme_taxonomy(conn: sqlite3.Connection) -> None:
+    if not _table_exists(conn, "content"):
+        return
+
+    has_existing_data = any(
+        conn.execute(f"SELECT 1 FROM {table_name} LIMIT 1").fetchone()
+        for table_name in ("content", "bandit_state", "bandit_observations")
+        if _table_exists(conn, table_name)
+    )
+    if not has_existing_data:
+        return
+
+    for legacy_theme, canonical_theme in _LEGACY_THEME_ID_MAP.items():
+        if legacy_theme == canonical_theme:
+            continue
+        conn.execute(
+            "UPDATE content SET theme=? WHERE theme=?",
+            (canonical_theme, legacy_theme),
+        )
+
+    _migrate_bandit_state_theme_taxonomy(conn)
+    _migrate_bandit_observation_theme_taxonomy(conn)
+
+
+def _migrate_bandit_state_theme_taxonomy(conn: sqlite3.Connection) -> None:
+    if not _table_exists(conn, "bandit_state"):
+        return
+
+    rows = conn.execute(
+        "SELECT arm_key, theme, hook_type, alpha, beta, last_updated FROM bandit_state"
+    ).fetchall()
+    merged_rows: dict[str, dict[str, str | float | None]] = {}
+
+    for row in rows:
+        parsed_key = _parse_bandit_arm_key(row["arm_key"])
+        legacy_theme = parsed_key[0] if parsed_key else row["theme"]
+        hook_type = parsed_key[1] if parsed_key else row["hook_type"]
+        canonical_theme = _canonical_theme_id(legacy_theme)
+        canonical_key = _build_bandit_arm_key(canonical_theme, hook_type)
+        existing = merged_rows.get(canonical_key)
+
+        if existing is None:
+            merged_rows[canonical_key] = {
+                "arm_key": canonical_key,
+                "theme": canonical_theme,
+                "hook_type": hook_type,
+                "alpha": float(row["alpha"] or 0.0),
+                "beta": float(row["beta"] or 0.0),
+                "last_updated": row["last_updated"],
+            }
+            continue
+
+        existing["alpha"] = float(existing["alpha"]) + float(row["alpha"] or 0.0)
+        existing["beta"] = float(existing["beta"]) + float(row["beta"] or 0.0)
+        existing["last_updated"] = _pick_latest_timestamp(
+            existing["last_updated"], row["last_updated"]
+        )
+
+    for theme in _NEW_THEME_IDS:
+        for hook_type in HOOK_TYPES:
+            canonical_key = _build_bandit_arm_key(theme, hook_type)
+            merged_rows.setdefault(
+                canonical_key,
+                {
+                    "arm_key": canonical_key,
+                    "theme": theme,
+                    "hook_type": hook_type,
+                    "alpha": 1.0,
+                    "beta": 1.0,
+                    "last_updated": None,
+                },
+            )
+
+    conn.execute("DELETE FROM bandit_state")
+    conn.executemany(
+        """INSERT INTO bandit_state (arm_key, theme, hook_type, alpha, beta, last_updated)
+           VALUES (?,?,?,?,?,?)""",
+        [
+            (
+                str(row["arm_key"]),
+                str(row["theme"]),
+                str(row["hook_type"]),
+                float(row["alpha"]),
+                float(row["beta"]),
+                row["last_updated"],
+            )
+            for row in merged_rows.values()
+        ],
+    )
+
+
+def _migrate_bandit_observation_theme_taxonomy(conn: sqlite3.Connection) -> None:
+    if not _table_exists(conn, "bandit_observations"):
+        return
+
+    rows = conn.execute(
+        "SELECT id, arm_key, theme, hook_type FROM bandit_observations"
+    ).fetchall()
+    updates: list[tuple[str, str, str, int]] = []
+
+    for row in rows:
+        parsed_key = _parse_bandit_arm_key(row["arm_key"])
+        legacy_theme = parsed_key[0] if parsed_key else row["theme"]
+        hook_type = parsed_key[1] if parsed_key else row["hook_type"]
+        canonical_theme = _canonical_theme_id(legacy_theme)
+        canonical_key = _build_bandit_arm_key(canonical_theme, hook_type)
+        if (
+            canonical_key == row["arm_key"]
+            and canonical_theme == row["theme"]
+            and hook_type == row["hook_type"]
+        ):
+            continue
+        updates.append((canonical_key, canonical_theme, hook_type, int(row["id"])))
+
+    if updates:
+        conn.executemany(
+            """UPDATE bandit_observations
+               SET arm_key=?, theme=?, hook_type=?
+               WHERE id=?""",
+            updates,
+        )
 
 
 @contextmanager
@@ -797,11 +979,18 @@ def _row_to_platform_payload(row: sqlite3.Row) -> PlatformPayload:
 
 def insert_post(p: Post) -> int:
     with _connect() as conn:
-        cur = conn.execute(
-            """INSERT INTO posts (content_id, platform, post_id, caption, hashtags, utm_url, destination_url, utm_source, utm_medium, utm_campaign, utm_content, link_mode)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (p.content_id, p.platform, p.post_id, p.caption, p.hashtags, p.utm_url, p.destination_url, p.utm_source, p.utm_medium, p.utm_campaign, p.utm_content, p.link_mode),
-        )
+        if p.published_at is None:
+            cur = conn.execute(
+                """INSERT INTO posts (content_id, platform, post_id, caption, hashtags, utm_url, destination_url, utm_source, utm_medium, utm_campaign, utm_content, link_mode)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (p.content_id, p.platform, p.post_id, p.caption, p.hashtags, p.utm_url, p.destination_url, p.utm_source, p.utm_medium, p.utm_campaign, p.utm_content, p.link_mode),
+            )
+        else:
+            cur = conn.execute(
+                """INSERT INTO posts (content_id, platform, post_id, caption, hashtags, utm_url, destination_url, utm_source, utm_medium, utm_campaign, utm_content, link_mode, published_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (p.content_id, p.platform, p.post_id, p.caption, p.hashtags, p.utm_url, p.destination_url, p.utm_source, p.utm_medium, p.utm_campaign, p.utm_content, p.link_mode, p.published_at),
+            )
         return cur.lastrowid  # type: ignore[return-value]
 
 
@@ -961,6 +1150,93 @@ def list_metrics_since(days: int = 30) -> list[Metric]:
         )
         for r in rows
     ]
+
+
+def list_recent_text_review_rows(
+    product_sku: str | None = None,
+    platform: str | None = None,
+    creative_format: str | None = None,
+    lookback_days: int = 30,
+) -> list[dict[str, object]]:
+    """Aggregate recent content performance to one row per content item for text review."""
+    clauses = ["1=1"]
+    params: list[object] = []
+    if product_sku is not None:
+        clauses.append("c.product_sku = ?")
+        params.append(product_sku)
+    if platform is not None:
+        clauses.append("p.platform = ?")
+        params.append(platform)
+    if creative_format is not None:
+        clauses.append("c.creative_format = ?")
+        params.append(creative_format)
+    if lookback_days > 0:
+        clauses.append("p.published_at >= datetime('now', ?)")
+        params.append(f"-{lookback_days} days")
+
+    where_sql = " AND ".join(clauses)
+    with _connect() as conn:
+        rows = conn.execute(
+            f"""
+            WITH latest_metrics AS (
+                SELECT
+                    m.post_id,
+                    COALESCE(m.views, 0) AS views,
+                    COALESCE(m.likes, 0)
+                        + COALESCE(m.shares, 0)
+                        + COALESCE(m.comments, 0)
+                        + COALESCE(m.saves, 0) AS engagements,
+                    m.pulled_at
+                FROM metrics m
+                WHERE m.id = (
+                    SELECT m2.id
+                    FROM metrics m2
+                    WHERE m2.post_id = m.post_id
+                    ORDER BY m2.pulled_at DESC, m2.id DESC
+                    LIMIT 1
+                )
+            )
+            SELECT
+                c.id AS content_id,
+                c.product_sku,
+                c.theme,
+                c.hook_type,
+                c.hook_text,
+                c.creative_format,
+                COUNT(DISTINCT p.id) AS post_count,
+                MAX(p.published_at) AS latest_posted_at,
+                MAX(lm.pulled_at) AS latest_metric_pulled_at,
+                COALESCE(SUM(lm.views), 0) AS total_views,
+                COALESCE(SUM(lm.engagements), 0) AS total_engagements,
+                CASE
+                    WHEN COALESCE(SUM(lm.views), 0) > 0
+                        THEN CAST(COALESCE(SUM(lm.engagements), 0) AS REAL)
+                             / CAST(SUM(lm.views) AS REAL)
+                    ELSE 0.0
+                END AS engagement_rate
+            FROM content c
+            JOIN posts p
+                ON p.content_id = c.id
+            JOIN latest_metrics lm
+                ON lm.post_id = p.id
+            WHERE {where_sql}
+            GROUP BY
+                c.id,
+                c.product_sku,
+                c.theme,
+                c.hook_type,
+                c.hook_text,
+                c.creative_format
+            ORDER BY
+                latest_posted_at DESC,
+                latest_metric_pulled_at DESC,
+                total_views DESC,
+                content_id ASC
+            """
+            ,
+            params,
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -1335,5 +1611,76 @@ def _row_to_research_snapshot(row: sqlite3.Row) -> ResearchSnapshot:
         creative_format=row["creative_format"],
         summary=row["summary"],
         source_type=row["source_type"] or "manual",
+        created_at=row["created_at"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Text Insights (Phase 4A)
+# ---------------------------------------------------------------------------
+
+def insert_text_insight(insight: TextInsight) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO text_insights
+               (id, product_sku, platform, creative_format, insight_text, source_post_count, created_at)
+               VALUES (?,?,?,?,?,?, COALESCE(?, datetime('now')))""",
+            (
+                insight.id,
+                insight.product_sku,
+                insight.platform,
+                insight.creative_format,
+                insight.insight_text,
+                int(insight.source_post_count),
+                insight.created_at,
+            ),
+        )
+
+
+def get_latest_text_insight(
+    product_sku: str | None = None,
+    platform: str | None = None,
+    creative_format: str | None = None,
+) -> TextInsight | None:
+    params = {
+        "product_sku": product_sku,
+        "platform": platform,
+        "creative_format": creative_format,
+    }
+    where_clauses = []
+    for column, value in params.items():
+        if value is None:
+            where_clauses.append(f"{column} IS NULL")
+        else:
+            where_clauses.append(f"({column} IS NULL OR {column} = :{column})")
+
+    score_expr = " + ".join(
+        [
+            "CASE WHEN :product_sku IS NOT NULL AND product_sku = :product_sku THEN 1 ELSE 0 END",
+            "CASE WHEN :platform IS NOT NULL AND platform = :platform THEN 1 ELSE 0 END",
+            "CASE WHEN :creative_format IS NOT NULL AND creative_format = :creative_format THEN 1 ELSE 0 END",
+        ]
+    )
+    where_sql = " AND ".join(where_clauses)
+
+    with _connect() as conn:
+        row = conn.execute(
+            f"""SELECT * FROM text_insights
+                WHERE {where_sql}
+                ORDER BY ({score_expr}) DESC, created_at DESC, id DESC
+                LIMIT 1""",
+            params,
+        ).fetchone()
+    return _row_to_text_insight(row) if row else None
+
+
+def _row_to_text_insight(row: sqlite3.Row) -> TextInsight:
+    return TextInsight(
+        id=row["id"],
+        product_sku=row["product_sku"],
+        platform=row["platform"],
+        creative_format=row["creative_format"],
+        insight_text=row["insight_text"] or "",
+        source_post_count=int(row["source_post_count"] or 0),
         created_at=row["created_at"],
     )

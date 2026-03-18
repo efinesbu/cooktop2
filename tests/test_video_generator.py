@@ -79,7 +79,7 @@ def test_generate_video_uses_async_xai_flow_and_downloads_video(
     content = Content(
         id="content-123",
         product_sku=product.sku,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="question",
         hook_text="Want brighter skin overnight?",
         scene_1_desc="Slow push-in on the product as soft light sweeps across the bottle.",
@@ -157,7 +157,7 @@ def test_build_flex_video_prompt_includes_anatomy_guardrail() -> None:
     content = Content(
         id="content-flex",
         product_sku=product.sku,
-        theme="curiosity",
+        theme="hidden_knowledge",
         hook_type="question",
         creative_format="ai_video_flex_15s",
         asset_manifest_json=jsonlib.dumps(
@@ -221,7 +221,7 @@ def test_generate_video_surfaces_413_for_original_image(
     content = Content(
         id="content-413",
         product_sku=product.sku,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="question",
         scene_1_desc="Scene one.",
         scene_1_script="Scene one voiceover.",

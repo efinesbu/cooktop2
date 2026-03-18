@@ -62,7 +62,7 @@ def sample_content() -> Content:
     return Content(
         id="test-content-001",
         product_sku="test-product",
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="bold_claim",
         hook_text="You won't believe this!",
     )

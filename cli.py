@@ -36,6 +36,7 @@ from src.creative_strategy import resolve_deterministic_fields
 from src.product_images import refresh_images_if_changed, register_images
 from src.prompt_generator import generate_content
 from src.renderers import render_media
+from src.text_review import run_text_review
 
 console = Console()
 PARALLEL_GENERATION_THRESHOLD = 10
@@ -674,6 +675,70 @@ def research_list_cmd(
         )
     console.print(table)
     console.print(f"\n[green]{len(snapshots)}[/green] snapshot(s).")
+
+
+@cli.command("review-text")
+@click.option("--product", "product_sku", default=None, help="Filter by product SKU")
+@click.option("--platform", type=click.Choice(PLATFORMS), default=None, help="Filter by platform")
+@click.option("--format", "creative_format", type=click.Choice(CREATIVE_FORMATS), default=None, help="Filter by creative format")
+@click.option(
+    "--min-posts",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Minimum eligible posts required before generating an insight",
+)
+@click.option(
+    "--lookback-days",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Only analyze posts from the last N days",
+)
+def review_text_cmd(
+    product_sku: str | None,
+    platform: str | None,
+    creative_format: str | None,
+    min_posts: int | None,
+    lookback_days: int | None,
+):
+    """Manually run the text-review worker and persist one scoped insight."""
+    _init()
+
+    min_posts = int(config.get("text_review.min_posts", 5)) if min_posts is None else min_posts
+    lookback_days = (
+        int(config.get("text_review.lookback_days", 30))
+        if lookback_days is None
+        else lookback_days
+    )
+
+    insight = run_text_review(
+        min_posts=min_posts,
+        product_sku=product_sku,
+        platform=platform,
+        creative_format=creative_format,
+        lookback_days=lookback_days,
+    )
+    if insight is None:
+        console.print(
+            "[yellow]No text insight created.[/yellow] "
+            "Not enough eligible posts were found for the requested scope."
+        )
+        return
+
+    scope_parts = []
+    if insight.product_sku:
+        scope_parts.append(f"product={insight.product_sku}")
+    if insight.platform:
+        scope_parts.append(f"platform={insight.platform}")
+    if insight.creative_format:
+        scope_parts.append(f"format={insight.creative_format}")
+    scope = ", ".join(scope_parts) if scope_parts else "all products/platforms/formats"
+
+    console.print(
+        f"[green]Created[/green] text insight [bold]{insight.id}[/bold] "
+        f"from {insight.source_post_count} post(s)."
+    )
+    console.print(f"Scope: {scope}")
+    console.print(insight.insight_text)
 
 
 @cli.command("paid-seed-clone")

@@ -52,9 +52,20 @@ def _create_post_with_metric(
     return post_id
 
 
+def _seed_bandit_arm(theme: str, hook_type: str) -> None:
+    db.upsert_bandit_arm(
+        BanditArm(
+            arm_key=bandit.arm_key(theme, hook_type),
+            theme=theme,
+            hook_type=hook_type,
+        )
+    )
+
+
 def test_update_from_metrics_is_idempotent(tmp_db: Path) -> None:
     db.upsert_product(Product(sku="serum-x", name="Serum X"))
     bandit.initialize_arms()
+    _seed_bandit_arm("benefit_spotlight", "bold_claim")
 
     _create_post_with_metric(
         product_sku="serum-x",
@@ -67,7 +78,7 @@ def test_update_from_metrics_is_idempotent(tmp_db: Path) -> None:
     _create_post_with_metric(
         product_sku="serum-x",
         content_id="content-b",
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="bold_claim",
         views=100,
         likes=10,
@@ -94,11 +105,12 @@ def test_update_from_metrics_is_idempotent(tmp_db: Path) -> None:
 def test_update_from_metrics_aggregates_by_creative_and_uses_latest_metric_per_post(tmp_db: Path) -> None:
     db.upsert_product(Product(sku="serum-y", name="Serum Y"))
     bandit.initialize_arms()
+    _seed_bandit_arm("benefit_spotlight", "bold_claim")
 
     post_id = _create_post_with_metric(
         product_sku="serum-y",
         content_id="content-c",
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="bold_claim",
         views=100,
         likes=10,
@@ -114,7 +126,7 @@ def test_update_from_metrics_aggregates_by_creative_and_uses_latest_metric_per_p
     _create_post_with_metric(
         product_sku="serum-y",
         content_id="content-c",
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="bold_claim",
         platform="instagram",
         views=100,
@@ -132,7 +144,7 @@ def test_update_from_metrics_aggregates_by_creative_and_uses_latest_metric_per_p
     updated = bandit.update_from_metrics()
     assert updated == 2
 
-    winning_arm = db.get_bandit_arm(bandit.arm_key("benefit", "bold_claim"))
+    winning_arm = db.get_bandit_arm(bandit.arm_key("benefit_spotlight", "bold_claim"))
     losing_arm = db.get_bandit_arm(bandit.arm_key("problem_solution", "relatable_pain"))
 
     assert winning_arm is not None
@@ -152,6 +164,7 @@ def test_update_from_metrics_falls_back_to_engagement_when_no_commerce(monkeypat
     monkeypatch.setattr("src.bandit._ranking_objective", lambda: "revenue")
     db.upsert_product(Product(sku="serum-z", name="Serum Z"))
     bandit.initialize_arms()
+    _seed_bandit_arm("benefit_spotlight", "bold_claim")
 
     _create_post_with_metric(
         product_sku="serum-z",
@@ -164,7 +177,7 @@ def test_update_from_metrics_falls_back_to_engagement_when_no_commerce(monkeypat
     _create_post_with_metric(
         product_sku="serum-z",
         content_id="content-f",
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="bold_claim",
         views=100,
         likes=5,
@@ -174,22 +187,23 @@ def test_update_from_metrics_falls_back_to_engagement_when_no_commerce(monkeypat
     assert updated == 2
 
     winning_arm = db.get_bandit_arm(bandit.arm_key("problem_solution", "relatable_pain"))
-    losing_arm = db.get_bandit_arm(bandit.arm_key("benefit", "bold_claim"))
+    losing_arm = db.get_bandit_arm(bandit.arm_key("benefit_spotlight", "bold_claim"))
     assert winning_arm is not None and winning_arm.alpha == 2.0
     assert losing_arm is not None and losing_arm.beta == 2.0
 
 
-def test_update_from_metrics_legacy_content_produces_observation_with_canonical_arm_key(
+def test_update_from_metrics_produces_observation_with_canonical_arm_key(
     tmp_db: Path,
 ) -> None:
-    """Legacy content still produces observations keyed only by theme and hook_type."""
+    """Canonical content produces observations keyed only by theme and hook_type."""
     db.upsert_product(Product(sku="serum-legacy", name="Serum Legacy"))
     bandit.initialize_arms()
+    _seed_bandit_arm("benefit_spotlight", "bold_claim")
 
     _create_post_with_metric(
         product_sku="serum-legacy",
         content_id="content-legacy",
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="bold_claim",
         views=100,
         likes=30,
@@ -200,7 +214,7 @@ def test_update_from_metrics_legacy_content_produces_observation_with_canonical_
 
     obs = db.get_bandit_observation_for_content("content-legacy")
     assert obs is not None
-    assert obs.arm_key == "benefit__bold_claim"
+    assert obs.arm_key == "benefit_spotlight__bold_claim"
 
 
 def test_update_from_metrics_ignores_non_arm_strategy_metadata(
@@ -208,11 +222,11 @@ def test_update_from_metrics_ignores_non_arm_strategy_metadata(
 ) -> None:
     """Stored strategy metadata should not create extra bandit arms."""
     db.upsert_product(Product(sku="serum-v2", name="Serum V2"))
-    arm_key = "benefit__bold_claim"
+    arm_key = "benefit_spotlight__bold_claim"
     db.upsert_bandit_arm(
         BanditArm(
             arm_key=arm_key,
-            theme="benefit",
+            theme="benefit_spotlight",
             hook_type="bold_claim",
         )
     )
@@ -224,7 +238,7 @@ def test_update_from_metrics_ignores_non_arm_strategy_metadata(
         Content(
             id="content-v2",
             product_sku="serum-v2",
-            theme="benefit",
+            theme="benefit_spotlight",
             hook_type="bold_claim",
             strategy_metadata_json=json.dumps(strategy),
         )
@@ -232,7 +246,7 @@ def test_update_from_metrics_ignores_non_arm_strategy_metadata(
     _create_post_with_metric(
         product_sku="serum-v2",
         content_id="content-v2",
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="bold_claim",
         views=100,
         likes=50,

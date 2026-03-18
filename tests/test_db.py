@@ -7,7 +7,7 @@ from pathlib import Path
 from src import db
 from src.models import (
     BanditArm, BanditObservation, Content, Cost, Metric, PlatformPayload, Post,
-    Product, ResearchSnapshot,
+    Product, ResearchSnapshot, TextInsight,
 )
 
 
@@ -180,7 +180,7 @@ def test_insert_and_get_content(
     assert fetched is not None
     assert fetched.id == sample_content.id
     assert fetched.product_sku == sample_content.product_sku
-    assert fetched.theme == "benefit"
+    assert fetched.theme == "benefit_spotlight"
     assert fetched.hook_type == "bold_claim"
     assert fetched.hook_text == "You won't believe this!"
     assert fetched.review_status == "pending"
@@ -227,7 +227,7 @@ def test_insert_and_get_content_preserves_strategy_metadata_json(
     content = Content(
         id="strategy-001",
         product_sku=sample_product.sku,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="bold_claim",
         hook_text="Test hook",
         strategy_metadata_json=json.dumps(strategy),
@@ -283,8 +283,8 @@ def test_bandit_state_roundtrip(
     db_with_product: Path, sample_product: Product
 ) -> None:
     arm = BanditArm(
-        arm_key="fear__question",
-        theme="fear",
+        arm_key="stakes_cost_of_inaction__question",
+        theme="stakes_cost_of_inaction",
         hook_type="question",
         alpha=5,
         beta=3,
@@ -293,14 +293,14 @@ def test_bandit_state_roundtrip(
 
     arms = db.list_bandit_arms()
     assert len(arms) == 1
-    assert arms[0].arm_key == "fear__question"
-    assert arms[0].theme == "fear"
+    assert arms[0].arm_key == "stakes_cost_of_inaction__question"
+    assert arms[0].theme == "stakes_cost_of_inaction"
     assert arms[0].hook_type == "question"
     assert arms[0].alpha == 5
     assert arms[0].beta == 3
 
-    db.increment_bandit("fear__question", success=True)
-    fetched = db.get_bandit_arm("fear__question")
+    db.increment_bandit("stakes_cost_of_inaction__question", success=True)
+    fetched = db.get_bandit_arm("stakes_cost_of_inaction__question")
     assert fetched is not None
     assert fetched.alpha == 6
     assert fetched.beta == 3
@@ -429,6 +429,48 @@ def test_platform_payload_roundtrip(
     assert any(item.content_id == sample_content.id and item.platform == "youtube" for item in due)
 
 
+def test_text_insight_roundtrip_and_scope_matching(tmp_db: Path) -> None:
+    db.insert_text_insight(
+        TextInsight(
+            id="text-generic",
+            product_sku=None,
+            platform=None,
+            creative_format=None,
+            insight_text="Generic insight.",
+            source_post_count=2,
+        )
+    )
+    db.insert_text_insight(
+        TextInsight(
+            id="text-scoped",
+            product_sku="test-product",
+            platform="instagram",
+            creative_format="ai_video_15s",
+            insight_text="Scoped insight.",
+            source_post_count=7,
+        )
+    )
+
+    fetched = db.get_latest_text_insight(
+        product_sku="test-product",
+        platform="instagram",
+        creative_format="ai_video_15s",
+    )
+    assert fetched is not None
+    assert fetched.id == "text-scoped"
+    assert fetched.insight_text == "Scoped insight."
+    assert fetched.source_post_count == 7
+    assert fetched.product_sku == "test-product"
+    assert fetched.platform == "instagram"
+    assert fetched.creative_format == "ai_video_15s"
+
+    fallback = db.get_latest_text_insight()
+    assert fallback is not None
+    assert fallback.id == "text-generic"
+    assert fallback.insight_text == "Generic insight."
+    assert fallback.source_post_count == 2
+
+
 def test_latest_metrics_for_post_prefers_newest_metric_row(
     db_with_product: Path, sample_content: Content
 ) -> None:
@@ -448,6 +490,28 @@ def test_latest_metrics_for_post_prefers_newest_metric_row(
     assert latest.likes == 25
 
 
+def test_insert_post_roundtrip_preserves_published_at(
+    db_with_product: Path, sample_content: Content
+) -> None:
+    db.insert_content(sample_content)
+    published_at = f"{date.today().isoformat()} 12:00:00"
+
+    post_id = db.insert_post(
+        Post(
+            content_id=sample_content.id,
+            platform="instagram",
+            post_id="ig-1",
+            published_at=published_at,
+        )
+    )
+
+    fetched = db.get_post(post_id)
+    assert fetched is not None
+    assert fetched.published_at == published_at
+    assert fetched.content_id == sample_content.id
+    assert fetched.platform == "instagram"
+
+
 def test_bandit_observation_helpers(
     db_with_product: Path, sample_content: Content
 ) -> None:
@@ -458,8 +522,8 @@ def test_bandit_observation_helpers(
         BanditObservation(
             content_id=sample_content.id,
             product_sku=sample_content.product_sku,
-            arm_key="benefit__bold_claim",
-            theme=sample_content.theme,
+            arm_key="benefit_spotlight__bold_claim",
+            theme="benefit_spotlight",
             hook_type=sample_content.hook_type,
             aggregated_engagement_rate=0.3,
             success=True,

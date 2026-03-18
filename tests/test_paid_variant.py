@@ -42,7 +42,7 @@ def winner_content(tmp_db: Path, sample_product: Product) -> Content:
     content = Content(
         id="winner-abc123",
         product_sku=sample_product.sku,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="bold_claim",
         hook_text="Original hook",
         cta_type="see_product",

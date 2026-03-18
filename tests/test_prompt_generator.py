@@ -9,7 +9,85 @@ from types import SimpleNamespace
 import pytest
 
 from src import db
-from src.models import Product, ProductImage, ResearchSnapshot
+from src.models import Product, ProductImage, ResearchSnapshot, TextInsight
+
+
+def _image_motion_frame(
+    role: str,
+    narrative_role: str,
+    frame_intent: str,
+    mood: str,
+    duration_seconds: float,
+    *,
+    style_family: str = "realistic_cinematic",
+    lighting: str = "golden_window_light",
+    camera_distance: str = "macro_closeup",
+    image_prompt: str = "Frame",
+) -> dict[str, object]:
+    return {
+        "role": role,
+        "narrative_role": narrative_role,
+        "frame_intent": frame_intent,
+        "mood": mood,
+        "duration_seconds": duration_seconds,
+        "style_family": style_family,
+        "lighting": lighting,
+        "camera_distance": camera_distance,
+        "image_prompt": image_prompt,
+    }
+
+
+def _standard_image_motion_frames() -> list[dict[str, object]]:
+    return [
+        _image_motion_frame(
+            "hero_macro",
+            "hook",
+            "Open with a premium product hero that implies value.",
+            "soft_curiosity",
+            1.5,
+            image_prompt="Frame 1",
+        ),
+        _image_motion_frame(
+            "hero_tabletop",
+            "problem",
+            "Shift to a gentle contrast that acknowledges the viewer's hesitation.",
+            "concern",
+            1.5,
+            lighting="soft_diffused_daylight",
+            camera_distance="closeup",
+            image_prompt="Frame 2",
+        ),
+        _image_motion_frame(
+            "texture_detail",
+            "proof",
+            "Show a concrete texture detail that makes the claim feel credible.",
+            "calm_confidence",
+            1.5,
+            lighting="clean_studio_backlight",
+            camera_distance="macro_closeup",
+            image_prompt="Frame 3",
+        ),
+        _image_motion_frame(
+            "hero_macro",
+            "proof",
+            "Echo the proof with a second hero angle and a warmer expression.",
+            "delight",
+            1.5,
+            lighting="golden_window_light",
+            camera_distance="closeup",
+            image_prompt="Frame 4",
+        ),
+        _image_motion_frame(
+            "texture_detail",
+            "cta",
+            "Close with an inviting product-led CTA.",
+            "invitation",
+            2.0,
+            lighting="clean_studio_backlight",
+            camera_distance="medium_shot",
+            image_prompt="Frame 5",
+        ),
+    ]
 
 
 def test_generate_content_uses_openai_and_persists_outputs(
@@ -23,7 +101,7 @@ def test_generate_content_uses_openai_and_persists_outputs(
     captured: dict[str, object] = {}
 
     response_payload = {
-        "theme": "benefit",
+        "theme": "benefit_spotlight",
         "hook_type": "question",
         "hook_text": "Want your skin to look fresher by morning?",
         "creative_format": "ai_video_15s",
@@ -98,7 +176,7 @@ def test_generate_content_uses_openai_and_persists_outputs(
 
     content, extras = prompt_generator.generate_content(
         product=product,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="question",
         product_images=[
             ProductImage(
@@ -120,7 +198,7 @@ def test_generate_content_uses_openai_and_persists_outputs(
     assert "Locked creative constraints:" in captured["input"]
     assert "Allowed themes:" in captured["input"]
 
-    assert content.theme == "benefit"
+    assert content.theme == "benefit_spotlight"
     assert content.hook_type == "question"
     assert content.hook_text == "Want your skin to look fresher by morning?"
     assert content.creative_format == "ai_video_15s"
@@ -154,7 +232,7 @@ def test_generate_content_defaults_to_gpt_5_4(
     captured: dict[str, object] = {}
 
     response_payload = {
-        "theme": "benefit",
+        "theme": "benefit_spotlight",
         "hook_type": "question",
         "hook_text": "Want your skin to look fresher by morning?",
         "creative_format": "ai_video_15s",
@@ -220,7 +298,7 @@ def test_generate_content_defaults_to_gpt_5_4(
 
     prompt_generator.generate_content(
         product=product,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="question",
         product_images=[
             ProductImage(
@@ -248,7 +326,7 @@ def test_generate_content_retries_on_empty_openai_response(
     call_count = 0
 
     response_payload = {
-        "theme": "benefit",
+        "theme": "benefit_spotlight",
         "hook_type": "question",
         "hook_text": "Want your skin to look fresher by morning?",
         "creative_format": "ai_video_15s",
@@ -317,7 +395,7 @@ def test_generate_content_retries_on_empty_openai_response(
 
     content, extras = prompt_generator.generate_content(
         product=product,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="question",
         product_images=[],
         cta_type="see_product",
@@ -341,7 +419,7 @@ def test_generate_content_retries_on_invalid_structured_output(
     call_count = 0
 
     invalid_payload = {
-        "theme": "benefit",
+        "theme": "benefit_spotlight",
         "hook_type": "question",
         "hook_text": "Want your skin to look fresher by morning?",
         "creative_format": "invalid_format",
@@ -412,7 +490,7 @@ def test_generate_content_retries_on_invalid_structured_output(
 
     content, extras = prompt_generator.generate_content(
         product=product,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="question",
         product_images=[],
         cta_type="see_product",
@@ -435,7 +513,7 @@ def test_generate_content_allows_prompt_selected_labels_without_overrides(
 
     captured: dict[str, object] = {}
     response_payload = {
-        "theme": "routine",
+        "theme": "benefit_spotlight",
         "hook_type": "quick_tip",
         "hook_text": "Here is the easiest way to make your routine look more polished.",
         "creative_format": "ai_video_15s",
@@ -508,7 +586,7 @@ def test_generate_content_allows_prompt_selected_labels_without_overrides(
 
     content, _ = prompt_generator.generate_content(
         product=product,
-        theme="routine",
+        theme="benefit_spotlight",
         hook_type="quick_tip",
         product_images=[],
         cta_type="shop_now",
@@ -518,8 +596,10 @@ def test_generate_content_allows_prompt_selected_labels_without_overrides(
 
     assert "Locked creative constraints:" in captured["messages"][1]["content"]
     assert "Allowed themes:" in captured["messages"][1]["content"]
+    assert "  - benefit_spotlight:" in captured["messages"][1]["content"]
+    assert "Guidance:" in captured["messages"][1]["content"]
     assert "Allowed hook types:" in captured["messages"][1]["content"]
-    assert content.theme == "routine"
+    assert content.theme == "benefit_spotlight"
     assert content.hook_type == "quick_tip"
     assert content.hook_text == response_payload["hook_text"]
 
@@ -538,7 +618,7 @@ def test_generate_content_rejects_invalid_metadata(
     prompt_generator = importlib.import_module("src.prompt_generator")
 
     response_payload = {
-        "theme": "benefit",
+        "theme": "benefit_spotlight",
         "hook_type": "question",
         "hook_text": "Want fresher skin?",
         "creative_format": "invalid_format",
@@ -604,7 +684,7 @@ def test_generate_content_rejects_invalid_metadata(
     with pytest.raises(ValueError, match="creative_format.*not in whitelist"):
         prompt_generator.generate_content(
             product=product,
-            theme="benefit",
+            theme="benefit_spotlight",
             hook_type="question",
             product_images=[],
             proof_type="ingredient",
@@ -616,7 +696,7 @@ def test_generate_content_rejects_invalid_metadata(
     with pytest.raises(ValueError, match="cta_type"):
         prompt_generator.generate_content(
             product=product,
-            theme="benefit",
+            theme="benefit_spotlight",
             hook_type="question",
             product_images=[],
             proof_type="ingredient",
@@ -634,7 +714,7 @@ def test_generate_content_injects_research_and_persists_snapshot_id(
 
     captured: dict[str, object] = {}
     response_payload = {
-        "theme": "benefit",
+        "theme": "benefit_spotlight",
         "hook_type": "question",
         "hook_text": "Want fresher skin?",
         "creative_format": "ai_video_15s",
@@ -716,7 +796,7 @@ def test_generate_content_injects_research_and_persists_snapshot_id(
 
     content, _ = prompt_generator.generate_content(
         product=product,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="question",
         product_images=[],
         proof_type="ingredient",
@@ -732,6 +812,167 @@ def test_generate_content_injects_research_and_persists_snapshot_id(
     assert fetched.research_snapshot_id == "rs-inject-test"
 
 
+def test_build_user_message_includes_and_omits_text_level_insights() -> None:
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    product = Product(sku="serum-x", name="Serum X")
+    insight = "Hooks that start with a real viewer problem beat generic benefit claims."
+
+    with_text_insight = prompt_generator._build_user_message(
+        product=product,
+        theme="mechanism_reveal",
+        hook_type="question",
+        product_images=[],
+        text_insights=insight,
+        creative_format="ai_video_15s",
+        cta_type="see_product",
+        proof_type="ingredient",
+        script_style="conversational",
+    )
+    without_text_insight = prompt_generator._build_user_message(
+        product=product,
+        theme="mechanism_reveal",
+        hook_type="question",
+        product_images=[],
+        creative_format="ai_video_15s",
+        cta_type="see_product",
+        proof_type="ingredient",
+        script_style="conversational",
+    )
+
+    assert "Theme must be: mechanism_reveal" in with_text_insight
+    assert "TEXT_LEVEL_INSIGHTS" in with_text_insight
+    assert insight in with_text_insight
+    assert "use these for text direction only, not image or render guidance" in with_text_insight
+    assert "TEXT_LEVEL_INSIGHTS" not in without_text_insight
+
+
+def test_generate_content_injects_text_level_insights_from_db(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    captured_calls: list[dict[str, object]] = []
+    text_insight = (
+        "Hooks that frame a specific viewer tension and then resolve it with one clean claim "
+        "perform better than broad product praise."
+    )
+    response_payload = {
+        "theme": "benefit_spotlight",
+        "hook_type": "question",
+        "hook_text": "Want your skin to look fresher by morning?",
+        "creative_format": "ai_video_15s",
+        "cta_type": "see_product",
+        "cta_text": "try me today",
+        "problem_angle": None,
+        "proof_type": "ingredient",
+        "script_style": "conversational",
+        "starting_image_prompt": (
+            "A cinematic 3D closeup of an anthropomorphic Serum X standing on a luxury "
+            "bathroom counter. The bottle has a high-quality Pixar-style face with large, "
+            "expressive eyes and an articulated mouth. Soft focus background of a luxury "
+            "bathroom counter. Volumetric lighting, octane render, unreal engine 5, 4k. "
+            "The product has the brand \"velura\" on it in brown writing using "
+            "'Cormorant Garamond', Georgia, 'Times New Roman', serif."
+        ),
+        "scene_1_desc": "Hook closeup as the bottle smiles softly and leans forward with slow, reassuring movement.",
+        "scene_2_desc": "HARD CUT to a cleaner angle as the bottle tilts slightly and soft light reveals texture.",
+        "scene_1_script": "I show up worried, hiding every flaw, afraid dull skin makes me look forgotten today.",
+        "scene_2_script": "I help skin look fresh and confident every morning, so try Serum X today now.",
+        "platform_captions": {
+            "youtube": "Glow faster with Serum X",
+            "instagram": "Meet your shortcut to brighter skin.",
+            "tiktok": "POV: your skin finally looks awake",
+            "x": "Serum X makes tired skin look camera-ready fast.",
+        },
+        "hashtags": ["skincare", "glow", "serumx"],
+    }
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            captured_calls.append(kwargs)
+            return SimpleNamespace(
+                output_text=json.dumps(response_payload),
+                usage=SimpleNamespace(input_tokens=120, output_tokens=80),
+            )
+
+    class FakeOpenAIClient:
+        def __init__(self, api_key: str) -> None:
+            self.responses = FakeResponses()
+
+    fake_openai = SimpleNamespace(
+        OpenAI=FakeOpenAIClient,
+        APIConnectionError=Exception,
+        RateLimitError=Exception,
+        APIStatusError=Exception,
+    )
+
+    client_secrets = tmp_path / "youtube_client_secrets.json"
+    client_secrets.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "openai": {"api_key": "test-openai-key", "model": "gpt-5.4"},
+            "site_url": "https://example.com",
+            "platforms": {"enabled": ["youtube"]},
+            "youtube": {"client_secrets_file": str(client_secrets)},
+        },
+    )
+    monkeypatch.setattr("src.config.load_dotenv", lambda: None)
+    monkeypatch.setattr(prompt_generator, "_load_openai_module", lambda: fake_openai)
+
+    product = Product(
+        sku="serum-x",
+        name="Serum X",
+        product_url="https://example.com/products/serum-x",
+    )
+    db.upsert_product(product)
+    db.insert_text_insight(
+        TextInsight(
+            id="text-insight-001",
+            product_sku=product.sku,
+            platform=None,
+            creative_format="ai_video_15s",
+            insight_text=text_insight,
+            source_post_count=4,
+        )
+    )
+
+    content, extras = prompt_generator.generate_content(
+        product=product,
+        theme="benefit_spotlight",
+        hook_type="question",
+        product_images=[],
+        cta_type="see_product",
+        proof_type="ingredient",
+        script_style="conversational",
+    )
+
+    assert len(captured_calls) == 1
+    assert "TEXT_LEVEL_INSIGHTS" in captured_calls[0]["input"]
+    assert text_insight in captured_calls[0]["input"]
+    assert "use these for text direction only, not image or render guidance" in captured_calls[0]["input"]
+    assert content.theme == "benefit_spotlight"
+    assert extras["hashtags"] == response_payload["hashtags"]
+    fetched = db.get_latest_text_insight(
+        product_sku=product.sku,
+        platform=None,
+        creative_format="ai_video_15s",
+    )
+    assert fetched is not None
+    assert fetched.id == "text-insight-001"
+    assert fetched.insight_text == text_insight
+    assert fetched.source_post_count == 4
+    assert fetched.product_sku == product.sku
+    assert fetched.platform is None
+    assert fetched.creative_format == "ai_video_15s"
+
+
 def test_generate_content_image_motion_15s_persists_image_plan(
     tmp_db: Path,
     monkeypatch,
@@ -743,7 +984,7 @@ def test_generate_content_image_motion_15s_persists_image_plan(
     captured_calls: list[dict[str, object]] = []
 
     image_plan_payload = {
-        "theme": "benefit",
+        "theme": "benefit_spotlight",
         "hook_type": "question",
         "hook_text": "Want fresher skin?",
         "creative_format": "image_motion_15s",
@@ -761,7 +1002,7 @@ def test_generate_content_image_motion_15s_persists_image_plan(
         "hashtags": ["skincare", "glow"],
         "image_plan": {
             "strategy_summary": "Hero-led sequence with texture detail",
-            "total_duration_seconds": 6.0,
+            "total_duration_seconds": 8.0,
             "performance_rationale": "default",
             "strategy_metadata": {
                 "content_goal": "engagement",
@@ -769,47 +1010,13 @@ def test_generate_content_image_motion_15s_persists_image_plan(
                 "audience_question_cluster": "Which ingredient actually matters?",
                 "audience_fear_cluster": None,
             },
-            "frames": [
-                {
-                    "role": "hero_macro",
-                    "narrative_role": "hook",
-                    "frame_intent": "Open with an intriguing hero detail that sparks curiosity.",
-                    "mood": "soft_curiosity",
-                    "duration_seconds": 2.0,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "golden_window_light",
-                    "camera_distance": "macro_closeup",
-                    "image_prompt": "Close-up of Serum X bottle with golden light.",
-                },
-                {
-                    "role": "hero_tabletop",
-                    "narrative_role": "proof",
-                    "frame_intent": "Show the premium counter setup as a believable proof point.",
-                    "mood": "calm_confidence",
-                    "duration_seconds": 2.0,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "soft_diffused_daylight",
-                    "camera_distance": "closeup",
-                    "image_prompt": "Serum X on bathroom counter.",
-                },
-                {
-                    "role": "texture_detail",
-                    "narrative_role": "cta",
-                    "frame_intent": "Close on texture payoff that makes the CTA feel earned.",
-                    "mood": "invitation",
-                    "duration_seconds": 2.0,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "clean_studio_backlight",
-                    "camera_distance": "macro_closeup",
-                    "image_prompt": "Texture detail of Serum X.",
-                },
-            ],
+            "frames": _standard_image_motion_frames(),
         },
     }
     voiceover_payload = {
         "voiceover_script": "Want fresher-looking skin? Serum X brings polished glow today. Try me.",
         "estimated_word_count": 9,
-        "timing_rationale": "The line stays concise enough for a calm premium read over a 6-second sequence.",
+        "timing_rationale": "The line stays concise enough for a calm premium read over an eight-second sequence.",
     }
 
     class FakeCompletions:
@@ -857,7 +1064,7 @@ def test_generate_content_image_motion_15s_persists_image_plan(
 
     content, extras = prompt_generator.generate_content(
         product=product,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="question",
         product_images=[],
         creative_format="image_motion_15s",
@@ -872,21 +1079,21 @@ def test_generate_content_image_motion_15s_persists_image_plan(
     plan = manifest["image_plan"]
     persisted = db.get_content(content.id)
     assert persisted is not None
-    assert len(plan["frames"]) == 3
-    assert plan["total_duration_seconds"] == 6.0
+    assert len(plan["frames"]) == 5
+    assert plan["total_duration_seconds"] == 8.0
     assert plan["frames"][0]["role"] == "hero_macro"
     assert plan["frames"][0]["narrative_role"] == "hook"
-    assert plan["frames"][1]["mood"] == "calm_confidence"
+    assert plan["frames"][2]["mood"] == "calm_confidence"
     assert plan["strategy_metadata"]["content_goal"] == "engagement"
     assert json.loads(content.strategy_metadata_json or "{}")["primary_engagement_intent"] == "save"
     assert json.loads(persisted.strategy_metadata_json or "{}")["primary_engagement_intent"] == "save"
     assert len(captured_calls) == 2
-    assert "Exact clip duration seconds: 6.0" in captured_calls[1]["messages"][1]["content"]
+    assert "Exact clip duration seconds: 8.0" in captured_calls[1]["messages"][1]["content"]
     assert "Frame 1:" in captured_calls[1]["messages"][1]["content"]
     assert "narrative_role: hook" in captured_calls[1]["messages"][1]["content"]
-    assert "frame_intent: Open with an intriguing hero detail that sparks curiosity." in captured_calls[1]["messages"][1]["content"]
+    assert "frame_intent: Open with a premium product hero that implies value." in captured_calls[1]["messages"][1]["content"]
     assert "Content goal: engagement" in captured_calls[1]["messages"][1]["content"]
-    assert "scene_description: Close-up of Serum X bottle with golden light." in captured_calls[1]["messages"][1]["content"]
+    assert "scene_description: Frame 1" in captured_calls[1]["messages"][1]["content"]
     assert "voice_prompt_input" in extras
     assert "voice_prompt_output" in extras
     # TTS voiceover plan must be persisted from the second LLM pass
@@ -914,7 +1121,7 @@ def test_generate_content_image_motion_voice_uses_marin(
     prompt_generator = importlib.import_module("src.prompt_generator")
 
     response_payload = {
-        "theme": "benefit",
+        "theme": "benefit_spotlight",
         "hook_type": "question",
         "hook_text": "Want fresher skin?",
         "creative_format": "image_motion_15s",
@@ -927,7 +1134,7 @@ def test_generate_content_image_motion_voice_uses_marin(
         "hashtags": ["skincare"],
         "image_plan": {
             "strategy_summary": "Hero-led sequence",
-            "total_duration_seconds": 6.0,
+            "total_duration_seconds": 8.0,
             "performance_rationale": "default",
             "strategy_metadata": {
                 "content_goal": "conversion",
@@ -935,47 +1142,13 @@ def test_generate_content_image_motion_voice_uses_marin(
                 "audience_question_cluster": None,
                 "audience_fear_cluster": None,
             },
-            "frames": [
-                {
-                    "role": "hero_macro",
-                    "narrative_role": "hook",
-                    "frame_intent": "Lead with a premium macro reveal.",
-                    "mood": "intrigue",
-                    "duration_seconds": 2.0,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "golden_window_light",
-                    "camera_distance": "macro_closeup",
-                    "image_prompt": "F1",
-                },
-                {
-                    "role": "hero_tabletop",
-                    "narrative_role": "proof",
-                    "frame_intent": "Show the bottle confidently in the routine context.",
-                    "mood": "calm_confidence",
-                    "duration_seconds": 2.0,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "soft_diffused_daylight",
-                    "camera_distance": "closeup",
-                    "image_prompt": "F2",
-                },
-                {
-                    "role": "texture_detail",
-                    "narrative_role": "cta",
-                    "frame_intent": "End on a clear product payoff and invitation.",
-                    "mood": "invitation",
-                    "duration_seconds": 2.0,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "clean_studio_backlight",
-                    "camera_distance": "medium_shot",
-                    "image_prompt": "F3",
-                },
-            ],
+            "frames": _standard_image_motion_frames(),
         },
     }
     voiceover_payload = {
         "voiceover_script": "Serum X keeps this quick sequence polished and easy to follow, then closes with a calm try me.",
         "estimated_word_count": 17,
-        "timing_rationale": "The script is short enough for a clean premium read over six seconds.",
+        "timing_rationale": "The script is short enough for a clean premium read over eight seconds.",
     }
 
     class FakeCompletions:
@@ -1006,11 +1179,11 @@ def test_generate_content_image_motion_voice_uses_marin(
     product = Product(sku="serum-x", name="Serum X", product_url="https://x.com/serum-x")
     db.upsert_product(product)
 
-    content1, _ = prompt_generator.generate_content(product=product, theme="benefit", hook_type="question", product_images=[], creative_format="image_motion_15s", proof_type="none")
+    content1, _ = prompt_generator.generate_content(product=product, theme="benefit_spotlight", hook_type="question", product_images=[], creative_format="image_motion_15s", proof_type="none")
     manifest1 = json.loads(content1.asset_manifest_json or "{}")
     voice1 = manifest1.get("voiceover_plan", {}).get("voice")
 
-    content2, _ = prompt_generator.generate_content(product=product, theme="benefit", hook_type="question", product_images=[], creative_format="image_motion_15s", proof_type="none")
+    content2, _ = prompt_generator.generate_content(product=product, theme="benefit_spotlight", hook_type="question", product_images=[], creative_format="image_motion_15s", proof_type="none")
     manifest2 = json.loads(content2.asset_manifest_json or "{}")
     voice2 = manifest2.get("voiceover_plan", {}).get("voice")
 
@@ -1029,7 +1202,7 @@ def test_image_motion_voiceover_budget_leaves_end_buffer() -> None:
     parsed = {
         "hook_text": "What makes this lipstick look this smooth?",
         "cta_text": "Shop now",
-        "theme": "benefit",
+        "theme": "benefit_spotlight",
         "hook_type": "question",
         "proof_type": "none",
         "script_style": "conversational",
@@ -1090,7 +1263,7 @@ def test_generate_content_image_motion_retries_voiceover_guardrail_failures(
     captured_calls: list[dict[str, object]] = []
 
     image_plan_payload = {
-        "theme": "benefit",
+        "theme": "benefit_spotlight",
         "hook_type": "question",
         "hook_text": "Want fresher skin?",
         "creative_format": "image_motion_15s",
@@ -1108,7 +1281,7 @@ def test_generate_content_image_motion_retries_voiceover_guardrail_failures(
         "hashtags": ["skincare", "glow"],
         "image_plan": {
             "strategy_summary": "Hero-led sequence with texture detail",
-            "total_duration_seconds": 6.0,
+            "total_duration_seconds": 8.0,
             "performance_rationale": "default",
             "strategy_metadata": {
                 "content_goal": "engagement",
@@ -1116,41 +1289,7 @@ def test_generate_content_image_motion_retries_voiceover_guardrail_failures(
                 "audience_question_cluster": "How does it fit into my routine?",
                 "audience_fear_cluster": None,
             },
-            "frames": [
-                {
-                    "role": "hero_macro",
-                    "narrative_role": "hook",
-                    "frame_intent": "Open with a curiosity-driving closeup.",
-                    "mood": "soft_curiosity",
-                    "duration_seconds": 2.0,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "golden_window_light",
-                    "camera_distance": "macro_closeup",
-                    "image_prompt": "Close-up of Serum X bottle with golden light.",
-                },
-                {
-                    "role": "hero_tabletop",
-                    "narrative_role": "proof",
-                    "frame_intent": "Ground the claim in a premium routine context.",
-                    "mood": "calm_confidence",
-                    "duration_seconds": 2.0,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "soft_diffused_daylight",
-                    "camera_distance": "closeup",
-                    "image_prompt": "Serum X on bathroom counter.",
-                },
-                {
-                    "role": "texture_detail",
-                    "narrative_role": "cta",
-                    "frame_intent": "End with a payoff texture detail that invites action.",
-                    "mood": "invitation",
-                    "duration_seconds": 2.0,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "clean_studio_backlight",
-                    "camera_distance": "macro_closeup",
-                    "image_prompt": "Texture detail of Serum X.",
-                },
-            ],
+            "frames": _standard_image_motion_frames(),
         },
     }
     voiceover_payloads = [
@@ -1167,7 +1306,7 @@ def test_generate_content_image_motion_retries_voiceover_guardrail_failures(
         {
             "voiceover_script": "Serum X brings polished glow, then closes with a calm try me.",
             "estimated_word_count": 11,
-            "timing_rationale": "The line stays concise enough for a calm premium read over a 6-second sequence.",
+            "timing_rationale": "The line stays concise enough for a calm premium read over an eight-second sequence.",
         },
     ]
 
@@ -1212,7 +1351,7 @@ def test_generate_content_image_motion_retries_voiceover_guardrail_failures(
 
     content, _ = prompt_generator.generate_content(
         product=product,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="question",
         product_images=[],
         creative_format="image_motion_15s",
@@ -1241,7 +1380,7 @@ def test_generate_content_image_motion_raises_after_third_voiceover_guardrail_fa
     captured_calls: list[dict[str, object]] = []
 
     image_plan_payload = {
-        "theme": "benefit",
+        "theme": "benefit_spotlight",
         "hook_type": "question",
         "hook_text": "Want fresher skin?",
         "creative_format": "image_motion_15s",
@@ -1259,7 +1398,7 @@ def test_generate_content_image_motion_raises_after_third_voiceover_guardrail_fa
         "hashtags": ["skincare", "glow"],
         "image_plan": {
             "strategy_summary": "Hero-led sequence with texture detail",
-            "total_duration_seconds": 6.0,
+            "total_duration_seconds": 8.0,
             "performance_rationale": "default",
             "strategy_metadata": {
                 "content_goal": "conversion",
@@ -1267,41 +1406,7 @@ def test_generate_content_image_motion_raises_after_third_voiceover_guardrail_fa
                 "audience_question_cluster": None,
                 "audience_fear_cluster": "Wasting money on hype",
             },
-            "frames": [
-                {
-                    "role": "hero_macro",
-                    "narrative_role": "hook",
-                    "frame_intent": "Open with a premium product hero that implies value.",
-                    "mood": "intrigue",
-                    "duration_seconds": 2.0,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "golden_window_light",
-                    "camera_distance": "macro_closeup",
-                    "image_prompt": "Close-up of Serum X bottle with golden light.",
-                },
-                {
-                    "role": "hero_tabletop",
-                    "narrative_role": "proof",
-                    "frame_intent": "Show the real counter setup as grounded proof.",
-                    "mood": "delight",
-                    "duration_seconds": 2.0,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "soft_diffused_daylight",
-                    "camera_distance": "closeup",
-                    "image_prompt": "Serum X on bathroom counter.",
-                },
-                {
-                    "role": "texture_detail",
-                    "narrative_role": "cta",
-                    "frame_intent": "End with a tactile payoff that invites the click.",
-                    "mood": "invitation",
-                    "duration_seconds": 2.0,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "clean_studio_backlight",
-                    "camera_distance": "macro_closeup",
-                    "image_prompt": "Texture detail of Serum X.",
-                },
-            ],
+            "frames": _standard_image_motion_frames(),
         },
     }
     invalid_voiceover_payload = {
@@ -1352,7 +1457,7 @@ def test_generate_content_image_motion_raises_after_third_voiceover_guardrail_fa
     with pytest.raises(ValueError, match="Voiceover script violated brand guardrails: instant"):
         prompt_generator.generate_content(
             product=product,
-            theme="benefit",
+            theme="benefit_spotlight",
             hook_type="question",
             product_images=[],
             creative_format="image_motion_15s",
@@ -1371,8 +1476,8 @@ def test_validate_and_normalize_image_motion_plan_requires_new_narrative_fields(
 
     data = {
         "image_plan": {
-            "strategy_summary": "Three-frame story",
-            "total_duration_seconds": 5.0,
+            "strategy_summary": "Five-frame story",
+            "total_duration_seconds": 8.0,
             "performance_rationale": "default",
             "strategy_metadata": {
                 "content_goal": "engagement",
@@ -1380,42 +1485,10 @@ def test_validate_and_normalize_image_motion_plan_requires_new_narrative_fields(
                 "audience_question_cluster": "Which ingredient actually matters?",
                 "audience_fear_cluster": None,
             },
-            "frames": [
-                {
-                    "role": "hero_macro",
-                    "narrative_role": "hook",
-                    "mood": "intrigue",
-                    "duration_seconds": 1.5,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "golden_window_light",
-                    "camera_distance": "macro_closeup",
-                    "image_prompt": "Frame 1",
-                },
-                {
-                    "role": "hero_tabletop",
-                    "narrative_role": "proof",
-                    "frame_intent": "Ground the frame in a premium routine context.",
-                    "mood": "calm_confidence",
-                    "duration_seconds": 1.5,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "soft_diffused_daylight",
-                    "camera_distance": "closeup",
-                    "image_prompt": "Frame 2",
-                },
-                {
-                    "role": "texture_detail",
-                    "narrative_role": "cta",
-                    "frame_intent": "Close with an inviting texture payoff.",
-                    "mood": "invitation",
-                    "duration_seconds": 2.0,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "clean_studio_backlight",
-                    "camera_distance": "medium_shot",
-                    "image_prompt": "Frame 3",
-                },
-            ],
+            "frames": _standard_image_motion_frames(),
         }
     }
+    data["image_plan"]["frames"][0].pop("frame_intent")
 
     with pytest.raises(ValueError, match="image_plan.frames\\[0\\]\\.frame_intent is required"):
         prompt_generator._validate_and_normalize_image_motion_plan(data)
@@ -1429,7 +1502,7 @@ def test_validate_and_normalize_image_motion_plan_rejects_lifestyle_without_mode
     data = {
         "image_plan": {
             "strategy_summary": "Lifestyle-driven sequence",
-            "total_duration_seconds": 5.0,
+            "total_duration_seconds": 8.0,
             "performance_rationale": "default",
             "strategy_metadata": {
                 "content_goal": "engagement",
@@ -1437,43 +1510,10 @@ def test_validate_and_normalize_image_motion_plan_rejects_lifestyle_without_mode
                 "audience_question_cluster": "How does it fit into my routine?",
                 "audience_fear_cluster": None,
             },
-            "frames": [
-                {
-                    "role": "hero_macro",
-                    "narrative_role": "hook",
-                    "frame_intent": "Open with a polished product hero.",
-                    "mood": "soft_curiosity",
-                    "duration_seconds": 1.5,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "golden_window_light",
-                    "camera_distance": "macro_closeup",
-                    "image_prompt": "Frame 1",
-                },
-                {
-                    "role": "lifestyle_in_use",
-                    "narrative_role": "proof",
-                    "frame_intent": "Show the product in use.",
-                    "mood": "delight",
-                    "duration_seconds": 1.5,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "soft_diffused_daylight",
-                    "camera_distance": "closeup",
-                    "image_prompt": "Frame 2",
-                },
-                {
-                    "role": "texture_detail",
-                    "narrative_role": "cta",
-                    "frame_intent": "End with a clean payoff and invitation.",
-                    "mood": "invitation",
-                    "duration_seconds": 2.0,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "clean_studio_backlight",
-                    "camera_distance": "medium_shot",
-                    "image_prompt": "Frame 3",
-                },
-            ],
+            "frames": _standard_image_motion_frames(),
         }
     }
+    data["image_plan"]["frames"][1]["role"] = "lifestyle_in_use"
 
     with pytest.raises(ValueError, match="requires model reference assets"):
         prompt_generator._validate_and_normalize_image_motion_plan(data)
@@ -1487,7 +1527,7 @@ def test_validate_and_normalize_image_motion_plan_rejects_repeated_visual_signat
     data = {
         "image_plan": {
             "strategy_summary": "Repeated-look sequence",
-            "total_duration_seconds": 5.0,
+            "total_duration_seconds": 8.0,
             "performance_rationale": "default",
             "strategy_metadata": {
                 "content_goal": "conversion",
@@ -1495,43 +1535,12 @@ def test_validate_and_normalize_image_motion_plan_rejects_repeated_visual_signat
                 "audience_question_cluster": None,
                 "audience_fear_cluster": "Wasting money on hype",
             },
-            "frames": [
-                {
-                    "role": "hero_macro",
-                    "narrative_role": "hook",
-                    "frame_intent": "Open with a clear hero angle.",
-                    "mood": "intrigue",
-                    "duration_seconds": 1.5,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "golden_window_light",
-                    "camera_distance": "macro_closeup",
-                    "image_prompt": "Frame 1",
-                },
-                {
-                    "role": "hero_tabletop",
-                    "narrative_role": "proof",
-                    "frame_intent": "Support the hook with a second angle.",
-                    "mood": "delight",
-                    "duration_seconds": 1.5,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "golden_window_light",
-                    "camera_distance": "macro_closeup",
-                    "image_prompt": "Frame 2",
-                },
-                {
-                    "role": "texture_detail",
-                    "narrative_role": "cta",
-                    "frame_intent": "Finish with a tactile product invitation.",
-                    "mood": "invitation",
-                    "duration_seconds": 2.0,
-                    "style_family": "realistic_cinematic",
-                    "lighting": "clean_studio_backlight",
-                    "camera_distance": "medium_shot",
-                    "image_prompt": "Frame 3",
-                },
-            ],
+            "frames": _standard_image_motion_frames(),
         }
     }
+
+    data["image_plan"]["frames"][1]["lighting"] = data["image_plan"]["frames"][0]["lighting"]
+    data["image_plan"]["frames"][1]["camera_distance"] = data["image_plan"]["frames"][0]["camera_distance"]
 
     with pytest.raises(ValueError, match="Consecutive image_motion_15s frames must vary"):
         prompt_generator._validate_and_normalize_image_motion_plan(data)
@@ -1547,7 +1556,7 @@ def test_generate_content_ai_video_flex_15s_persists_video_plan(
     prompt_generator = importlib.import_module("src.prompt_generator")
 
     response_payload = {
-        "theme": "benefit",
+        "theme": "benefit_spotlight",
         "hook_type": "question",
         "hook_text": "Want fresher skin?",
         "creative_format": "ai_video_flex_15s",
@@ -1621,7 +1630,7 @@ def test_generate_content_ai_video_flex_15s_persists_video_plan(
 
     content, _ = prompt_generator.generate_content(
         product=product,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="question",
         product_images=[],
         creative_format="ai_video_flex_15s",
@@ -1651,7 +1660,7 @@ def test_generate_content_ai_video_flex_rejects_invalid_video_plan(
     prompt_generator = importlib.import_module("src.prompt_generator")
 
     base_payload = {
-        "theme": "benefit",
+        "theme": "benefit_spotlight",
         "hook_type": "question",
         "hook_text": "Want fresher skin?",
         "creative_format": "ai_video_flex_15s",
@@ -1703,7 +1712,7 @@ def test_generate_content_ai_video_flex_rejects_invalid_video_plan(
     }}
     monkeypatch.setattr(prompt_generator, "_load_openai_module", lambda: make_fake(payload))
     with pytest.raises(ValueError, match="3–7 entries"):
-        prompt_generator.generate_content(product=product, theme="benefit", hook_type="question", product_images=[], creative_format="ai_video_flex_15s", proof_type="ingredient")
+        prompt_generator.generate_content(product=product, theme="benefit_spotlight", hook_type="question", product_images=[], creative_format="ai_video_flex_15s", proof_type="ingredient")
 
     # Scene duration 4.0 out of range (1.5–3.0): clamped and total normalized
     payload = {**base_payload, "video_plan": {
@@ -1719,7 +1728,7 @@ def test_generate_content_ai_video_flex_rejects_invalid_video_plan(
     }}
     monkeypatch.setattr(prompt_generator, "_load_openai_module", lambda: make_fake(payload))
     content, _ = prompt_generator.generate_content(
-        product=product, theme="benefit", hook_type="question", product_images=[], creative_format="ai_video_flex_15s", proof_type="ingredient"
+        product=product, theme="benefit_spotlight", hook_type="question", product_images=[], creative_format="ai_video_flex_15s", proof_type="ingredient"
     )
     manifest = json.loads(content.asset_manifest_json)
     plan = manifest["video_plan"]
@@ -1747,7 +1756,7 @@ def test_build_user_message_video_v2_preserves_branding_from_hero_references() -
 
     message = prompt_generator._build_user_message(
         product=product,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="visual_surprise",
         product_images=product_images,
         creative_format="ai_video_flex_15s",
@@ -1766,7 +1775,7 @@ def test_build_user_message_includes_all_locked_constraints() -> None:
     product = Product(sku="test", name="Test Product")
     message = prompt_generator._build_user_message(
         product=product,
-        theme="curiosity",
+        theme="mechanism_reveal",
         hook_type="question",
         product_images=[],
         cta_type="shop_now",
@@ -1775,7 +1784,7 @@ def test_build_user_message_includes_all_locked_constraints() -> None:
     )
 
     assert "Locked creative constraints:" in message
-    assert "Theme must be: curiosity" in message
+    assert "Theme must be: mechanism_reveal" in message
     assert "Hook type must be: question" in message
     assert "CTA type must be: shop_now" in message
     assert "Proof type must be: ingredient" in message
@@ -1788,7 +1797,7 @@ def test_validate_response_shape_rejects_mismatched_locked_cta_proof_script() ->
     prompt_generator = importlib.import_module("src.prompt_generator")
 
     data = {
-        "theme": "benefit",
+        "theme": "benefit_spotlight",
         "hook_type": "question",
         "hook_text": "Want fresher skin?",
         "platform_captions": {"youtube": "X", "instagram": "X", "tiktok": "X", "x": "X"},
@@ -1798,7 +1807,7 @@ def test_validate_response_shape_rejects_mismatched_locked_cta_proof_script() ->
     with pytest.raises(ValueError, match="cta_type.*did not match locked"):
         prompt_generator._validate_response_shape(
             {**data, "cta_type": "shop_now"},
-            theme="benefit",
+            theme="benefit_spotlight",
             hook_type="question",
             cta_type="see_product",
         )
@@ -1806,7 +1815,7 @@ def test_validate_response_shape_rejects_mismatched_locked_cta_proof_script() ->
     with pytest.raises(ValueError, match="proof_type.*did not match locked"):
         prompt_generator._validate_response_shape(
             {**data, "cta_type": "see_product", "proof_type": "testimonial"},
-            theme="benefit",
+            theme="benefit_spotlight",
             hook_type="question",
             proof_type="ingredient",
         )
@@ -1814,7 +1823,7 @@ def test_validate_response_shape_rejects_mismatched_locked_cta_proof_script() ->
     with pytest.raises(ValueError, match="script_style.*did not match locked"):
         prompt_generator._validate_response_shape(
             {**data, "cta_type": "see_product", "proof_type": "ingredient", "script_style": "storytelling"},
-            theme="benefit",
+            theme="benefit_spotlight",
             hook_type="question",
             cta_type="see_product",
             proof_type="ingredient",
@@ -1833,7 +1842,7 @@ def test_validate_and_normalize_v2_timeline_valid_four_scenes() -> None:
     prompt_generator = importlib.import_module("src.prompt_generator")
 
     data = {
-        "theme": "benefit",
+        "theme": "benefit_spotlight",
         "hook_type": "question",
         "timeline": [
             {"start_seconds": 0, "end_seconds": 3, "scene_description": "Hook closeup.", "script": "First line."},

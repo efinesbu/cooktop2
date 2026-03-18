@@ -47,6 +47,7 @@ python cli.py sync-products
           Approve: python cli.py approve --content-id <id>
           Schedule: python cli.py schedule --today
           Publish due posts: python cli.py post-due
+          Periodic learning: python cli.py review-text --min-posts 5
 8:00 PM   pull-analytics (cron)
 ```
 
@@ -72,13 +73,13 @@ python cli.py register-images --product eye-cream
 
 ```bash
 # AI video (4 clips: 2 products × 2 theme/hook pairs)
-python cli.py run --product moisturizer --product eye-cream --theme problem_solution --theme benefit --hook relatable_pain --hook bold_claim --rotate-theme-hook --count 2 --format ai_video_15s
+python cli.py run --product moisturizer --product eye-cream --theme problem_solution --theme hidden_knowledge --hook relatable_pain --hook question --rotate-theme-hook --count 2 --format ai_video_15s
 
 # AI video flex (experimental: 3–7 scenes, 6–15s, flexible style)
-python cli.py run --product moisturizer --product eye-cream --theme problem_solution --theme benefit --hook relatable_pain --hook bold_claim --rotate-theme-hook --count 2 --format ai_video_flex_15s
+python cli.py run --product moisturizer --product eye-cream --theme problem_solution --theme hidden_knowledge --hook relatable_pain --hook question --rotate-theme-hook --count 2 --format ai_video_flex_15s
 
 # Image motion (4 clips)
-python cli.py run --product moisturizer --product eye-cream --theme problem_solution --theme benefit --hook relatable_pain --hook bold_claim --rotate-theme-hook --count 2 --format image_motion_15s
+python cli.py run --product moisturizer --product eye-cream --theme problem_solution --theme hidden_knowledge --hook relatable_pain --hook question --rotate-theme-hook --count 2 --format image_motion_15s
 ```
 
 **Result:** 8 creatives total (4 per product). Then: `preview --today` → `approve` → `schedule --today` → `post-due` or `post --today`.
@@ -93,7 +94,7 @@ python cli.py run --product moisturizer --product eye-cream --count 4 --format a
 python cli.py run --product moisturizer --product eye-cream --count 4 --format image_motion_15s
 ```
 
-This yields 8 creatives with bandit-recommended strategies (may include `curiosity`, `visual_surprise`, etc.).
+This yields 8 creatives with bandit-recommended strategies from the current theme taxonomy (for example `hidden_knowledge`, `identity_tribe`, or `stakes_cost_of_inaction`) and the current hook whitelist.
 
 ## CLI Commands
 
@@ -120,6 +121,7 @@ This yields 8 creatives with bandit-recommended strategies (may include `curiosi
 | `post --today` | Immediately post approved content from the last 24 hours; repeated posts on the same platform wait 5 minutes by default |
 | `post --content-id ID` | Manually post a specific content piece; add `--delay-XXX` to change the same-platform wait or `--nodelay` to post everything immediately |
 | `pull-analytics` | Pull metrics from all platforms |
+| `review-text [--product SLUG] [--platform PLATFORM] [--format FORMAT] [--min-posts N] [--lookback-days N]` | Analyze recent post performance and store one reusable text insight for future prompt injection |
 | `commerce-ingest PATH` | Ingest commerce facts (sessions, purchases, revenue) from CSV for revenue-aware ranking |
 | `paid-seed-clone --content-id ID [--variants N]` | Clone an organic winner into 3–5 ad-safe variants for paid promotion |
 | `report-product --product SLUG` | Product performance report, including total tracked spend |
@@ -161,15 +163,21 @@ Velura now treats `theme` and `hook_type` as real creative strategy labels inste
 
 Current curated whitelist:
 
-- Themes: `benefit`, `problem_solution`, `curiosity`, `social_proof`, `routine`, `urgency`, `fear`
+- Themes: `problem_solution`, `benefit_spotlight`, `stakes_cost_of_inaction`, `hidden_knowledge`, `identity_tribe`, `mechanism_reveal`, `mythbust`, `contrast_versus`
 - Hook types: `question`, `bold_claim`, `relatable_pain`, `visual_surprise`, `quick_tip`
 
 Starter shared bandit arms:
 
+- `stakes_cost_of_inaction__relatable_pain`
 - `problem_solution__relatable_pain`
-- `benefit__bold_claim`
-- `curiosity__question`
-- `benefit__visual_surprise`
+- `hidden_knowledge__question`
+- `identity_tribe__bold_claim`
+
+Prompt reuse and feedback:
+
+- `research-add` stores scoped `RESEARCH INSIGHT` text for future generations.
+- `review-text` analyzes recent posts with metrics and stores one scoped `TEXT_LEVEL_INSIGHTS` paragraph focused on hook wording, framing, proof language, and CTA phrasing.
+- When a matching research snapshot or text insight exists, generation automatically injects it into the prompt for `ai_video_15s`, `ai_video_flex_15s`, `video-v2`, and `image_motion_15s`.
 
 ### Commerce and Revenue-Aware Ranking
 
@@ -245,6 +253,7 @@ Copy `config.example.yaml` to `config.yaml` and fill in:
 - **Instagram sync** — optional `instagram_sync.spreadsheet_id`, `instagram_sync.worksheet_name`, and `instagram_sync.credentials_file` if you want `pull-analytics` to read a Google Sheet exported from Make and replace temporary `make:...` handoff ids with real Instagram media ids before analytics pulls run
 - **TikTok** — `tiktok.client_key`, `tiktok.client_secret`, `tiktok.access_token`, and `tiktok.refresh_token` for posting; Content Posting API approval is required. Analytics only need the client key + secret. The separate review demo uses `tiktok-sandbox.*` settings.
 - **Bandit** — optional shared-bandit controls for `bandit.daily_slots`, `bandit.min_top_k`, `bandit.allocation_ceiling`, `bandit.expand_after_creatives`, and `bandit.starter_arms`; used by `run --auto` and `run --product SLUG` (when no `--theme`/`--hook` is given)
+- **Text review** — optional `text_review.min_posts` and `text_review.lookback_days` defaults for `review-text`, which creates reusable `TEXT_LEVEL_INSIGHTS` from recent post performance
 - **X** — API key/secret + access token/secret (Basic tier for posting)
 - **Make bridge** — optional `make_bridge.webhook_url` plus `make_bridge.r2.account_id`, `make_bridge.r2.access_key_id`, `make_bridge.r2.secret_access_key`, and `make_bridge.r2.bucket_name` if you want to upload finished `.mp4` files to Cloudflare R2 and forward a presigned URL to Make.com
 - **GCS** — Bucket name + service account credentials (optional, for archival)

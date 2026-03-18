@@ -111,6 +111,10 @@ posting:
     youtube: 360
     x: 480
 
+text_review:
+  min_posts: 5
+  lookback_days: 30
+
 data_root: "~/.velura"
 
 # image_motion_15s: reference folders for Gemini-generated frames
@@ -134,7 +138,7 @@ bandit:
   # engagement_rate (default), views, composite, revenue, sessions, purchases
   ranking_objective: engagement_rate
   starter_arms:
-    - "fear__relatable_pain"
+    - "stakes_cost_of_inaction__relatable_pain"
     - "problem_solution__relatable_pain"
-    - "curiosity__question"
-    - "social_proof__bold_claim"
+    - "hidden_knowledge__question"
+    - "identity_tribe__bold_claim"

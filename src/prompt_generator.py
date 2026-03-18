@@ -21,7 +21,7 @@ from src.utm import build_attribution_data
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """\
-You are an expert creative director and AI video prompt engineer specializing in cosmetic advertising.
+You are an expert creative director and AI video prompt engineer specializing in premium product advertising.
 
 TARGET PRODUCT: provided in the user message.
 
@@ -29,7 +29,7 @@ PRODUCT TRUTH: Base all product claims, benefits, and ingredient references ONLY
 
 CORE DIRECTIVE
 Generate exactly 1 unique creative variation for the target product. Output an image generation prompt and a 30-word video script featuring an anthropomorphic version of this product speaking in the first person.
-- The single variation may be fear-based or positive, but it must stay FTC-compliant and visually simple.
+- The single variation may lean into tension, contrast, or aspiration, but it must stay FTC-compliant and visually simple.
 - Use the theme, hook_type, cta_type, proof_type, and script_style from the locked constraints in the user message. Echo them exactly in your response.
 - Use these values as real creative direction, not as bookkeeping metadata.
 - Return a concise `hook_text` that captures the opening hook in natural spoken language.
@@ -56,7 +56,7 @@ RESPOND WITH ONLY valid JSON matching this exact schema — no markdown fences, 
   "creative_format": "string — must be 'ai_video_15s' for this generation",
   "cta_type": "string — must match the locked cta_type in the user message",
   "cta_text": "string — the exact CTA phrase used in scene_2_script (e.g. 'try me today', 'shop now')",
-  "problem_angle": "string — one-line description of the problem/angle if theme is problem_solution, else null",
+  "problem_angle": "string or null — one-line summary of the core tension, pain point, or opportunity shaping this creative",
   "proof_type": "string — must match the locked proof_type in the user message",
   "script_style": "string — must match the locked script_style in the user message",
   "starting_image_prompt": "string — must describe a cinematic 3D closeup of an anthropomorphic target product standing on a luxury bathroom counter. Include a high-quality Pixar-style face with large expressive eyes and an articulated mouth, soft focus luxury bathroom background, volumetric lighting, octane render, unreal engine 5, 4k, and the brand 'velura' in brown writing using font style Cormorant Garamond, Georgia, Times New Roman, serif. Add 1-2 sentences of variation-specific visual detail.",
@@ -86,7 +86,7 @@ RULES:
 """
 
 _SIMPLIFIED_SYSTEM_PROMPT = """\
-You are an expert creative director for cosmetic advertising.
+You are an expert creative director for premium product advertising.
 
 TARGET PRODUCT: provided in the user message.
 
@@ -108,7 +108,7 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
   "creative_format": "string — must match the locked format in user message",
   "cta_type": "string — must match locked cta_type in user message",
   "cta_text": "string — CTA phrase (e.g. 'try me today', 'shop now')",
-  "problem_angle": "string or null",
+  "problem_angle": "string or null — one-line summary of the core tension, pain point, or opportunity shaping this creative",
   "proof_type": "string — must match locked proof_type in user message",
   "script_style": "string — must match locked script_style in user message",
   "platform_captions": {
@@ -121,28 +121,8 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
 }
 """
 
-_AUDIENCE_QUESTIONS = [
-    "Does it work for my skin type?",
-    "How fast will I see results?",
-    "Will it irritate sensitive skin?",
-    "Which ingredient actually matters?",
-    "How does it fit into my routine?",
-    "Is it worth the price? (yes)",
-    "Will it help with dark spots, acne, dryness, or texture?",
-]
-_AUDIENCE_FEARS = [
-    "Breakouts or purging",
-    "Irritation or barrier damage",
-    "Wasting money on hype",
-    "Fake before-and-afters",
-    "Buying the wrong product for the skin concern",
-    "Overcomplicated routines",
-    "Results that do not last",
-    "Actives being too harsh for daily use",
-]
-
 _IMAGE_MOTION_SYSTEM_PROMPT = """\
-You are an expert creative director for cosmetic image-motion ads.
+You are an expert creative director for premium product image-motion ads.
 
 TARGET PRODUCT: provided in the user message.
 
@@ -165,12 +145,6 @@ VISUAL DIRECTORY
 NARRATIVE DIRECTORY
 - narrative_role: hook, problem, proof, cta
 - mood: intrigue, concern, delight, invitation, calm_confidence, soft_curiosity
-
-AUDIENCE INSIGHT - when theme is fear:
-Choose ONE realistic fear from this list and frame it gently and compliantly: """ + "; ".join(_AUDIENCE_FEARS) + """.
-
-AUDIENCE INSIGHT - when theme is curiosity:
-Choose ONE question from this list and build the open loop around it: """ + "; ".join(_AUDIENCE_QUESTIONS) + """.
 
 CONTROLLED VARIETY (use this vocabulary; vary at most 1-2 axes per creative):
 - style_family: anamorphic, realistic_cinematic
@@ -201,7 +175,7 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
   "creative_format": "image_motion_15s",
   "cta_type": "string — must match locked cta_type in user message",
   "cta_text": "string — CTA phrase",
-  "problem_angle": "string or null",
+  "problem_angle": "string or null — one-line summary of the core tension, pain point, or opportunity shaping this creative",
   "proof_type": "string — must match locked proof_type in user message",
   "script_style": "string — must match locked script_style in user message",
   "platform_captions": {
@@ -218,8 +192,8 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
     "strategy_metadata": {
       "content_goal": "string — conversion | engagement",
       "primary_engagement_intent": "string — follow | save | share | comment | click",
-      "audience_question_cluster": "string or null — if theme is curiosity, which question cluster",
-      "audience_fear_cluster": "string or null — if theme is fear, which fear cluster"
+      "audience_question_cluster": "string or null — optional audience question or open-loop angle when useful",
+      "audience_fear_cluster": "string or null — optional audience concern, objection, or risk angle when useful"
     },
     "frames": [
       {
@@ -240,7 +214,7 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
 
 # TTS voiceover: bounded script templates and brand guardrails for image_motion_15s
 TTS_VOICE_INSTRUCTIONS = (
-    "Speak in a calm, premium, reassuring tone for a luxury skincare brand. "
+    "Speak in a calm, premium, reassuring tone for a premium consumer brand. "
     "Sound polished, warm, and confident. Keep the pace slightly unhurried and never overly salesy or bubbly."
 )
 TTS_VOICES = ("marin",)
@@ -453,7 +427,7 @@ def _build_voiceover_plan(
 
 
 _IMAGE_MOTION_VOICEOVER_SYSTEM_PROMPT = """\
-You are an expert short-form ad scriptwriter for premium cosmetic image-motion ads.
+You are an expert short-form ad scriptwriter for premium product image-motion ads.
 Your scripts will be read aloud by a single voice actor. Every word must earn its place.
 
 TASK
@@ -489,8 +463,8 @@ CONTENT GOAL — the user message specifies "conversion" or "engagement":
 - engagement: favor curiosity and emotional resonance over direct selling. The CTA can be softer — "follow for more", "save this", "you'll want to see this again". The proof beat can lean into sensory or aspirational language.
 
 AUDIENCE INSIGHT — when provided:
-- If an audience_fear_cluster is present, gently acknowledge the underlying concern in the problem beat. Do not name the fear explicitly — hint at it, then pivot to reassurance.
-- If an audience_question_cluster is present, echo the viewer's curiosity in the hook or problem beat. Leave the answer for the proof beat.
+- If an audience_fear_cluster is present, treat it as an audience concern, objection, or consequence to acknowledge gently in the problem beat. Do not use alarmist language; hint at the tension, then pivot to reassurance.
+- If an audience_question_cluster is present, use it as an optional open-loop or framing cue in the hook or problem beat. Let the proof beat deliver the answer or payoff.
 
 CONTENT RULES
 - Reflect the actual frame order, visual details, and strategy summary from the provided image plan.
@@ -545,9 +519,9 @@ def _build_image_motion_voiceover_user_message(
         f"Strategy summary: {(plan.get('strategy_summary') or '').strip()}",
         f"Content goal: {((plan.get('strategy_metadata') or {}).get('content_goal') or '').strip() or 'conversion'}",
         f"Primary engagement intent: {((plan.get('strategy_metadata') or {}).get('primary_engagement_intent') or '').strip() or 'click'}",
-        "Audience question cluster: "
+        "Audience question angle: "
         f"{(((plan.get('strategy_metadata') or {}).get('audience_question_cluster')) or '').strip() or 'none'}",
-        "Audience fear cluster: "
+        "Audience concern angle: "
         f"{(((plan.get('strategy_metadata') or {}).get('audience_fear_cluster')) or '').strip() or 'none'}",
         "",
         f"Exact clip duration seconds: {total_duration_seconds:.1f}",
@@ -695,7 +669,7 @@ def _generate_image_motion_voiceover_plan(
 
 
 _AI_VIDEO_FLEX_SYSTEM_PROMPT = """\
-You are an expert creative director and AI video prompt engineer specializing in cosmetic advertising.
+You are an expert creative director and AI video prompt engineer specializing in premium product advertising.
 
 TARGET PRODUCT: provided in the user message.
 
@@ -730,7 +704,7 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
   "creative_format": "ai_video_flex_15s",
   "cta_type": "string — must match locked cta_type in user message",
   "cta_text": "string — CTA phrase",
-  "problem_angle": "string or null",
+  "problem_angle": "string or null — one-line summary of the core tension, pain point, or opportunity shaping this creative",
   "proof_type": "string — must match locked proof_type in user message",
   "script_style": "string — must match locked script_style in user message",
   "starting_image_prompt": "string — flexible starting frame for the video; when anamorphic, use luxury bathroom + anthropomorphic product per style reference above",
@@ -758,7 +732,7 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
 }
 """
 
-# Video V2: Audience research clusters for fear and curiosity style buckets
+# Video V2: Audience research style buckets
 STYLE_BUCKETS = [
     "fear_non_user",
     "aspirational_luxury",
@@ -767,7 +741,7 @@ STYLE_BUCKETS = [
 ]
 
 _AI_VIDEO_V2_SYSTEM_PROMPT = """\
-You are an expert creative director and AI video prompt engineer for premium beauty and skincare content. Your output powers both conversion-oriented ads and highly engaging organic content that builds followers and saves.
+You are an expert creative director and AI video prompt engineer for premium product content. Your output powers both conversion-oriented ads and highly engaging organic content that builds followers and saves.
 
 TARGET PRODUCT: provided in the user message.
 
@@ -775,7 +749,7 @@ PRODUCT TRUTH: Base all product claims, benefits, and ingredient references ONLY
 
 VISUAL DIRECTORY (apply to scene descriptions when style_family matches):
 - anamorphic: Cinematic 3D closeup of anthropomorphic product on luxury bathroom counter. Pixar-style face, large expressive eyes, articulated mouth, soft focus background, volumetric lighting, octane render, unreal engine 5, 4k, brand "velura" in brown serif (Cormorant Garamond, Georgia, Times New Roman).
-- realistic_cinematic: Natural proportions, realistic hands and skin, soft diffusion, premium product hero shot.
+- realistic_cinematic: Natural proportions, realistic hands and materials, soft diffusion, premium product hero shot.
 
 STYLE_FAMILY DEFAULT:
 - Prefer style_family "anamorphic" unless RESEARCH INSIGHT in the user message explicitly requests "realistic_cinematic". Anamorphic is the default for premium product-led video.
@@ -787,12 +761,6 @@ ANAMORPHIC SCENE RULES (apply to ALL scenes when style_family is "anamorphic"):
 - The luxury bathroom counter is the consistent environment. Do not switch to vanities, studios, or abstract backgrounds.
 - The product speaks in first person in every voiceover script.
 - When anamorphic, starting_image_prompt MUST use the full spec: cinematic 3D closeup, anthropomorphic product, luxury bathroom counter, Pixar-style face, volumetric lighting, octane render, unreal engine 5, 4k, brand "velura" in brown serif.
-
-AUDIENCE INSIGHT — when theme is fear:
-Choose ONE realistic fear from this list and frame it gently and compliantly: """ + "; ".join(_AUDIENCE_FEARS) + """.
-
-AUDIENCE INSIGHT — when theme is curiosity:
-Choose ONE question from this list and build the open loop around it: """ + "; ".join(_AUDIENCE_QUESTIONS) + """.
 
 CORE DIRECTIVE
 Generate exactly 1 unique creative for a 15-second video. Output MUST use a timeline with exactly 4 scenes and absolute timestamps. Total duration is LOCKED at 15 seconds.
@@ -821,12 +789,12 @@ SCENE ROLE DEFINITIONS (each scene MUST serve its assigned role in BOTH visual d
 SCRIPT VARIETY (mandatory):
 - Each scene's voiceover must advance the narrative to a NEW idea. The four scripts must read as a mini-story with a beginning, middle, and end — not four versions of the same tagline.
 - No two scenes may express the same concept. Do not use synonyms of the same idea (e.g., "rebuying," "keep reaching for," "favorite," "repeat-purchase") across multiple scenes.
-- If the theme is social_proof, distribute the proof: Scene 1 can claim popularity, but Scene 2 must pivot to a problem or contrast, Scene 3 must give a specific reason, and Scene 4 must invite action with fresh language.
+- If the locked angle leans heavily on credibility, validation, or proof, distribute that evidence across the sequence: Scene 1 can signal the claim, but Scene 2 should pivot to a problem or contrast, Scene 3 should give a specific reason, and Scene 4 should invite action with fresh language.
 
 VISUAL-SCRIPT COUPLING (mandatory):
 - Each scene_description must include at least one specific visual detail that directly illustrates or emotionally reinforces the voiceover line for that scene.
 - The product's facial expression MUST match the emotional register of the script line (e.g., conspiratorial for revealing a secret, warm pride for a proof point, beckoning for a CTA).
-- Do not write generic beauty-shot descriptions disconnected from the script content. Every visual choice should serve the story beat.
+- Do not write generic product-shot descriptions disconnected from the script content. Every visual choice should serve the story beat.
 
 EXPRESSION ARC (mandatory for anamorphic):
 - The product's facial expression must follow a distinct emotional progression across the 4 scenes.
@@ -846,7 +814,7 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
   "creative_format": "ai_video_flex_15s",
   "cta_type": "string — must match locked cta_type in user message",
   "cta_text": "string — CTA phrase",
-  "problem_angle": "string or null",
+  "problem_angle": "string or null — one-line summary of the core tension, pain point, or opportunity shaping this creative",
   "proof_type": "string — must match locked proof_type in user message",
   "script_style": "string — must match locked script_style in user message",
   "starting_image_prompt": "string — first frame; preserve visible packaging branding/wordmark and label layout from hero reference images when provided; when style_family is anamorphic, MUST use full anamorphic spec per ANAMORPHIC SCENE RULES (cinematic 3D closeup, anthropomorphic product, luxury bathroom counter, Pixar-style face, volumetric lighting, octane render, unreal engine 5, 4k, brand velura in brown serif)",
@@ -862,8 +830,8 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
     "style_angle": "string — one-line summary of the execution",
     "content_goal": "conversion or engagement",
     "primary_engagement_intent": "follow | save | share | comment | click",
-    "audience_question_cluster": "string or null — if theme is curiosity, which question",
-    "audience_fear_cluster": "string or null — if theme is fear, which fear",
+    "audience_question_cluster": "string or null — optional audience question or open-loop angle when useful",
+    "audience_fear_cluster": "string or null — optional audience concern, objection, or risk angle when useful",
     "scene_roles": ["hook", "problem", "proof", "cta"]
   },
   "timeline": [
@@ -889,6 +857,7 @@ def _build_user_message(
     hook_type: str,
     product_images: list[ProductImage],
     research_summary: str | None = None,
+    text_insights: str | None = None,
     creative_format: str | None = None,
     performance_summary: str | None = None,
     video_v2: bool = False,
@@ -929,6 +898,13 @@ def _build_user_message(
         lines.append("")
         lines.append("RESEARCH INSIGHT (use to inform your creative choices):")
         lines.append(research_summary.strip())
+    if text_insights and text_insights.strip():
+        lines.append("")
+        lines.append(
+            "TEXT_LEVEL_INSIGHTS (reusable learnings for hooks, framing, proof, and CTA; "
+            "use these for text direction only, not image or render guidance):"
+        )
+        lines.append(text_insights.strip())
     if performance_summary and performance_summary.strip():
         lines.append("")
         lines.append("PERFORMANCE_SUMMARY (bias your image_plan toward these):")
@@ -989,6 +965,12 @@ def generate_content(
         creative_format=fmt,
     )
     research_summary = snapshot.summary if snapshot else None
+    latest_text_insight = db.get_latest_text_insight(
+        product_sku=product.sku,
+        platform=None,
+        creative_format=fmt,
+    )
+    text_insights = latest_text_insight.insight_text if latest_text_insight else None
     performance_summary = None
     performance_rationale = "default"
     if fmt == "image_motion_15s":
@@ -1001,6 +983,7 @@ def generate_content(
     user_msg = _build_user_message(
         product, theme, hook_type, product_images,
         research_summary=research_summary,
+        text_insights=text_insights,
         creative_format=fmt,
         performance_summary=performance_summary,
         video_v2=video_v2,
@@ -1719,7 +1702,7 @@ def _usage_token_counts(response: Any) -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 
 _PAID_VARIANT_SYSTEM_PROMPT = """\
-You are an expert creative director for cosmetic ad copy.
+You are an expert creative director for premium product ad copy.
 
 TASK: Generate N ad-safe caption variants for a proven organic winner. Each variant must:
 - Preserve the core concept and product message

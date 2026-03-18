@@ -15,6 +15,12 @@ def test_recommend_initializes_missing_arms(tmp_db: Path) -> None:
 
     assert sum(item.count for item in rec.allocations) == 2
     assert len(db.list_bandit_arms()) == len(bandit.starter_arm_keys())
+    assert bandit.starter_arm_keys() == [
+        "stakes_cost_of_inaction__relatable_pain",
+        "problem_solution__relatable_pain",
+        "hidden_knowledge__question",
+        "identity_tribe__bold_claim",
+    ]
 
 
 def test_increment_bandit_records_first_observation(tmp_db: Path) -> None:

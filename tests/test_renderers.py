@@ -64,7 +64,7 @@ def test_render_media_raises_for_unknown_format(
     content = Content(
         id="test-001",
         product_sku=sample_product.sku,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="bold_claim",
         creative_format="unknown_format",
     )
@@ -90,7 +90,7 @@ def test_render_media_ai_video_invokes_image_and_video_generators(
     content = Content(
         id="test-002",
         product_sku=sample_product.sku,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="bold_claim",
         creative_format="ai_video_15s",
         starting_image_prompt="A product on a counter",
@@ -175,7 +175,7 @@ def test_render_media_ai_video_flex_uses_manifest_plan(
     content = Content(
         id="test-flex-001",
         product_sku=sample_product.sku,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="bold_claim",
         creative_format="ai_video_flex_15s",
         starting_image_prompt="A product on a counter",
@@ -285,7 +285,7 @@ def test_render_media_image_motion_uses_plan_when_present(
     content = Content(
         id="test-im-001",
         product_sku=sample_product.sku,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="bold_claim",
         creative_format="image_motion_15s",
         asset_manifest_json=json.dumps({"format": "image_motion_15s", "image_plan": plan}),
@@ -415,7 +415,7 @@ def test_render_media_image_motion_with_voiceover_generates_tts_and_muxes(
     content = Content(
         id="test-im-tts",
         product_sku=sample_product.sku,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="bold_claim",
         creative_format="image_motion_15s",
         asset_manifest_json=json.dumps({

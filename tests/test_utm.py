@@ -10,7 +10,7 @@ def test_build_utm_url() -> None:
     content = Content(
         id="c-001",
         product_sku="widget-pro",
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="bold_claim",
     )
     url = utm.build_utm_url("https://store.com/products/widget-pro", content, "youtube")
@@ -18,7 +18,7 @@ def test_build_utm_url() -> None:
     assert url.startswith("https://store.com/products/widget-pro?")
     assert "utm_source=youtube" in url
     assert "utm_medium=social" in url
-    assert "utm_campaign=benefit_bold_claim" in url
+    assert "utm_campaign=benefit_spotlight_bold_claim" in url
     assert "utm_content=c-001" in url
 
 
@@ -26,7 +26,7 @@ def test_parse_utm_params() -> None:
     content = Content(
         id="c-rt",
         product_sku="roundtrip",
-        theme="urgency",
+        theme="stakes_cost_of_inaction",
         hook_type="question",
     )
     original = utm.build_utm_url("https://example.com/products/roundtrip", content, "instagram")
@@ -34,7 +34,7 @@ def test_parse_utm_params() -> None:
 
     assert parsed["utm_source"] == "instagram"
     assert parsed["utm_medium"] == "bio"
-    assert parsed["utm_campaign"] == "urgency_question"
+    assert parsed["utm_campaign"] == "stakes_cost_of_inaction_question"
     assert parsed["utm_content"] == "c-rt"
 
 
@@ -42,7 +42,7 @@ def test_build_attribution_data_direct() -> None:
     content = Content(
         id="c-002",
         product_sku="serum-x",
-        theme="curiosity",
+        theme="hidden_knowledge",
         hook_type="question",
     )
     product = Product(sku="serum-x", name="Serum X")
@@ -56,14 +56,14 @@ def test_build_attribution_data_direct() -> None:
     assert "veluraesthetics.com/products/serum-x" in data["destination_url"]
     assert data["link_mode"] == "direct"
     assert "utm_source=youtube" in data["utm_url"]
-    assert "utm_campaign=curiosity_question" in data["utm_url"]
+    assert "utm_campaign=hidden_knowledge_question" in data["utm_url"]
 
 
 def test_build_attribution_data_redirect() -> None:
     content = Content(
         id="c-003",
         product_sku="eye-cream",
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="bold_claim",
     )
     product = Product(

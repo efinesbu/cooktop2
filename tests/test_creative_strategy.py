@@ -11,14 +11,14 @@ from src.models import CTA_TYPES, HOOK_TYPES, PROOF_TYPES, SCRIPT_STYLES, THEMES
 def test_resolve_deterministic_fields_cli_overrides_all() -> None:
     """CLI-provided values take precedence over round-robin."""
     resolved = resolve_deterministic_fields(
-        theme="fear",
+        theme="stakes_cost_of_inaction",
         hook_type="relatable_pain",
         cta_type="shop_now",
         proof_type="testimonial",
         script_style="storytelling",
         generation_index=99,
     )
-    assert resolved["theme"] == "fear"
+    assert resolved["theme"] == "stakes_cost_of_inaction"
     assert resolved["hook_type"] == "relatable_pain"
     assert resolved["cta_type"] == "shop_now"
     assert resolved["proof_type"] == "testimonial"

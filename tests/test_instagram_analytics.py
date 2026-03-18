@@ -23,7 +23,6 @@ sys.modules.setdefault(
         Client=object,
     ),
 )
-sys.modules.setdefault("src.analytics", types.SimpleNamespace(PULLERS={}))
 sys.modules.setdefault(
     "src.image_generator",
     types.SimpleNamespace(generate_starting_image=lambda *args, **kwargs: None),

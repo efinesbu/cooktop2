@@ -27,53 +27,60 @@ class HookDefinition:
 
 THEME_DEFINITIONS = [
     ThemeDefinition(
-        id="benefit",
-        label="Benefit-Led",
-        summary="Lead with the clearest visible payoff the customer wants.",
-        prompt_guidance="Center the creative on the most desirable visible outcome and why it feels worth trying.",
-        default_weight=1.25,
-    ),
-    ThemeDefinition(
         id="problem_solution",
         label="Problem-Solution",
-        summary="Start from a familiar beauty frustration, then resolve it simply.",
-        prompt_guidance="Frame the product as a straightforward answer to a common beauty pain point without sounding alarming.",
+        summary="Start with a familiar friction point, then show the path to resolution.",
+        prompt_guidance="Frame the offer as a straightforward answer to a recognizable problem without sounding alarmist or overly technical. ex: you have X problem, This fixes it.",
         default_weight=1.2,
     ),
     ThemeDefinition(
-        id="curiosity",
-        label="Curiosity Gap",
-        summary="Create an open loop that makes the viewer want the reveal.",
-        prompt_guidance="Tease an interesting insight, reveal, or angle that invites the viewer to keep watching.",
-        default_weight=1.1,
-    ),
-    ThemeDefinition(
-        id="social_proof",
-        label="Social Proof",
-        summary="Anchor the message in popularity, community validation, or repeat use.",
-        prompt_guidance="Highlight that people keep reaching for this product or that it has become a trusted favorite.",
+        id="benefit_spotlight",
+        label="Benefit Spotlight",
+        summary="Lead with the clearest payoff or positive outcome the audience wants.",
+        prompt_guidance="Center the creative on the most compelling benefit and why it feels immediately valuable or worthwhile. ex: The one thing about this that matters most.",
         default_weight=1.15,
     ),
     ThemeDefinition(
-        id="routine",
-        label="Routine Ritual",
-        summary="Position the product as an easy step in a premium daily ritual.",
-        prompt_guidance="Show how the product fits naturally into a simple, repeatable beauty routine.",
+        id="stakes_cost_of_inaction",
+        label="Stakes / Cost Of Inaction",
+        summary="Clarify what is lost, delayed, or made harder when the problem goes unaddressed.",
+        prompt_guidance="Surface believable consequences of waiting or doing nothing, then position the offer as the practical next step. ex: Here's what happens if you ignore this.",
+        default_weight=1.2,
+    ),
+    ThemeDefinition(
+        id="hidden_knowledge",
+        label="Hidden Knowledge",
+        summary="Open a curiosity loop around an insight, reveal, or underused perspective.",
+        prompt_guidance="Tease a useful idea, overlooked detail, or surprising takeaway that rewards attention and keeps the viewer engaged. ex: Most people don''t know this exists / works this way.",
+        default_weight=1.1,
+    ),
+    ThemeDefinition(
+        id="identity_tribe",
+        label="Identity / Tribe",
+        summary="Anchor the message in belonging, shared values, or signals of who this is for.",
+        prompt_guidance="Show how the offer aligns with the audience's self-image, standards, or the kind of people they want to identify with. ex: This is what serious people in X space use.",
+        default_weight=1.15,
+    ),
+    ThemeDefinition(
+        id="mechanism_reveal",
+        label="Mechanism Reveal",
+        summary="Explain the underlying reason something works in a clear, concrete way.",
+        prompt_guidance="Highlight the key mechanism, process, or driver behind the result so the audience feels they understand what makes it effective. ex: Here's what actually happens when you use this.",
         default_weight=1.0,
     ),
     ThemeDefinition(
-        id="urgency",
-        label="Timely Reason",
-        summary="Create a believable reason to try it now, not someday.",
-        prompt_guidance="Use light urgency around timing, season, or readiness to act now without sounding pushy.",
-        default_weight=0.95,
+        id="mythbust",
+        label="Myth Bust",
+        summary="Challenge a common assumption and replace it with a sharper truth.",
+        prompt_guidance="Call out a mistaken belief, oversimplification, or bad habit, then reframe it with a more credible explanation. ex: What you've been told is wrong. Here's the truth.",
+        default_weight=1.0,
     ),
     ThemeDefinition(
-        id="fear",
-        label="Fear / Consequence",
-        summary="Touch on what the viewer risks if they ignore the problem or skip the solution.",
-        prompt_guidance="Acknowledge a gentle consequence of inaction or delay, then position the product as the way to avoid it, without being alarmist.",
-        default_weight=1.3,
+        id="contrast_versus",
+        label="Contrast / Versus",
+        summary="Create clarity by comparing two options, approaches, or outcomes side by side.",
+        prompt_guidance="Use a crisp contrast to show why one path, choice, or behavior leads to a better result than the alternative. ex: X vs Y, and why it matters.",
+        default_weight=1.0,
     ),
 ]
 
@@ -96,7 +103,7 @@ HOOK_DEFINITIONS = [
         id="relatable_pain",
         label="Relatable Pain",
         summary="Lead with a familiar frustration or insecurity the product addresses.",
-        prompt_guidance="Open on a recognizable beauty annoyance or confidence dip that feels common and human.",
+        prompt_guidance="Open on a recognizable frustration or confidence dip that feels common, specific, and human.",
         default_weight=1.2,
     ),
     HookDefinition(
@@ -321,6 +328,18 @@ class ResearchSnapshot:
     creative_format: Optional[str] = None
     summary: str = ""
     source_type: str = "manual"  # manual, creatives, comments, platform_notes
+    created_at: Optional[str] = None
+
+
+@dataclass
+class TextInsight:
+    """Stored text-level insight matched by product, platform, and format scope."""
+    id: str = ""
+    product_sku: Optional[str] = None
+    platform: Optional[str] = None
+    creative_format: Optional[str] = None
+    insight_text: str = ""
+    source_post_count: int = 0
     created_at: Optional[str] = None
 
 

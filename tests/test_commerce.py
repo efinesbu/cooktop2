@@ -15,7 +15,7 @@ def test_upsert_commerce_fact_idempotent(tmp_db: Path) -> None:
     """Re-importing same row replaces, does not duplicate."""
     db.upsert_product(Product(sku="serum-x", name="Serum X"))
     db.insert_content(
-        Content(id="abc123", product_sku="serum-x", theme="benefit", hook_type="bold_claim")
+        Content(id="abc123", product_sku="serum-x", theme="benefit_spotlight", hook_type="bold_claim")
     )
 
     fact = CommerceFact(
@@ -47,7 +47,7 @@ def test_aggregate_commerce_empty(tmp_db: Path) -> None:
 def test_aggregate_commerce_filters_by_platform(tmp_db: Path) -> None:
     """Commerce is filtered by platform when specified."""
     db.upsert_product(Product(sku="p1", name="P1"))
-    db.insert_content(Content(id="c1", product_sku="p1", theme="benefit", hook_type="bold_claim"))
+    db.insert_content(Content(id="c1", product_sku="p1", theme="benefit_spotlight", hook_type="bold_claim"))
 
     db.upsert_commerce_fact(
         CommerceFact(content_id="c1", platform="instagram", event_date="2026-03-08", revenue=50.0)
@@ -66,7 +66,7 @@ def test_aggregate_commerce_filters_by_platform(tmp_db: Path) -> None:
 def test_ingest_commerce_csv(tmp_db: Path, tmp_path: Path) -> None:
     """CSV ingest upserts rows and returns counts."""
     db.upsert_product(Product(sku="serum", name="Serum"))
-    db.insert_content(Content(id="xyz789", product_sku="serum", theme="benefit", hook_type="bold_claim"))
+    db.insert_content(Content(id="xyz789", product_sku="serum", theme="benefit_spotlight", hook_type="bold_claim"))
 
     csv_path = tmp_path / "commerce.csv"
     csv_path.write_text(
@@ -89,7 +89,7 @@ def test_ingest_commerce_csv(tmp_db: Path, tmp_path: Path) -> None:
 def test_ingest_commerce_csv_idempotent(tmp_db: Path, tmp_path: Path) -> None:
     """Re-importing same CSV does not create duplicates."""
     db.upsert_product(Product(sku="p", name="P"))
-    db.insert_content(Content(id="c1", product_sku="p", theme="benefit", hook_type="bold_claim"))
+    db.insert_content(Content(id="c1", product_sku="p", theme="benefit_spotlight", hook_type="bold_claim"))
 
     csv_path = tmp_path / "commerce.csv"
     csv_path.write_text(
@@ -109,8 +109,8 @@ def test_ingest_commerce_csv_idempotent(tmp_db: Path, tmp_path: Path) -> None:
 def test_ingest_commerce_csv_skips_invalid_rows(tmp_db: Path, tmp_path: Path) -> None:
     """Invalid rows are skipped when skip_invalid=True."""
     db.upsert_product(Product(sku="p", name="P"))
-    db.insert_content(Content(id="c1", product_sku="p", theme="benefit", hook_type="bold_claim"))
-    db.insert_content(Content(id="c3", product_sku="p", theme="benefit", hook_type="bold_claim"))
+    db.insert_content(Content(id="c1", product_sku="p", theme="benefit_spotlight", hook_type="bold_claim"))
+    db.insert_content(Content(id="c3", product_sku="p", theme="benefit_spotlight", hook_type="bold_claim"))
 
     csv_path = tmp_path / "commerce.csv"
     csv_path.write_text(

@@ -15,10 +15,10 @@ from src.models import (
 
 ARM_KEY_SEPARATOR = "__"
 DEFAULT_STARTER_ARMS: list[tuple[str, str]] = [
-    ("fear", "relatable_pain"),
+    ("stakes_cost_of_inaction", "relatable_pain"),
     ("problem_solution", "relatable_pain"),
-    ("curiosity", "question"),
-    ("social_proof", "bold_claim"),
+    ("hidden_knowledge", "question"),
+    ("identity_tribe", "bold_claim"),
 ]
 
 

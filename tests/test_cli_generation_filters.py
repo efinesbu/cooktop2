@@ -16,7 +16,6 @@ sys.modules.setdefault(
         Client=object,
     ),
 )
-sys.modules.setdefault("src.analytics", types.SimpleNamespace(PULLERS={}))
 sys.modules.setdefault(
     "src.shopify",
     types.SimpleNamespace(sync_products=lambda *args, **kwargs: []),
@@ -68,8 +67,8 @@ def test_run_manual_uses_bandit_when_no_theme_or_hook(monkeypatch) -> None:
         "recommend",
         lambda total_slots: BanditRecommendation(
             allocations=[
-                ThemeHookAllocation(theme="curiosity", hook_type="question", count=1, score=0.7),
-                ThemeHookAllocation(theme="benefit", hook_type="visual_surprise", count=1, score=0.6),
+                ThemeHookAllocation(theme="hidden_knowledge", hook_type="question", count=1, score=0.7),
+                ThemeHookAllocation(theme="benefit_spotlight", hook_type="visual_surprise", count=1, score=0.6),
             ]
         ),
     )
@@ -84,7 +83,7 @@ def test_run_manual_uses_bandit_when_no_theme_or_hook(monkeypatch) -> None:
 
     cli_module._run_manual(("sku-1",), (), (), count=2, should_post=False)
 
-    assert calls == [("curiosity", "question"), ("benefit", "visual_surprise")]
+    assert calls == [("hidden_knowledge", "question"), ("benefit_spotlight", "visual_surprise")]
 
 
 def test_run_manual_supports_partial_overrides(monkeypatch) -> None:
@@ -98,7 +97,7 @@ def test_run_manual_supports_partial_overrides(monkeypatch) -> None:
         "recommend",
         lambda total_slots: BanditRecommendation(
             allocations=[
-                ThemeHookAllocation(theme="benefit", hook_type="bold_claim", count=1, score=0.7),
+                ThemeHookAllocation(theme="benefit_spotlight", hook_type="bold_claim", count=1, score=0.7),
             ]
         ),
     )
@@ -111,10 +110,10 @@ def test_run_manual_supports_partial_overrides(monkeypatch) -> None:
 
     monkeypatch.setattr(cli_module, "_generate_single", fake_generate_single)
 
-    cli_module._run_manual(("sku-1",), ("benefit",), (), count=1, should_post=False)
+    cli_module._run_manual(("sku-1",), ("benefit_spotlight",), (), count=1, should_post=False)
     cli_module._run_manual(("sku-1",), (), ("question",), count=1, should_post=False)
 
-    assert calls == [("benefit", "bold_claim"), ("benefit", "question")]
+    assert calls == [("benefit_spotlight", "bold_claim"), ("benefit_spotlight", "question")]
 
 
 def test_run_manual_repeats_same_locked_pair_without_rotation(monkeypatch) -> None:
@@ -134,13 +133,13 @@ def test_run_manual_repeats_same_locked_pair_without_rotation(monkeypatch) -> No
 
     cli_module._run_manual(
         ("sku-1",),
-        ("benefit",),
+        ("benefit_spotlight",),
         ("question",),
         count=3,
         should_post=False,
     )
 
-    assert calls == [("benefit", "question")] * 3
+    assert calls == [("benefit_spotlight", "question")] * 3
 
 
 def test_run_manual_parallelizes_generation_when_count_below_threshold(monkeypatch) -> None:
@@ -177,14 +176,14 @@ def test_run_manual_parallelizes_generation_when_count_below_threshold(monkeypat
 
     cli_module._run_manual(
         ("sku-1",),
-        ("benefit",),
+        ("benefit_spotlight",),
         ("question",),
         count=3,
         should_post=False,
     )
 
     assert executor_usage == {"used": True, "max_workers": 3}
-    assert calls == [("benefit", "question")] * 3
+    assert calls == [("benefit_spotlight", "question")] * 3
 
 
 def test_run_manual_stays_serial_at_parallel_threshold(monkeypatch) -> None:
@@ -209,13 +208,13 @@ def test_run_manual_stays_serial_at_parallel_threshold(monkeypatch) -> None:
 
     cli_module._run_manual(
         ("sku-1",),
-        ("benefit",),
+        ("benefit_spotlight",),
         ("question",),
         count=10,
         should_post=False,
     )
 
-    assert calls == [("benefit", "question")] * 10
+    assert calls == [("benefit_spotlight", "question")] * 10
 
 
 def test_run_manual_rotates_theme_and_hook_when_enabled(monkeypatch) -> None:
@@ -235,7 +234,7 @@ def test_run_manual_rotates_theme_and_hook_when_enabled(monkeypatch) -> None:
 
     cli_module._run_manual(
         ("sku-1",),
-        ("benefit", "social_proof"),
+        ("benefit_spotlight", "identity_tribe"),
         ("question", "quick_tip", "bold_claim"),
         count=5,
         should_post=False,
@@ -243,11 +242,11 @@ def test_run_manual_rotates_theme_and_hook_when_enabled(monkeypatch) -> None:
     )
 
     assert calls == [
-        ("benefit", "question"),
-        ("social_proof", "quick_tip"),
-        ("benefit", "bold_claim"),
-        ("social_proof", "question"),
-        ("benefit", "quick_tip"),
+        ("benefit_spotlight", "question"),
+        ("identity_tribe", "quick_tip"),
+        ("benefit_spotlight", "bold_claim"),
+        ("identity_tribe", "question"),
+        ("benefit_spotlight", "quick_tip"),
     ]
 
 
@@ -263,8 +262,8 @@ def test_run_auto_parallelizes_across_products_below_threshold(monkeypatch) -> N
         "recommend",
         lambda total_slots: BanditRecommendation(
             allocations=[
-                ThemeHookAllocation(theme="benefit", hook_type="bold_claim", count=2, score=0.8),
-                ThemeHookAllocation(theme="curiosity", hook_type="question", count=1, score=0.6),
+                ThemeHookAllocation(theme="benefit_spotlight", hook_type="bold_claim", count=2, score=0.8),
+                ThemeHookAllocation(theme="hidden_knowledge", hook_type="question", count=1, score=0.6),
             ]
         ),
     )
@@ -298,9 +297,9 @@ def test_run_auto_parallelizes_across_products_below_threshold(monkeypatch) -> N
 
     assert executor_usage == {"used": True, "max_workers": 3}
     assert len(calls) == 3
-    assert calls.count(("sku-1", "benefit", "bold_claim")) == 1
-    assert calls.count(("sku-2", "benefit", "bold_claim")) == 1
-    assert calls.count(("sku-1", "curiosity", "question")) == 1
+    assert calls.count(("sku-1", "benefit_spotlight", "bold_claim")) == 1
+    assert calls.count(("sku-2", "benefit_spotlight", "bold_claim")) == 1
+    assert calls.count(("sku-1", "hidden_knowledge", "question")) == 1
 
 
 def test_run_auto_uses_global_allocation_and_round_robin_product_split(monkeypatch) -> None:
@@ -315,8 +314,8 @@ def test_run_auto_uses_global_allocation_and_round_robin_product_split(monkeypat
         "recommend",
         lambda total_slots: BanditRecommendation(
             allocations=[
-                ThemeHookAllocation(theme="benefit", hook_type="bold_claim", count=2, score=0.8),
-                ThemeHookAllocation(theme="curiosity", hook_type="question", count=1, score=0.6),
+                ThemeHookAllocation(theme="benefit_spotlight", hook_type="bold_claim", count=2, score=0.8),
+                ThemeHookAllocation(theme="hidden_knowledge", hook_type="question", count=1, score=0.6),
             ]
         ),
     )
@@ -332,9 +331,9 @@ def test_run_auto_uses_global_allocation_and_round_robin_product_split(monkeypat
     cli_module._run_auto(count=3, should_post=False)
 
     assert len(calls) == 3
-    assert calls.count(("sku-1", "benefit", "bold_claim")) == 1
-    assert calls.count(("sku-2", "benefit", "bold_claim")) == 1
-    assert calls.count(("sku-1", "curiosity", "question")) == 1
+    assert calls.count(("sku-1", "benefit_spotlight", "bold_claim")) == 1
+    assert calls.count(("sku-2", "benefit_spotlight", "bold_claim")) == 1
+    assert calls.count(("sku-1", "hidden_knowledge", "question")) == 1
 
 
 def test_run_auto_randomizes_round_robin_starting_product(monkeypatch) -> None:
@@ -349,7 +348,7 @@ def test_run_auto_randomizes_round_robin_starting_product(monkeypatch) -> None:
         "recommend",
         lambda total_slots: BanditRecommendation(
             allocations=[
-                ThemeHookAllocation(theme="benefit", hook_type="bold_claim", count=3, score=0.8),
+                ThemeHookAllocation(theme="benefit_spotlight", hook_type="bold_claim", count=3, score=0.8),
             ]
         ),
     )
@@ -366,9 +365,9 @@ def test_run_auto_randomizes_round_robin_starting_product(monkeypatch) -> None:
     cli_module._run_auto(count=3, should_post=False)
 
     assert calls == [
-        ("sku-2", "benefit", "bold_claim"),
-        ("sku-3", "benefit", "bold_claim"),
-        ("sku-1", "benefit", "bold_claim"),
+        ("sku-2", "benefit_spotlight", "bold_claim"),
+        ("sku-3", "benefit_spotlight", "bold_claim"),
+        ("sku-1", "benefit_spotlight", "bold_claim"),
     ]
 
 
@@ -421,7 +420,7 @@ def test_generate_single_refreshes_registered_images_when_disk_changes(
 
     result = cli_module._generate_single(
         product,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="question",
         generation_index=0,
         should_post=False,
@@ -491,7 +490,7 @@ def test_generate_single_refreshes_registered_images_from_custom_image_dir(
 
     result = cli_module._generate_single(
         product,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="question",
         generation_index=0,
         should_post=False,

@@ -23,7 +23,6 @@ sys.modules.setdefault(
         Client=object,
     ),
 )
-sys.modules.setdefault("src.analytics", types.SimpleNamespace(PULLERS={}))
 sys.modules.setdefault(
     "src.image_generator",
     types.SimpleNamespace(generate_starting_image=lambda *args, **kwargs: None),
@@ -78,7 +77,7 @@ def _seed_approved_youtube_content(
     content = Content(
         id=content_id,
         product_sku=product.sku,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="question",
         video_local_path=str(video_path),
     )
@@ -121,7 +120,7 @@ def test_approve_schedule_and_post_due(
     content = Content(
         id="content-123",
         product_sku=product.sku,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="question",
         video_local_path=str(video_path),
     )
@@ -136,7 +135,7 @@ def test_approve_schedule_and_post_due(
             destination_url="https://example.com/products/serum-x",
             utm_source="youtube",
             utm_medium="social",
-            utm_campaign="benefit_question",
+            utm_campaign="benefit_spotlight_question",
             utm_content="content-123",
             link_mode="direct",
         )
@@ -177,13 +176,13 @@ def test_preview_all_shows_every_saved_row(tmp_db: Path) -> None:
     recent = Content(
         id="content-recent",
         product_sku=product.sku,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="question",
     )
     older = Content(
         id="content-older",
         product_sku=product.sku,
-        theme="problem",
+        theme="problem_solution",
         hook_type="bold_claim",
     )
     db.insert_content(recent)
@@ -199,16 +198,16 @@ def test_preview_all_shows_every_saved_row(tmp_db: Path) -> None:
     all_result = runner.invoke(cli_module.cli, ["preview", "--all"])
     assert all_result.exit_code == 0
     assert "All Content" in all_result.output
-    assert "benefit" in all_result.output
-    assert "problem" in all_result.output
+    assert "benefit\u2026" in all_result.output
+    assert "problem\u2026" in all_result.output
     assert "Product" in all_result.output
     assert "Theme" in all_result.output
     assert "Hook Type" in all_result.output
 
     last_24h_result = runner.invoke(cli_module.cli, ["preview", "--last-24h"])
     assert last_24h_result.exit_code == 0
-    assert "benefit" in last_24h_result.output
-    assert "problem" not in last_24h_result.output
+    assert "benefit_\u2026" in last_24h_result.output
+    assert "problem\u2026" not in last_24h_result.output
 
 
 def _seed_recent_content_rows(product: Product, total: int = 23) -> list[str]:
@@ -220,7 +219,7 @@ def _seed_recent_content_rows(product: Product, total: int = 23) -> list[str]:
             Content(
                 id=content_id,
                 product_sku=product.sku,
-                theme="benefit",
+                theme="benefit_spotlight",
                 hook_type="question",
             )
         )
@@ -291,7 +290,7 @@ def test_schedule_and_post_due_skip_disabled_platform_payloads(
     content = Content(
         id="content-456",
         product_sku=product.sku,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="question",
         video_local_path=str(video_path),
     )
@@ -382,7 +381,7 @@ def test_approve_schedule_and_post_due_instagram_via_make_bridge(
     content = Content(
         id="content-ig-123",
         product_sku=product.sku,
-        theme="benefit",
+        theme="benefit_spotlight",
         hook_type="question",
         video_local_path=str(video_path),
     )

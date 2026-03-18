@@ -25,7 +25,7 @@ def test_gather_cohort_performances_groups_by_matrix_dimensions(monkeypatch) -> 
         "c1": Content(
             id="c1",
             product_sku="serum-a",
-            theme="benefit",
+            theme="benefit_spotlight",
             hook_type="question",
             creative_format="ai_video_15s",
             cta_type="see_product",
@@ -33,7 +33,7 @@ def test_gather_cohort_performances_groups_by_matrix_dimensions(monkeypatch) -> 
         "c2": Content(
             id="c2",
             product_sku="serum-b",
-            theme="routine",
+            theme="benefit_spotlight",
             hook_type="quick_tip",
             creative_format="image_motion_15s",
             cta_type="see_product",
@@ -86,7 +86,7 @@ def test_gather_cohort_performances_handles_zero_view_creatives(monkeypatch) -> 
         "c1": Content(
             id="c1",
             product_sku="serum-a",
-            theme="benefit",
+            theme="benefit_spotlight",
             hook_type="question",
             creative_format="ai_video_15s",
             cta_type="see_product",
@@ -131,7 +131,7 @@ def test_gather_cohort_performances_handles_sparse_data(monkeypatch) -> None:
         Post(id=1, content_id="c1", platform="youtube", published_at="2026-03-08 10:00:00"),
         Post(id=2, content_id="c99", platform="instagram", published_at="2026-03-07 10:00:00"),
     ]
-    contents = {"c1": Content(id="c1", product_sku="serum-a", theme="benefit", hook_type="question")}
+    contents = {"c1": Content(id="c1", product_sku="serum-a", theme="benefit_spotlight", hook_type="question")}
     metrics = {1: Metric(post_id=1, platform="youtube", views=100, likes=5, comments=0, shares=0, saves=0)}
     products = {"serum-a": Product(sku="serum-a", name="Serum A")}
 
@@ -173,7 +173,7 @@ def test_gather_cohort_performances_partial_platform_cohorts(monkeypatch) -> Non
         "c1": Content(
             id="c1",
             product_sku="serum-a",
-            theme="benefit",
+            theme="benefit_spotlight",
             hook_type="question",
             creative_format="ai_video_15s",
             cta_type="see_product",
@@ -233,7 +233,7 @@ def test_classify_winners_middles_losers_single_cohort() -> None:
         creative_format="ai_video_15s",
         hook_type="q",
         cta_type="see_product",
-        theme="benefit",
+        theme="benefit_spotlight",
         post_count=1,
         total_views=100,
         total_engagements=10,
@@ -250,10 +250,10 @@ def test_classify_winners_middles_losers_single_cohort() -> None:
 def test_classify_winners_middles_losers_splits_by_percentile() -> None:
     """Top 25% winners, bottom 25% losers, rest middle."""
     perfs = [
-        CohortPerformance("a", "A", "ig", "ai", "q", "see", "benefit", 1, 1000, 100, 0.10, 0.5, ["c1"]),
-        CohortPerformance("b", "B", "ig", "ai", "r", "see", "benefit", 1, 800, 60, 0.075, 0.4, ["c2"]),
-        CohortPerformance("c", "C", "ig", "ai", "s", "see", "benefit", 1, 600, 30, 0.05, 0.3, ["c3"]),
-        CohortPerformance("d", "D", "ig", "ai", "t", "see", "benefit", 1, 400, 10, 0.025, 0.2, ["c4"]),
+        CohortPerformance("a", "A", "ig", "ai", "q", "see", "benefit_spotlight", 1, 1000, 100, 0.10, 0.5, ["c1"]),
+        CohortPerformance("b", "B", "ig", "ai", "r", "see", "benefit_spotlight", 1, 800, 60, 0.075, 0.4, ["c2"]),
+        CohortPerformance("c", "C", "ig", "ai", "s", "see", "benefit_spotlight", 1, 600, 30, 0.05, 0.3, ["c3"]),
+        CohortPerformance("d", "D", "ig", "ai", "t", "see", "benefit_spotlight", 1, 400, 10, 0.025, 0.2, ["c4"]),
     ]
     w, m, l = classify_winners_middles_losers(perfs, winner_pct=0.25, loser_pct=0.25)
     assert len(w) == 1
@@ -266,9 +266,9 @@ def test_classify_winners_middles_losers_splits_by_percentile() -> None:
 def test_classify_winners_middles_losers_rank_by_revenue() -> None:
     """When rank_by=revenue, cohorts are ranked by revenue."""
     perfs = [
-        CohortPerformance("a", "A", "ig", "ai", "q", "see", "benefit", 1, 100, 10, 0.10, None, ["c1"], sessions=50, purchases=2, revenue=80.0),
-        CohortPerformance("b", "B", "ig", "ai", "r", "see", "benefit", 1, 200, 20, 0.10, None, ["c2"], sessions=100, purchases=1, revenue=30.0),
-        CohortPerformance("c", "C", "ig", "ai", "s", "see", "benefit", 1, 300, 30, 0.10, None, ["c3"], sessions=80, purchases=0, revenue=0.0),
+        CohortPerformance("a", "A", "ig", "ai", "q", "see", "benefit_spotlight", 1, 100, 10, 0.10, None, ["c1"], sessions=50, purchases=2, revenue=80.0),
+        CohortPerformance("b", "B", "ig", "ai", "r", "see", "benefit_spotlight", 1, 200, 20, 0.10, None, ["c2"], sessions=100, purchases=1, revenue=30.0),
+        CohortPerformance("c", "C", "ig", "ai", "s", "see", "benefit_spotlight", 1, 300, 30, 0.10, None, ["c3"], sessions=80, purchases=0, revenue=0.0),
     ]
     w, m, l = classify_winners_middles_losers(perfs, rank_by="revenue", winner_pct=0.33, loser_pct=0.33)
     assert len(w) == 1
@@ -285,7 +285,7 @@ def test_format_cohort_label() -> None:
         creative_format="image_motion_15s",
         hook_type="question",
         cta_type="see_product",
-        theme="benefit",
+        theme="benefit_spotlight",
         post_count=1,
         total_views=100,
         total_engagements=10,
@@ -320,7 +320,7 @@ def test_get_image_motion_performance_summary_product_winners(monkeypatch) -> No
         creative_format="image_motion_15s",
         hook_type="q",
         cta_type="see_product",
-        theme="benefit",
+        theme="benefit_spotlight",
         post_count=2,
         total_views=500,
         total_engagements=50,
@@ -336,7 +336,7 @@ def test_get_image_motion_performance_summary_product_winners(monkeypatch) -> No
 
     summary, rationale = get_image_motion_performance_summary("serum-a")
     assert rationale == "product_winners"
-    assert "benefit" in summary or "Historical" in summary
+    assert "benefit_spotlight" in summary or "Historical" in summary
 
 
 def test_get_image_motion_performance_summary_global_fallback(monkeypatch) -> None:
@@ -348,7 +348,7 @@ def test_get_image_motion_performance_summary_global_fallback(monkeypatch) -> No
         creative_format="image_motion_15s",
         hook_type="q",
         cta_type="see_product",
-        theme="benefit",
+        theme="benefit_spotlight",
         post_count=1,
         total_views=100,
         total_engagements=10,
@@ -364,4 +364,4 @@ def test_get_image_motion_performance_summary_global_fallback(monkeypatch) -> No
 
     summary, rationale = get_image_motion_performance_summary("serum-x")
     assert rationale == "global_winners"
-    assert "benefit" in summary or "Historical" in summary
+    assert "benefit_spotlight" in summary or "Historical" in summary

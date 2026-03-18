@@ -55,8 +55,8 @@ def _stub_common_dependencies(monkeypatch, products: list[Product]) -> None:
         "recommend",
         lambda total_slots: BanditRecommendation(
             allocations=[
-                ThemeHookAllocation("benefit", "question", 3, 0.91),
-                ThemeHookAllocation("routine", "quick_tip", 3, 0.44),
+                ThemeHookAllocation("benefit_spotlight", "question", 3, 0.91),
+                ThemeHookAllocation("benefit_spotlight", "quick_tip", 3, 0.44),
             ]
         ),
     )
@@ -79,12 +79,12 @@ def test_generate_briefing_includes_7day_trends_and_creative_insights(monkeypatc
         Post(id=6, content_id="c6", platform="instagram", published_at="2026-02-26 10:00:00"),
     ]
     contents = {
-        "c1": Content(id="c1", product_sku="serum-a", theme="benefit", hook_type="question"),
-        "c2": Content(id="c2", product_sku="serum-a", theme="benefit", hook_type="question"),
-        "c3": Content(id="c3", product_sku="serum-b", theme="routine", hook_type="quick_tip"),
-        "c4": Content(id="c4", product_sku="serum-b", theme="routine", hook_type="quick_tip"),
-        "c5": Content(id="c5", product_sku="serum-a", theme="social_proof", hook_type="bold_claim"),
-        "c6": Content(id="c6", product_sku="serum-b", theme="curiosity", hook_type="question"),
+        "c1": Content(id="c1", product_sku="serum-a", theme="benefit_spotlight", hook_type="question"),
+        "c2": Content(id="c2", product_sku="serum-a", theme="benefit_spotlight", hook_type="question"),
+        "c3": Content(id="c3", product_sku="serum-b", theme="benefit_spotlight", hook_type="quick_tip"),
+        "c4": Content(id="c4", product_sku="serum-b", theme="benefit_spotlight", hook_type="quick_tip"),
+        "c5": Content(id="c5", product_sku="serum-a", theme="identity_tribe", hook_type="bold_claim"),
+        "c6": Content(id="c6", product_sku="serum-b", theme="hidden_knowledge", hook_type="question"),
     }
     metrics = {
         1: Metric(post_id=1, platform="youtube", views=1000, likes=80, comments=20, shares=10, saves=10, watch_through_rate=0.45),
@@ -129,11 +129,11 @@ def test_generate_briefing_includes_7day_trends_and_creative_insights(monkeypatc
     assert "Best platform: Instagram — 7.6% engagement across 2 posts" in briefing
     assert "Most viewed product: Serum B — 5,700 views across 3 posts" in briefing
     assert "Top repeated combos (7d):" in briefing
-    assert "1. benefit/question — 11.1% engagement (2 posts, 1,800 views)" in briefing
-    assert "1. routine/quick_tip — 1.1% engagement (2 posts)" in briefing
+    assert "1. benefit_spotlight/question — 11.1% engagement (2 posts, 1,800 views)" in briefing
+    assert "1. benefit_spotlight/quick_tip — 1.1% engagement (2 posts)" in briefing
     assert "7-day views down 25% vs prior week" in briefing
     assert "7-day engagement down 22% vs prior week" in briefing
-    assert "Retest routine/quick_tip creative (7-day engagement 1.1%)" in briefing
+    assert "Retest benefit_spotlight/quick_tip creative (7-day engagement 1.1%)" in briefing
     assert "ORGANIC EVALUATION (12-CREATIVE MATRIX)" in briefing
     assert "Winners (repeat or promote):" in briefing or "Middle (consider remixing):" in briefing or "Losers (retire or refresh):" in briefing
 
@@ -146,7 +146,7 @@ def test_generate_briefing_includes_today_in_rolling_7day_window(monkeypatch) ->
         Post(id=21, content_id="c21", platform="instagram", published_at="2026-03-09 09:00:00"),
     ]
     contents = {
-        "c21": Content(id="c21", product_sku="serum-a", theme="benefit", hook_type="question"),
+        "c21": Content(id="c21", product_sku="serum-a", theme="benefit_spotlight", hook_type="question"),
     }
     metrics = {
         21: Metric(
@@ -196,7 +196,7 @@ def test_generate_briefing_handles_sparse_7day_data(monkeypatch) -> None:
         Post(id=11, content_id="c11", platform="instagram", published_at="2026-03-08 09:00:00"),
     ]
     contents = {
-        "c11": Content(id="c11", product_sku="serum-a", theme="benefit", hook_type="question"),
+        "c11": Content(id="c11", product_sku="serum-a", theme="benefit_spotlight", hook_type="question"),
     }
     metrics = {
         11: Metric(
@@ -232,7 +232,7 @@ def test_generate_briefing_handles_sparse_7day_data(monkeypatch) -> None:
     assert "POSTS PUBLISHED YESTERDAY" in briefing
     assert "Vs prior 7 days: not enough historical data yet." in briefing
     assert "Need more repeated posts to compare creative combos confidently." in briefing
-    assert "Current leader: benefit/question — 10.0% engagement (1 post)" in briefing
+    assert "Current leader: benefit_spotlight/question — 10.0% engagement (1 post)" in briefing
     assert "No urgent actions. Systems nominal." in briefing
 
 

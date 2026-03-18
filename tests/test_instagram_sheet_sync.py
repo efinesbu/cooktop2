@@ -11,7 +11,7 @@ def test_sync_instagram_post_ids_from_sheet_uses_handoff_id(
     monkeypatch,
 ) -> None:
     product = Product(sku="sku-1", name="Product 1")
-    content = Content(id="content-1", product_sku=product.sku, theme="benefit", hook_type="question")
+    content = Content(id="content-1", product_sku=product.sku, theme="benefit_spotlight", hook_type="question")
     db.upsert_product(product)
     db.insert_content(content)
     db.upsert_platform_payload(
@@ -62,7 +62,7 @@ def test_sync_instagram_post_ids_from_sheet_falls_back_to_content_id(
     monkeypatch,
 ) -> None:
     product = Product(sku="sku-2", name="Product 2")
-    content = Content(id="content-2", product_sku=product.sku, theme="benefit", hook_type="question")
+    content = Content(id="content-2", product_sku=product.sku, theme="benefit_spotlight", hook_type="question")
     db.upsert_product(product)
     db.insert_content(content)
     post_id = db.insert_post(
@@ -176,8 +176,8 @@ def test_inspect_instagram_post_ids_reports_statuses(
     monkeypatch,
 ) -> None:
     product = Product(sku="sku-3", name="Product 3")
-    content_match = Content(id="content-match", product_sku=product.sku, theme="benefit", hook_type="question")
-    content_synced = Content(id="content-synced", product_sku=product.sku, theme="benefit", hook_type="question")
+    content_match = Content(id="content-match", product_sku=product.sku, theme="benefit_spotlight", hook_type="question")
+    content_synced = Content(id="content-synced", product_sku=product.sku, theme="benefit_spotlight", hook_type="question")
     db.upsert_product(product)
     db.insert_content(content_match)
     db.insert_content(content_synced)

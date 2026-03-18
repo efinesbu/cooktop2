@@ -52,17 +52,20 @@ def test_whitelist_and_starter_arms_are_meaningful() -> None:
     assert len(THEMES) == len(set(THEMES))
     assert len(HOOK_TYPES) == len(set(HOOK_TYPES))
     assert "problem_solution" in THEMES
-    assert "routine" in THEMES
+    assert "benefit_spotlight" in THEMES
+    assert "stakes_cost_of_inaction" in THEMES
+    assert "hidden_knowledge" in THEMES
+    assert "identity_tribe" in THEMES
     assert "quick_tip" in HOOK_TYPES
     assert "visual_surprise" in HOOK_TYPES
 
     starter_keys = bandit.starter_arm_keys()
     assert len(starter_keys) == 4
     assert starter_keys == [
-        "fear__relatable_pain",
+        "stakes_cost_of_inaction__relatable_pain",
         "problem_solution__relatable_pain",
-        "curiosity__question",
-        "social_proof__bold_claim",
+        "hidden_knowledge__question",
+        "identity_tribe__bold_claim",
     ]
     for key in starter_keys:
         theme, hook_type = bandit.parse_arm_key(key)

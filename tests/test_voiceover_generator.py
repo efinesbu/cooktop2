@@ -38,7 +38,12 @@ def test_generate_voiceover_calls_openai_and_saves_wav(
 ) -> None:
     """generate_voiceover calls OpenAI TTS API and saves WAV, records cost."""
     product = Product(sku="serum-x", name="Serum X")
-    content = Content(id="test-tts-001", product_sku=product.sku, theme="benefit", hook_type="question")
+    content = Content(
+        id="test-tts-001",
+        product_sku=product.sku,
+        theme="benefit_spotlight",
+        hook_type="question",
+    )
     db.upsert_product(product)
     db.insert_content(content)
 
