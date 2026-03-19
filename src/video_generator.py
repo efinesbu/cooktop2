@@ -126,6 +126,7 @@ def _build_flex_video_prompt(content: Content, product: Product) -> str:
     """Build prompt from persisted video_plan in asset_manifest_json."""
     manifest = json.loads(content.asset_manifest_json or "{}")
     plan = manifest.get("video_plan", {})
+    is_v3_manifest = manifest.get("schema_version") == 3
     if not plan:
         raise ValueError(
             "ai_video_flex_15s content missing video_plan in asset_manifest_json. "
@@ -149,8 +150,13 @@ def _build_flex_video_prompt(content: Content, product: Product) -> str:
         script = scene.get("script", "")
         if desc:
             parts.append(f"Scene {i + 1} visual direction: {desc}")
-        if script:
+        if script and not is_v3_manifest:
             parts.append(f"Scene {i + 1} voiceover: {script}")
+    if is_v3_manifest:
+        parts.append(
+            "Do not animate mouth movements or attempt lip sync; keep expression and motion readable "
+            "without spoken-mouth performance because narration will be stitched separately."
+        )
     parts.append("Keep the product appearance, colors, and branding consistent with the provided image.")
     parts.append(ANATOMY_GUARDRAIL)
     parts.append("Use smooth motion, premium lighting, and ad-ready pacing.")
@@ -280,7 +286,12 @@ def _poll_until_complete(
     while True:
         try:
             resp = client.get(status_url, headers={"Authorization": headers["Authorization"]})
-            resp.raise_for_status()
+            if not resp.is_success:
+                detail = _response_detail(resp)
+                raise RuntimeError(
+                    f"xAI video polling failed for request {request_id} "
+                    f"with status {resp.status_code}: {detail}"
+                )
             data = resp.json()
         except httpx.TransportError as exc:
             if time.monotonic() >= deadline:
@@ -294,6 +305,11 @@ def _poll_until_complete(
         status = data.get("status")
         if status == "done":
             return data
+        if status == "failed":
+            detail = _provider_detail(data)
+            raise RuntimeError(
+                f"xAI video request failed before completion: {request_id}: {detail}"
+            )
         if status == "expired":
             raise RuntimeError(f"xAI video request expired before completion: {request_id}")
         if time.monotonic() >= deadline:
@@ -308,6 +324,46 @@ def _poll_until_complete(
             poll_interval,
         )
         time.sleep(poll_interval)
+
+
+def _response_detail(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+
+    detail = _provider_detail(payload)
+    if detail != "no detail provided":
+        return detail
+
+    text = response.text.strip()
+    return text or "no detail provided"
+
+
+def _provider_detail(payload: object) -> str:
+    if isinstance(payload, dict):
+        for key in ("error", "message", "detail"):
+            value = payload.get(key)
+            detail = _stringify_provider_detail(value)
+            if detail:
+                return detail
+    return "no detail provided"
+
+
+def _stringify_provider_detail(value: object) -> str | None:
+    if isinstance(value, str):
+        detail = value.strip()
+        return detail or None
+    if isinstance(value, dict):
+        for key in ("message", "detail", "error"):
+            nested = _stringify_provider_detail(value.get(key))
+            if nested:
+                return nested
+        compact = json.dumps(value, sort_keys=True)
+        return compact if compact != "{}" else None
+    if value is None:
+        return None
+    return str(value)
 
 
 def _video_url_from_response(response_data: dict) -> str:

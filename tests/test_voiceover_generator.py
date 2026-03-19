@@ -101,3 +101,65 @@ def test_generate_voiceover_calls_openai_and_saves_wav(
     tts_costs = [c for c in costs if c.step == "tts_gen"]
     assert len(tts_costs) == 1
     assert tts_costs[0].api_provider == "openai"
+
+
+def test_generate_voiceover_normalizes_unicode_punctuation_before_tts(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Regression: voiceover script with Unicode em dash is normalized to ASCII before TTS API."""
+    product = Product(sku="serum-x", name="Serum X")
+    content = Content(
+        id="test-tts-002",
+        product_sku=product.sku,
+        theme="benefit_spotlight",
+        hook_type="question",
+    )
+    db.upsert_product(product)
+    db.insert_content(content)
+
+    captured: dict = {}
+
+    class FakeSpeechResponse:
+        content = b"fake-wav-bytes"
+
+    class FakeOpenAIClient:
+        def __init__(self, api_key: str) -> None:
+            captured["api_key"] = api_key
+
+        @property
+        def audio(self):
+            return self
+
+        @property
+        def speech(self):
+            return self
+
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return FakeSpeechResponse()
+
+    fake_openai = SimpleNamespace(OpenAI=FakeOpenAIClient)
+
+    monkeypatch.setattr(
+        "src.config._config",
+        {"openai": {"api_key": "test-key"}},
+    )
+    monkeypatch.setattr("src.config.load_dotenv", lambda: None)
+    monkeypatch.setattr(
+        "src.voiceover_generator._load_openai_module",
+        lambda: fake_openai,
+    )
+
+    script_with_em_dash = "Want fresher skin\u2014try me today."
+    output_path = tmp_path / "videos" / "serum-x" / "test-tts-002_voiceover.wav"
+    generate_voiceover(
+        script=script_with_em_dash,
+        voice="marin",
+        voice_instructions="Calm tone.",
+        output_path=output_path,
+        content_id=content.id,
+    )
+
+    assert captured.get("input") == "Want fresher skin-try me today."

@@ -1,0 +1,13 @@
+---
+description: Repo-specific commit and push workflow guidance
+alwaysApply: true
+---
+
+# Commit Workflow
+
+- For simple `commit` or `commit and push` requests, start with `git status --short --branch`, `git diff --stat`, and recent commit subjects to infer scope quickly.
+- If the tracked changes are clearly one feature or fix, inspect only the changed tracked source, docs, config, and test files needed to name the commit accurately.
+- Treat local-only artifacts as out of scope unless the user explicitly mentions them. This includes temporary verification folders and ad hoc `.cursor` files.
+- Prefer the existing commit style in this repo: conventional prefix plus concise scope, for example `feat: ...` or `fix: ...`.
+- When the user asks to push after committing, push the current branch after the commit succeeds.
+- If unrelated untracked local artifacts appear beside a clean scoped change, mention that they were excluded instead of spending time analyzing them.

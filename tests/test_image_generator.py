@@ -2,11 +2,22 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+import json
 
 import pytest
 
-from src.image_generator import _build_prompt, _extract_image_bytes, _first_hero_image_path
+import src.image_generator as _img_gen
+from src.image_generator import (
+    _build_prompt,
+    _extract_image_bytes,
+    _first_hero_image_path,
+    generate_frame_images_for_plan,
+    generate_starting_image,
+)
 from src.models import Content, Product
+
+# Content-aware hero selector; required for nolabel tests. Implementer adds this.
+_hero_image_path_for_content = getattr(_img_gen, "_hero_image_path_for_content", None)
 
 
 def test_first_hero_image_path_prefers_hero_named_files(
@@ -52,6 +63,31 @@ def test_build_prompt_requires_preserving_reference_branding(
 
     assert "visible brand wordmark" in prompt
     assert "Do not replace, omit, or genericize" in prompt
+
+
+def test_build_prompt_omits_wordmark_instruction_when_branding_disabled(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "velura-data"
+    product_dir = data_root / "product-images" / "eye-cream"
+    product_dir.mkdir(parents=True)
+    (product_dir / "hero-eyecream.png").write_bytes(b"hero")
+
+    monkeypatch.setattr("src.config._config", {"data_root": str(data_root)})
+
+    content = Content(
+        id="content-1",
+        product_sku="eye-cream",
+        starting_image_prompt="Soft minimal premium hero shot.",
+        asset_manifest_json=json.dumps({"velura_branding": False}),
+    )
+    product = Product(sku="eye-cream", name="Eye Cream")
+
+    prompt = _build_prompt(content, product)
+
+    assert "visible brand wordmark" not in prompt
+    assert "without forcing an added brand wordmark" in prompt
 
 
 def test_first_hero_image_path_uses_product_image_dir_override(
@@ -106,3 +142,376 @@ def test_extract_image_bytes_reports_blocked_response() -> None:
 
     with pytest.raises(RuntimeError, match="block_reason='SAFETY'"):
         _extract_image_bytes(response)
+
+
+def test_generate_frame_images_omits_brand_refs_when_branding_disabled(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "velura-data"
+    product_dir = data_root / "product-images" / "eye-cream"
+    product_dir.mkdir(parents=True)
+    hero_path = product_dir / "hero-eyecream.png"
+    hero_path.write_bytes(b"hero")
+
+    output_dir = tmp_path / "out"
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "data_root": str(data_root),
+            "gemini": {"api_key": "test-key", "model": "gemini-test", "aspect_ratio": "9:16"},
+        },
+    )
+    monkeypatch.setattr("src.image_generator.genai.Client", lambda api_key: object())
+
+    brand_path = tmp_path / "brand-ref.png"
+    brand_path.write_bytes(b"brand")
+    model_path = tmp_path / "model-ref.png"
+    model_path.write_bytes(b"model")
+
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr("src.image_generator._brand_reference_paths", lambda: [brand_path])
+    monkeypatch.setattr("src.image_generator._model_reference_paths", lambda: [model_path])
+    monkeypatch.setattr("src.image_generator.db.insert_cost", lambda cost: 1)
+
+    def fake_build_contents_multi(reference_paths, prompt):
+        captured["reference_paths"] = [str(path) for path in reference_paths]
+        captured["prompt"] = prompt
+        return prompt
+
+    monkeypatch.setattr("src.image_generator._build_contents_multi", fake_build_contents_multi)
+    monkeypatch.setattr("src.image_generator._generate_with_retries", lambda *args, **kwargs: b"png")
+
+    content = Content(
+        id="content-1",
+        product_sku="eye-cream",
+        asset_manifest_json=json.dumps({"velura_branding": False}),
+    )
+    product = Product(sku="eye-cream", name="Eye Cream")
+    plan = {
+        "frames": [
+            {
+                "role": "lifestyle_portrait",
+                "image_prompt": "Soft premium portrait.",
+            }
+        ]
+    }
+
+    result_paths = generate_frame_images_for_plan(content, product, plan, output_dir=output_dir)
+
+    assert len(result_paths) == 1
+    assert captured["reference_paths"] == [str(hero_path), str(model_path)]
+    assert str(brand_path) not in captured["reference_paths"]
+    assert "without forcing an explicit wordmark" in captured["prompt"]
+
+
+# --- Nolabel reference selection (non-branded generation) ---
+
+
+@pytest.mark.skipif(
+    _hero_image_path_for_content is None,
+    reason="Requires _hero_image_path_for_content(content, product) in image_generator",
+)
+def test_first_hero_image_path_prefers_nolabel_when_non_branded(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """When velura_branding is false, hero selection should prefer -nolabel- in filenames."""
+    data_root = tmp_path / "velura-data"
+    product_dir = data_root / "product-images" / "eye-cream"
+    product_dir.mkdir(parents=True)
+
+    hero_labeled = product_dir / "hero-eyecream.png"
+    hero_labeled.write_bytes(b"labeled")
+    hero_nolabel = product_dir / "hero-nolabel-eyecream.png"
+    hero_nolabel.write_bytes(b"nolabel")
+
+    monkeypatch.setattr("src.config._config", {"data_root": str(data_root)})
+
+    content = Content(
+        id="content-1",
+        product_sku="eye-cream",
+        asset_manifest_json=json.dumps({"velura_branding": False}),
+    )
+    product = Product(sku="eye-cream", name="Eye Cream")
+
+    hero_path = _hero_image_path_for_content(content, product)
+
+    assert hero_path == hero_nolabel
+    assert "-nolabel-" in hero_path.stem
+
+
+@pytest.mark.skipif(
+    _hero_image_path_for_content is None,
+    reason="Requires _hero_image_path_for_content(content, product) in image_generator",
+)
+def test_first_hero_image_path_ignores_nolabel_preference_when_branded(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """When velura_branding is true (default), hero selection should NOT prefer -nolabel-."""
+    data_root = tmp_path / "velura-data"
+    product_dir = data_root / "product-images" / "eye-cream"
+    product_dir.mkdir(parents=True)
+
+    hero_labeled = product_dir / "hero-eyecream.png"
+    hero_labeled.write_bytes(b"labeled")
+    hero_nolabel = product_dir / "hero-nolabel-eyecream.png"
+    hero_nolabel.write_bytes(b"nolabel")
+
+    monkeypatch.setattr("src.config._config", {"data_root": str(data_root)})
+
+    content = Content(
+        id="content-1",
+        product_sku="eye-cream",
+        asset_manifest_json=json.dumps({"velura_branding": True}),
+    )
+    product = Product(sku="eye-cream", name="Eye Cream")
+
+    hero_path = _hero_image_path_for_content(content, product)
+
+    assert hero_path == hero_labeled
+
+
+@pytest.mark.skipif(
+    _hero_image_path_for_content is None,
+    reason="Requires _hero_image_path_for_content(content, product) in image_generator",
+)
+def test_hero_image_path_falls_back_to_labeled_when_no_nolabel_exists(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """When non-branded but no -nolabel- hero exists, use the labeled hero."""
+    data_root = tmp_path / "velura-data"
+    product_dir = data_root / "product-images" / "eye-cream"
+    product_dir.mkdir(parents=True)
+
+    hero_labeled = product_dir / "hero-eyecream.png"
+    hero_labeled.write_bytes(b"labeled")
+
+    monkeypatch.setattr("src.config._config", {"data_root": str(data_root)})
+
+    content = Content(
+        id="content-1",
+        product_sku="eye-cream",
+        asset_manifest_json=json.dumps({"velura_branding": False}),
+    )
+    product = Product(sku="eye-cream", name="Eye Cream")
+
+    hero_path = _hero_image_path_for_content(content, product)
+
+    assert hero_path == hero_labeled
+
+
+def test_generate_starting_image_uses_nolabel_hero_when_non_branded(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Starting-image grounding should prefer -nolabel- hero when non-branded."""
+    data_root = tmp_path / "velura-data"
+    product_dir = data_root / "product-images" / "eye-cream"
+    product_dir.mkdir(parents=True)
+
+    hero_labeled = product_dir / "hero-eyecream.png"
+    hero_labeled.write_bytes(b"labeled")
+    hero_nolabel = product_dir / "hero-nolabel-eyecream.png"
+    hero_nolabel.write_bytes(b"nolabel")
+
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "data_root": str(data_root),
+            "gemini": {"api_key": "test-key", "model": "gemini-test", "aspect_ratio": "9:16"},
+        },
+    )
+    monkeypatch.setattr("src.image_generator.genai.Client", lambda api_key: object())
+    monkeypatch.setattr("src.image_generator.db.insert_cost", lambda cost: 1)
+
+    captured: dict[str, object] = {}
+
+    def fake_build_contents(prompt: str, reference_image_path: Path | None):
+        captured["reference_image_path"] = reference_image_path
+        return prompt
+
+    monkeypatch.setattr("src.image_generator._build_contents", fake_build_contents)
+    monkeypatch.setattr("src.image_generator._generate_with_retries", lambda *args, **kwargs: b"png")
+
+    content = Content(
+        id="content-1",
+        product_sku="eye-cream",
+        starting_image_prompt="Soft minimal hero shot.",
+        asset_manifest_json=json.dumps({"velura_branding": False}),
+    )
+    product = Product(sku="eye-cream", name="Eye Cream")
+
+    generate_starting_image(content, product)
+
+    assert captured["reference_image_path"] == hero_nolabel
+    assert "-nolabel-" in str(captured["reference_image_path"])
+
+
+@pytest.mark.parametrize("frame_role", ["hero_macro", "hero_tabletop", "texture_detail"])
+def test_generate_frame_images_adds_nolabel_detail_for_detail_style_frames(
+    monkeypatch,
+    tmp_path: Path,
+    frame_role: str,
+) -> None:
+    """Detail-style frames (hero_macro, hero_tabletop, texture_detail) get nolabel detail refs when non-branded."""
+    data_root = tmp_path / "velura-data"
+    product_dir = data_root / "product-images" / "eye-cream"
+    product_dir.mkdir(parents=True)
+
+    hero_nolabel = product_dir / "hero-nolabel-eyecream.png"
+    hero_nolabel.write_bytes(b"hero")
+    detail_nolabel = product_dir / "detail-nolabel-texture.jpeg"
+    detail_nolabel.write_bytes(b"detail")
+
+    output_dir = tmp_path / "out"
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "data_root": str(data_root),
+            "gemini": {"api_key": "test-key", "model": "gemini-test", "aspect_ratio": "9:16"},
+        },
+    )
+    monkeypatch.setattr("src.image_generator.genai.Client", lambda api_key: object())
+    monkeypatch.setattr("src.image_generator._brand_reference_paths", lambda: [])
+    monkeypatch.setattr("src.image_generator._model_reference_paths", lambda: [])
+    monkeypatch.setattr("src.image_generator.db.insert_cost", lambda cost: 1)
+
+    captured: dict[str, list[list[str]]] = {"reference_paths_per_frame": []}
+
+    def fake_build_contents_multi(reference_paths, prompt):
+        captured["reference_paths_per_frame"].append([str(p) for p in reference_paths])
+        return prompt
+
+    monkeypatch.setattr("src.image_generator._build_contents_multi", fake_build_contents_multi)
+    monkeypatch.setattr("src.image_generator._generate_with_retries", lambda *args, **kwargs: b"png")
+
+    content = Content(
+        id="content-1",
+        product_sku="eye-cream",
+        asset_manifest_json=json.dumps({"velura_branding": False}),
+    )
+    product = Product(sku="eye-cream", name="Eye Cream")
+    plan = {"frames": [{"role": frame_role, "image_prompt": "Product close-up."}]}
+
+    generate_frame_images_for_plan(content, product, plan, output_dir=output_dir)
+
+    refs = captured["reference_paths_per_frame"][0]
+    assert str(hero_nolabel) in refs
+    assert str(detail_nolabel) in refs
+
+
+def test_generate_frame_images_omits_nolabel_detail_for_lifestyle_frame_when_non_branded(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Lifestyle frames should not get nolabel detail refs; only hero (nolabel when non-branded)."""
+    data_root = tmp_path / "velura-data"
+    product_dir = data_root / "product-images" / "eye-cream"
+    product_dir.mkdir(parents=True)
+
+    hero_nolabel = product_dir / "hero-nolabel-eyecream.png"
+    hero_nolabel.write_bytes(b"hero")
+    detail_nolabel = product_dir / "detail-nolabel-texture.jpeg"
+    detail_nolabel.write_bytes(b"detail")
+
+    model_path = tmp_path / "model.png"
+    model_path.write_bytes(b"model")
+
+    output_dir = tmp_path / "out"
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "data_root": str(data_root),
+            "gemini": {"api_key": "test-key", "model": "gemini-test", "aspect_ratio": "9:16"},
+        },
+    )
+    monkeypatch.setattr("src.image_generator.genai.Client", lambda api_key: object())
+    monkeypatch.setattr("src.image_generator._brand_reference_paths", lambda: [])
+    monkeypatch.setattr("src.image_generator._model_reference_paths", lambda: [model_path])
+    monkeypatch.setattr("src.image_generator.db.insert_cost", lambda cost: 1)
+
+    captured: dict[str, list[list[str]]] = {"reference_paths_per_frame": []}
+
+    def fake_build_contents_multi(reference_paths, prompt):
+        captured["reference_paths_per_frame"].append([str(p) for p in reference_paths])
+        return prompt
+
+    monkeypatch.setattr("src.image_generator._build_contents_multi", fake_build_contents_multi)
+    monkeypatch.setattr("src.image_generator._generate_with_retries", lambda *args, **kwargs: b"png")
+
+    content = Content(
+        id="content-1",
+        product_sku="eye-cream",
+        asset_manifest_json=json.dumps({"velura_branding": False}),
+    )
+    product = Product(sku="eye-cream", name="Eye Cream")
+    plan = {
+        "frames": [
+            {"role": "lifestyle_portrait", "image_prompt": "Person with product."},
+        ]
+    }
+
+    generate_frame_images_for_plan(content, product, plan, output_dir=output_dir)
+
+    refs = captured["reference_paths_per_frame"][0]
+    assert str(hero_nolabel) in refs
+    assert str(detail_nolabel) not in refs
+
+
+def test_generate_frame_images_branded_does_not_add_nolabel_detail_refs(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """When branded, texture_detail frames should NOT get nolabel detail refs; branded behavior unchanged."""
+    data_root = tmp_path / "velura-data"
+    product_dir = data_root / "product-images" / "eye-cream"
+    product_dir.mkdir(parents=True)
+
+    hero_labeled = product_dir / "hero-eyecream.png"
+    hero_labeled.write_bytes(b"hero")
+    detail_nolabel = product_dir / "detail-nolabel-texture.jpeg"
+    detail_nolabel.write_bytes(b"detail")
+
+    output_dir = tmp_path / "out"
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "data_root": str(data_root),
+            "gemini": {"api_key": "test-key", "model": "gemini-test", "aspect_ratio": "9:16"},
+        },
+    )
+    monkeypatch.setattr("src.image_generator.genai.Client", lambda api_key: object())
+    monkeypatch.setattr("src.image_generator._brand_reference_paths", lambda: [])
+    monkeypatch.setattr("src.image_generator._model_reference_paths", lambda: [])
+    monkeypatch.setattr("src.image_generator.db.insert_cost", lambda cost: 1)
+
+    captured: dict[str, list[list[str]]] = {"reference_paths_per_frame": []}
+
+    def fake_build_contents_multi(reference_paths, prompt):
+        captured["reference_paths_per_frame"].append([str(p) for p in reference_paths])
+        return prompt
+
+    monkeypatch.setattr("src.image_generator._build_contents_multi", fake_build_contents_multi)
+    monkeypatch.setattr("src.image_generator._generate_with_retries", lambda *args, **kwargs: b"png")
+
+    content = Content(
+        id="content-1",
+        product_sku="eye-cream",
+        asset_manifest_json=json.dumps({"velura_branding": True}),
+    )
+    product = Product(sku="eye-cream", name="Eye Cream")
+    plan = {
+        "frames": [
+            {"role": "texture_detail", "image_prompt": "Close-up texture shot."},
+        ]
+    }
+
+    generate_frame_images_for_plan(content, product, plan, output_dir=output_dir)
+
+    refs = captured["reference_paths_per_frame"][0]
+    assert str(hero_labeled) in refs
+    assert str(detail_nolabel) not in refs

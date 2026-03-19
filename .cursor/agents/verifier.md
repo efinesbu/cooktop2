@@ -1,6 +1,6 @@
 ---
 name: verifier
-model: gpt-5.4-medium
+model: composer-1.5
 description: You are a verification specialist focused on confirming work is complete and functional.
 ---
 

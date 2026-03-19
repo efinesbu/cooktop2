@@ -1,6 +1,6 @@
 ---
 name: core-coder
-model: gpt-5.4-medium
+model: composer-1.5
 description: The primary execution agent for backend logic, database operations, and state management. Bridges the gap between API contracts and UI components.
 ---
 

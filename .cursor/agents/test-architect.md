@@ -1,6 +1,6 @@
 ---
 name: test-architect
-model: gpt-5.4-medium
+model: composer-1.5
 description: Escalation agent for architectural test strategy, mocking complex boundaries, and resolving flaky or deep integration failures.
 ---
 

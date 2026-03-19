@@ -21,6 +21,34 @@ INITIAL_BACKOFF = 2.0
 # Approximate cost per 1K chars for TTS (gpt-4o-mini-tts pricing)
 TTS_COST_PER_1K_CHARS_USD = 0.015
 
+# Unicode punctuation -> ASCII-safe (aligned with prompt_generator._UNICODE_TEXT_REPLACEMENTS)
+_UNICODE_TTS_REPLACEMENTS = {
+    "\u00a0": " ",
+    "\u200b": "",
+    "\u200c": "",
+    "\u200d": "",
+    "\ufeff": "",
+    "\u2018": "'",
+    "\u2019": "'",
+    "\u201a": "'",
+    "\u201b": "'",
+    "\u201c": '"',
+    "\u201d": '"',
+    "\u201e": '"',
+    "\u2026": "...",
+    "\u2013": "-",
+    "\u2014": "-",
+    "\u2212": "-",
+}
+
+
+def _normalize_for_tts(text: str) -> str:
+    """Normalize Unicode punctuation to ASCII-safe text before TTS API call."""
+    result = text
+    for source, target in _UNICODE_TTS_REPLACEMENTS.items():
+        result = result.replace(source, target)
+    return result
+
 
 def _load_openai_module() -> Any:
     try:
@@ -93,6 +121,7 @@ def generate_voiceover(
     response_format = cfg.get("response_format", TTS_RESPONSE_FORMAT)
     instructions = _build_tts_instructions(voice_instructions, lang)
 
+    normalized_script = _normalize_for_tts(script)
     last_exc: Exception | None = None
     delay = INITIAL_BACKOFF
     for attempt in range(1, MAX_RETRIES + 1):
@@ -100,7 +129,7 @@ def generate_voiceover(
             response = client.audio.speech.create(
                 model=cfg["model"],
                 voice=voice,
-                input=script,
+                input=normalized_script,
                 instructions=instructions,
                 response_format=response_format,
             )

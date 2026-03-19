@@ -116,6 +116,46 @@ def test_run_manual_supports_partial_overrides(monkeypatch) -> None:
     assert calls == [("benefit_spotlight", "bold_claim"), ("benefit_spotlight", "question")]
 
 
+def test_run_manual_threads_no_velura_branding_flag(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli_module.db,
+        "get_product",
+        lambda sku: Product(sku=sku, name=f"Product {sku}"),
+    )
+
+    captured: list[bool] = []
+
+    def fake_generate_single(
+        product,
+        theme,
+        hook_type,
+        generation_index,
+        should_post,
+        creative_format=None,
+        video_v2=False,
+        video_v3=False,
+        cta_type=None,
+        proof_type=None,
+        script_style=None,
+        **kwargs,
+    ):
+        captured.append(kwargs["velura_branding"])
+        return object()
+
+    monkeypatch.setattr(cli_module, "_generate_single", fake_generate_single)
+
+    cli_module._run_manual(
+        ("sku-1",),
+        ("benefit_spotlight",),
+        ("question",),
+        count=1,
+        should_post=False,
+        velura_branding=False,
+    )
+
+    assert captured == [False]
+
+
 def test_run_manual_repeats_same_locked_pair_without_rotation(monkeypatch) -> None:
     monkeypatch.setattr(
         cli_module.db,

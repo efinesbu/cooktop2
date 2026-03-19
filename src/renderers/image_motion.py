@@ -13,7 +13,7 @@ from src.models import Content, Cost, Product, ProductImage
 from src.voiceover_generator import generate_voiceover
 
 from .base import BaseRenderer
-from .ffmpeg_utils import find_ffmpeg
+from .ffmpeg_utils import _mux_audio_into_video, _tts_enabled_for_format, find_ffmpeg
 from .registry import register_renderer
 
 logger = logging.getLogger(__name__)
@@ -143,32 +143,6 @@ def _parse_manifest(content: Content) -> dict:
         return data if isinstance(data, dict) else {}
     except json.JSONDecodeError:
         return {}
-
-
-def _mux_audio_into_video(ffmpeg: str, video_path: Path, audio_path: Path, output_path: Path) -> None:
-    """Mux audio track into video. Uses -shortest to trim to shorter stream."""
-    cmd = [
-        ffmpeg, "-y",
-        "-i", str(video_path),
-        "-i", str(audio_path),
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-map", "0:v:0",
-        "-map", "1:a:0",
-        "-shortest",
-        str(output_path),
-    ]
-    subprocess.run(cmd, check=True, capture_output=True)
-
-
-def _tts_enabled_for_format(creative_format: str) -> bool:
-    """True if TTS is enabled for this creative format."""
-    enabled = config.get("openai.tts_enabled_formats")
-    if enabled is None:
-        return creative_format == "image_motion_15s"
-    if not isinstance(enabled, list):
-        return False
-    return creative_format in enabled
 
 
 @register_renderer

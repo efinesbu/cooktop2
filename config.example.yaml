@@ -24,12 +24,12 @@ openai:
   # GPT-5.4 pricing (defaults): $2.50/1M input, $15/1M output
   # input_per_million_usd: 2.50
   # output_per_million_usd: 15.0
-  # TTS voiceover for image_motion_15s (uses same api_key)
+  # TTS voiceover for image_motion_15s and stitched ai_video_flex_15s (uses same api_key)
   # tts_model: "gpt-4o-mini-tts"
   # tts_voice_cycle: ["marin"]
   # tts_response_format: "wav"
   # tts_language: "english"
-  # tts_enabled_formats: ["image_motion_15s"]
+  # tts_enabled_formats: ["image_motion_15s", "ai_video_flex_15s"]
 
 gemini:
   api_key: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"

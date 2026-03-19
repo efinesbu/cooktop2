@@ -3,11 +3,17 @@ from __future__ import annotations
 import importlib
 import json
 import logging
+import random
 import re
 import time
 import unicodedata
 import uuid
 from typing import Any
+
+
+def _should_include_v3_cta() -> bool:
+    """10% chance of including CTA in V3 video. Deterministic tests can monkeypatch this."""
+    return random.random() < 0.10
 
 from src import config, db
 from src.creative_strategy import whitelist_prompt_lines
@@ -427,6 +433,47 @@ def _build_voiceover_plan(
     }
 
 
+def _collect_timeline_scripts(timeline: list[Any]) -> list[str]:
+    """Return non-empty timeline script lines in scene order."""
+    scripts: list[str] = []
+    for scene in timeline:
+        if not isinstance(scene, dict):
+            continue
+        script = scene.get("script")
+        if isinstance(script, str):
+            script = script.strip()
+            if script:
+                scripts.append(script)
+    return scripts
+
+
+def _build_v3_voiceover_plan(
+    timeline: list[Any],
+    content_id: str,
+    total_duration_seconds: float,
+) -> dict[str, Any] | None:
+    """Build durable stitched voiceover plan for V3 timeline manifests."""
+    timeline_scripts = _collect_timeline_scripts(timeline)
+    if not timeline_scripts:
+        return None
+    voiceover_script = _sanitize_generated_text(" ".join(timeline_scripts))
+    word_count = len(voiceover_script.split())
+    speech_rate = (
+        word_count / total_duration_seconds
+        if total_duration_seconds > 0
+        else VOICEOVER_TARGET_WORDS_PER_SECOND
+    )
+    return {
+        "script_template_id": "timeline_stitch_v3",
+        "voiceover_script": voiceover_script,
+        "voice": _pick_voice(content_id),
+        "voice_instructions": TTS_VOICE_INSTRUCTIONS,
+        "language": "english",
+        "speech_rate_words_per_second": round(speech_rate, 1),
+        "estimated_word_count": word_count,
+    }
+
+
 _IMAGE_MOTION_VOICEOVER_SYSTEM_PROMPT = """\
 You are an expert short-form ad scriptwriter for premium product image-motion ads.
 Your scripts will be read aloud by a single voice actor. Every word must earn its place.
@@ -666,7 +713,9 @@ def _generate_image_motion_voiceover_plan(
         "timing_rationale": str(data.get("timing_rationale") or "").strip(),
         "estimated_word_count": int(data["estimated_word_count"]),
     }
-    return voiceover_plan, user_msg, raw, response
+    # Expose sanitized JSON for debug panel; raw response may contain Unicode punctuation.
+    voice_prompt_output = json.dumps(data)
+    return voiceover_plan, user_msg, voice_prompt_output, response
 
 
 _AI_VIDEO_FLEX_SYSTEM_PROMPT = """\
@@ -769,7 +818,7 @@ Generate exactly 1 unique creative for a 15-second video. Output MUST use a time
 - Return hook_text, platform_captions, hashtags.
 - Choose content_goal: "conversion" (direct-response) or "engagement" (saves, shares, follows, watch-through).
 - When content_goal is "engagement", CTA can be softer; prioritize stopping the scroll and earning a save or follow.
-- If product reference images are provided, preserve the real package silhouette, label layout, and visible brand wordmark from the hero references in the starting frame and product hero scenes. Do not genericize or omit on-pack branding.
+- If product reference images are provided, preserve the real package silhouette, and visible brand wordmark from the hero references in the starting frame and product hero scenes. Do not genericize or omit on-pack branding.
 - Use plain ASCII characters only in every field. No emoji or Unicode punctuation.
 
 STRICT TIMING RULES
@@ -878,6 +927,7 @@ NARRATION STYLE: THIRD PERSON
 PACING
 - Write voiceover scripts that fit a moderate speaking pace of 2-3 words per second for each scene duration.
 - Not every scene needs voiceover. 1-2 scenes can be visual-only beats (music and visual) for breathing room. Mark these with script: null.
+- The final narration may be stitched separately from the visuals, so do not depend on precise lip sync or talking-mouth performance.
 
 CTA APPROACH: SOFT ENGAGEMENT
 - The final scene should close with a soft, curiosity-driven call to action. Never hard-sell.
@@ -1024,6 +1074,69 @@ def _has_model_reference_assets() -> bool:
         return False
     return any(models_dir.iterdir())
 
+
+def _hero_reference_instruction(velura_branding: bool) -> str:
+    if velura_branding:
+        return (
+            "Reference-image rule: preserve the real package silhouette, label layout, "
+            "and visible brand wordmark from hero product images. Do not genericize or "
+            "omit the on-pack Velura branding in the starting image or product hero shots."
+        )
+    return (
+        "Reference-image rule: preserve the real package silhouette, label layout, "
+        "and overall packaging appearance from hero product images. Keep colors and "
+        "packaging details grounded in the references without forcing an added wordmark."
+    )
+
+
+def _system_prompt_for_branding(base_prompt: str, velura_branding: bool) -> str:
+    if velura_branding:
+        return base_prompt
+
+    replacements = (
+        (
+            "the brand 'velura' in brown writing using font style Cormorant Garamond, Georgia, Times New Roman, serif",
+            "warm-neutral brown serif typography cues using Cormorant Garamond, Georgia, Times New Roman, serif",
+        ),
+        (
+            'brand "velura" in brown serif (Cormorant Garamond, Georgia, Times New Roman)',
+            "warm-neutral brown serif typography cues (Cormorant Garamond, Georgia, Times New Roman)",
+        ),
+        (
+            "brand 'velura' in brown serif (Cormorant Garamond, Georgia, Times New Roman, serif)",
+            "warm-neutral brown serif typography cues (Cormorant Garamond, Georgia, Times New Roman, serif)",
+        ),
+        (
+            "brand velura in brown serif",
+            "warm-neutral brown serif typography cues",
+        ),
+        (
+            "BRANDING CONTEXT: provided in the user message. Use the brand name and palette as soft visual anchors for consistency but let the creative breathe.",
+            "STYLE CONTEXT: provided in the user message. Preserve the premium warm-neutral palette and elegant serif typography cues without forcing an explicit wordmark.",
+        ),
+        (
+            "preserve visible packaging branding/wordmark and label layout from hero reference images when provided",
+            "preserve packaging silhouette, label layout, and overall appearance from hero reference images when provided",
+        ),
+        (
+            "preserve packaging branding from hero reference images when provided",
+            "preserve packaging appearance from hero reference images when provided",
+        ),
+        (
+            "preserve the real package silhouette, label layout, and visible brand wordmark from the hero references in the starting frame and product hero scenes. Do not genericize or omit on-pack branding.",
+            "preserve the real package silhouette, label layout, and overall packaging appearance from the hero references in the starting frame and product hero scenes. Do not invent or add extra brand text.",
+        ),
+        (
+            "preserve the real package silhouette, label layout, and visible brand wordmark in the starting frame and product hero scenes.",
+            "preserve the real package silhouette, label layout, and overall packaging appearance in the starting frame and product hero scenes.",
+        ),
+    )
+
+    prompt = base_prompt
+    for old, new in replacements:
+        prompt = prompt.replace(old, new)
+    return prompt
+
 def _build_user_message(
     product: Product,
     theme: str,
@@ -1035,9 +1148,11 @@ def _build_user_message(
     performance_summary: str | None = None,
     video_v2: bool = False,
     video_v3: bool = False,
+    v3_cta_enabled: bool = True,
     cta_type: str = "see_product",
     proof_type: str = "none",
     script_style: str = "conversational",
+    velura_branding: bool = True,
 ) -> str:
     lines = [
         f"Product: {product.name}",
@@ -1056,10 +1171,15 @@ def _build_user_message(
             lines.append("")
             lines.append(f"THEME GUIDANCE: {theme_def.summary} {theme_def.prompt_guidance}")
         lines.append("")
-        lines.append("BRANDING KIT:")
-        lines.append("  Brand name: Velura")
+        lines.append("BRANDING KIT:" if velura_branding else "STYLE KIT:")
+        if velura_branding:
+            lines.append("  Brand name: Velura")
         lines.append("  Brand colors: warm brown, cream, neutral earth tones")
         lines.append("  Brand font: Cormorant Garamond (serif)")
+        if not velura_branding:
+            lines.append(
+                "  Wordmark guidance: omit explicit brand-name or wordmark callouts; keep the same premium warm-neutral palette and serif cues."
+            )
     else:
         lines.append("Locked creative constraints:")
         lines.append(f"  - Theme must be: {theme}")
@@ -1078,11 +1198,12 @@ def _build_user_message(
         lines.append("Available product images:")
         lines.extend(img_descriptions)
         if any((img.image_type or "").strip().lower() == "hero" for img in product_images):
-            lines.append(
-                "Reference-image rule: preserve the real package silhouette, label layout, "
-                "and visible brand wordmark from hero product images. Do not genericize or "
-                "omit the on-pack Velura branding in the starting image or product hero shots."
-            )
+            lines.append(_hero_reference_instruction(velura_branding))
+    if not velura_branding:
+        lines.append("")
+        lines.append(
+            "Branding mode: keep the premium warm-neutral palette, brown tones, and elegant serif typography cues, but do not add an explicit brand name or wordmark."
+        )
     if research_summary and research_summary.strip():
         lines.append("")
         lines.append("RESEARCH INSIGHT (use to inform your creative choices):")
@@ -1110,10 +1231,15 @@ def _build_user_message(
         lines.append("VIDEO V2: Use the timeline format with exactly 4 scenes and absolute timestamps [0:00–0:03], [0:03–0:07], [0:07–0:11], [0:11–0:15]. Scenes 2–4 must start with 'HARD CUT:'.")
     if video_v3:
         lines.append("")
+        cta_instruction = (
+            "Soft CTA only. Include a soft call to action in the final scene and set cta_text to the phrase used."
+            if v3_cta_enabled
+            else "Omit CTA entirely. Do not include any call to action in the final scene. Set cta_text to empty string."
+        )
         lines.append(
-            "VIDEO V3: Use the flexible timeline format with 6-8 scenes, each 1.5-2.5 seconds, "
-            "totaling 13-15 seconds. Scenes 2+ must start with 'HARD CUT:'. "
-            "Third-person narrator voice. Include background_music metadata. Soft CTA only."
+            f"VIDEO V3: Use the flexible timeline format with 6-8 scenes, each 1.5-2.5 seconds, "
+            f"totaling 13-15 seconds. Scenes 2+ must start with 'HARD CUT:'. "
+            f"Third-person narrator voice. Include background_music metadata. {cta_instruction}"
         )
     return "\n".join(lines)
 
@@ -1129,6 +1255,7 @@ def generate_content(
     cta_type: str = "see_product",
     proof_type: str = "none",
     script_style: str = "conversational",
+    velura_branding: bool = True,
 ) -> tuple[Content, dict]:
     """Call OpenAI to generate a structured content script for a 15-second video ad.
 
@@ -1177,6 +1304,7 @@ def generate_content(
         performance_summary, performance_rationale = get_image_motion_performance_summary(
             product.sku, rank_by=rank_by
         )
+    v3_cta_enabled = _should_include_v3_cta() if video_v3 else True
     user_msg = _build_user_message(
         product, theme, hook_type, product_images,
         research_summary=research_summary,
@@ -1185,9 +1313,11 @@ def generate_content(
         performance_summary=performance_summary,
         video_v2=video_v2,
         video_v3=video_v3,
+        v3_cta_enabled=v3_cta_enabled,
         cta_type=cta_type,
         proof_type=proof_type,
         script_style=script_style,
+        velura_branding=velura_branding,
     )
     content_id = uuid.uuid4().hex[:16]
 
@@ -1195,13 +1325,14 @@ def generate_content(
     use_ai_video_flex = fmt == "ai_video_flex_15s"
     use_ai_video_v2 = video_v2
     use_ai_video_v3 = video_v3
-    system_prompt = (
+    base_system_prompt = (
         _IMAGE_MOTION_SYSTEM_PROMPT if use_image_motion else
         (_AI_VIDEO_V3_SYSTEM_PROMPT if use_ai_video_v3 else
          (_AI_VIDEO_V2_SYSTEM_PROMPT if use_ai_video_v2 else
           (_AI_VIDEO_FLEX_SYSTEM_PROMPT if use_ai_video_flex else
            (_SIMPLIFIED_SYSTEM_PROMPT if fmt != "ai_video_15s" else _SYSTEM_PROMPT))))
     )
+    system_prompt = _system_prompt_for_branding(base_system_prompt, velura_branding)
 
     # V3 needs higher token budget for 6-8 scenes + background_music
     if use_image_motion:
@@ -1232,6 +1363,7 @@ def generate_content(
             parsed = _parse_response(
                 response, theme=theme, hook_type=hook_type, creative_format=fmt,
                 video_v2=video_v2, video_v3=video_v3,
+                v3_cta_enabled=v3_cta_enabled,
                 cta_type=cta_type, proof_type=proof_type, script_style=script_style,
             )
             break
@@ -1282,6 +1414,7 @@ def generate_content(
         )
         asset_manifest_json = json.dumps({
             "format": "image_motion_15s",
+            "velura_branding": velura_branding,
             "image_plan": plan,
             "voiceover_plan": voiceover_plan,
         })
@@ -1347,6 +1480,13 @@ def generate_content(
                 manifest_payload["strategy_metadata"] = parsed["strategy_metadata"]
             if "timeline" in parsed:
                 manifest_payload["timeline"] = parsed["timeline"]
+                voiceover_plan = _build_v3_voiceover_plan(
+                    parsed["timeline"],
+                    content_id,
+                    float(total),
+                )
+                if voiceover_plan is not None:
+                    manifest_payload["voiceover_plan"] = voiceover_plan
             if "background_music" in parsed:
                 manifest_payload["background_music"] = parsed["background_music"]
         asset_manifest_json = json.dumps(manifest_payload)
@@ -1360,15 +1500,13 @@ def generate_content(
     elif (video_v2 or video_v3) and "strategy_metadata" in parsed:
         strategy_metadata_json = json.dumps(parsed["strategy_metadata"])
 
+    cta_text_for_content = parsed.get("cta_text")
     # V3: classify hook_type, script_style, proof_type from the generated script
     v3_classified: dict[str, str] = {}
     if video_v3:
-        cta_type = "soft_cta"
-        timeline_scripts = [
-            (scene.get("script") or "")
-            for scene in (parsed.get("timeline") or [])
-            if isinstance(scene, dict)
-        ]
+        cta_type = "soft_cta" if v3_cta_enabled else "see_product"
+        cta_text_for_content = parsed.get("cta_text") if v3_cta_enabled else None
+        timeline_scripts = _collect_timeline_scripts(parsed.get("timeline") or [])
         v3_classified = _classify_v3_script(
             client, openai_module,
             parsed.get("hook_text", ""),
@@ -1390,7 +1528,7 @@ def generate_content(
         hook_text=parsed["hook_text"],
         creative_format=parsed.get("creative_format") or fmt or "ai_video_15s",
         cta_type=cta_type,
-        cta_text=parsed.get("cta_text"),
+        cta_text=cta_text_for_content,
         problem_angle=parsed.get("problem_angle"),
         proof_type=proof_type,
         script_style=script_style,
@@ -1582,6 +1720,7 @@ def _parse_response(
     creative_format: str | None = None,
     video_v2: bool = False,
     video_v3: bool = False,
+    v3_cta_enabled: bool = True,
     cta_type: str = "see_product",
     proof_type: str = "none",
     script_style: str = "conversational",
@@ -1604,10 +1743,12 @@ def _parse_response(
 
     if use_ai_video_v3:
         required = [
-            "theme", "hook_text", "creative_format", "cta_text",
+            "theme", "hook_text", "creative_format",
             "starting_image_prompt", "timeline", "strategy_metadata",
             "background_music", "platform_captions", "hashtags",
         ]
+        if v3_cta_enabled:
+            required.append("cta_text")
     else:
         required = [
             "theme", "hook_type", "hook_text",
@@ -1632,7 +1773,7 @@ def _parse_response(
         raise ValueError(f"OpenAI response missing required fields: {missing}")
 
     if use_ai_video_v3:
-        _validate_v3_response_shape(data, theme=theme)
+        _validate_v3_response_shape(data, theme=theme, v3_cta_enabled=v3_cta_enabled)
         _validate_and_normalize_v3_timeline(data)
     else:
         _validate_response_shape(data, theme=theme, hook_type=hook_type, cta_type=cta_type, proof_type=proof_type, script_style=script_style)
@@ -1868,7 +2009,9 @@ def _validate_and_normalize_v2_timeline(data: dict[str, Any]) -> None:
     data["video_plan"] = video_plan
 
 
-def _validate_v3_response_shape(data: dict[str, Any], theme: str | None = None) -> None:
+def _validate_v3_response_shape(
+    data: dict[str, Any], theme: str | None = None, v3_cta_enabled: bool = True
+) -> None:
     """Validate V3-specific response shape (theme-only lock, no hook/cta/proof/style)."""
     returned_theme = str(data.get("theme", "")).strip()
     if not returned_theme:
@@ -1884,9 +2027,10 @@ def _validate_v3_response_shape(data: dict[str, Any], theme: str | None = None) 
     hook_text = str(data.get("hook_text", "")).strip()
     if not hook_text:
         raise ValueError("V3 response field `hook_text` must be a non-empty string.")
-    cta_text = str(data.get("cta_text", "")).strip()
-    if not cta_text:
-        raise ValueError("V3 response field `cta_text` must be a non-empty string.")
+    if v3_cta_enabled:
+        cta_text = str(data.get("cta_text", "")).strip()
+        if not cta_text:
+            raise ValueError("V3 response field `cta_text` must be a non-empty string.")
     fmt = str(data.get("creative_format", "")).strip()
     if fmt != "ai_video_flex_15s":
         raise ValueError(f"V3 response creative_format must be 'ai_video_flex_15s', got '{fmt}'.")

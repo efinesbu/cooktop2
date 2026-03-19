@@ -1,6 +1,6 @@
 ---
 name: debugger
-model: gpt-5.4-medium
+model: composer-1.5
 description: You are an expert debugger focused on root cause analysis.
 ---
 

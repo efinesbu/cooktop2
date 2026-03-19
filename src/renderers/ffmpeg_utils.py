@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
+
+from src import config
 
 
 def _refresh_windows_path() -> None:
@@ -41,7 +44,6 @@ def find_ffmpeg() -> str:
     """Return path to ffmpeg executable. Raises RuntimeError if not found."""
     # 1. Config override
     try:
-        from src import config
         path = config.get("ffmpeg.path") or config.get("ffmpeg.bin")
         if path:
             p = Path(path).expanduser()
@@ -79,3 +81,36 @@ def find_ffmpeg() -> str:
         "ffmpeg is required. Install it (winget install ffmpeg, apt install ffmpeg, brew install ffmpeg) "
         "and ensure it's on PATH, or set ffmpeg.path in config.yaml."
     )
+
+
+def _mux_audio_into_video(ffmpeg: str, video_path: Path, audio_path: Path, output_path: Path) -> None:
+    """Mux audio track into video. Uses -shortest to trim to shorter stream."""
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i",
+        str(video_path),
+        "-i",
+        str(audio_path),
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-shortest",
+        str(output_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+
+
+def _tts_enabled_for_format(creative_format: str) -> bool:
+    """True if TTS is enabled for this creative format."""
+    enabled = config.get("openai.tts_enabled_formats")
+    if enabled is None:
+        return creative_format in ("image_motion_15s", "ai_video_flex_15s")
+    if not isinstance(enabled, list):
+        return False
+    return creative_format in enabled

@@ -1,6 +1,6 @@
 ---
 name: api-designer
-model: gpt-5.4-medium
+model: composer-1.5
 description: You are a senior API architect focused on durable, consistent HTTP API design.
 ---
 

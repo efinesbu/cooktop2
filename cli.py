@@ -387,10 +387,24 @@ def _run_generation_job(
     cta_type: str | None = None,
     proof_type: str | None = None,
     script_style: str | None = None,
+    velura_branding: bool = True,
 ) -> Optional[Content]:
     product, theme, hook_type, generation_index = job
-    return _generate_single(product, theme, hook_type, generation_index, should_post, creative_format, video_v2,
-                           video_v3, cta_type, proof_type, script_style)
+    kwargs = {"velura_branding": velura_branding} if not velura_branding else {}
+    return _generate_single(
+        product,
+        theme,
+        hook_type,
+        generation_index,
+        should_post,
+        creative_format,
+        video_v2,
+        video_v3,
+        cta_type,
+        proof_type,
+        script_style,
+        **kwargs,
+    )
 
 
 def _generate_batch(
@@ -403,12 +417,23 @@ def _generate_batch(
     cta_type: str | None = None,
     proof_type: str | None = None,
     script_style: str | None = None,
+    velura_branding: bool = True,
 ) -> int:
     if not jobs:
         return 0
 
     def run_job(job):
-        return _run_generation_job(job, should_post, creative_format, video_v2, video_v3, cta_type, proof_type, script_style)
+        return _run_generation_job(
+            job,
+            should_post,
+            creative_format,
+            video_v2,
+            video_v3,
+            cta_type,
+            proof_type,
+            script_style,
+            velura_branding,
+        )
 
     if requested_count < PARALLEL_GENERATION_THRESHOLD and len(jobs) > 1:
         max_workers = min(len(jobs), requested_count)
@@ -417,16 +442,30 @@ def _generate_batch(
             return sum(1 for result in results if result)
 
     return sum(
-        1 for product, theme, hook_type, idx in jobs
-        if _generate_single(product, theme, hook_type, idx, should_post, creative_format, video_v2,
-                            video_v3, cta_type, proof_type, script_style)
+        1
+        for product, theme, hook_type, idx in jobs
+        if _generate_single(
+            product,
+            theme,
+            hook_type,
+            idx,
+            should_post,
+            creative_format,
+            video_v2,
+            video_v3,
+            cta_type,
+            proof_type,
+            script_style,
+            **({"velura_branding": velura_branding} if not velura_branding else {}),
+        )
     )
 
 
 def _generate_single(product: Product, theme: str | None, hook_type: str | None, generation_index: int,
                      should_post: bool, creative_format: str | None = None, video_v2: bool = False,
                      video_v3: bool = False,
-                     cta_type: str | None = None, proof_type: str | None = None, script_style: str | None = None) -> Optional[Content]:
+                     cta_type: str | None = None, proof_type: str | None = None,
+                     script_style: str | None = None, velura_branding: bool = True) -> Optional[Content]:
     spent, budget, within = check_budget()
     if not within:
         console.print(
@@ -449,6 +488,7 @@ def _generate_single(product: Product, theme: str | None, hook_type: str | None,
         product, resolved["theme"], resolved["hook_type"], images,
         creative_format, video_v2=video_v2, video_v3=video_v3,
         cta_type=resolved["cta_type"], proof_type=resolved["proof_type"], script_style=resolved["script_style"],
+        velura_branding=velura_branding,
     )
     if "prompt_input" in extras:
         _print_debug_panel(extras["prompt_input"], "Prompt")
@@ -945,12 +985,19 @@ def briefing_diagnose_cmd():
 @click.option("--cta-type", "cta_type", type=click.Choice(CTA_TYPES), default=None, help="CTA type (see_product, shop_now)")
 @click.option("--proof-type", "proof_type", type=click.Choice(PROOF_TYPES), default=None, help="Proof type (test_result, testimonial, before_after, ingredient, none)")
 @click.option("--script-style", "script_style", type=click.Choice(SCRIPT_STYLES), default=None, help="Script style (conversational, direct, storytelling, tip_based)")
+@click.option(
+    "--velura-branding/--no-velura-branding",
+    "velura_branding",
+    default=True,
+    show_default=True,
+    help="Include or omit explicit Velura wordmark and brand-name guidance during generation.",
+)
 @click.option("--post", "should_post", is_flag=True, help="Deprecated: use preview, approve, schedule, and post-due")
 def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
         hooks: tuple[str, ...], creative_format: str | None, video_v2: bool,
         video_v3: bool,
         count: int, rotate_theme_hook: bool, cta_type: str | None, proof_type: str | None,
-        script_style: str | None, should_post: bool):
+        script_style: str | None, velura_branding: bool, should_post: bool):
     """Generate content — manually or via bandit recommendations."""
     _init()
 
@@ -991,14 +1038,39 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
         sys.exit(1)
 
     if auto_mode:
-        _run_auto(count, should_post, creative_format, video_v2, video_v3, cta_type, proof_type, script_style)
+        _run_auto(
+            count,
+            should_post,
+            creative_format,
+            video_v2,
+            video_v3,
+            cta_type,
+            proof_type,
+            script_style,
+            velura_branding,
+        )
     else:
-        _run_manual(slugs, themes, hooks, count, should_post, creative_format, rotate_theme_hook, video_v2, video_v3, cta_type, proof_type, script_style)
+        _run_manual(
+            slugs,
+            themes,
+            hooks,
+            count,
+            should_post,
+            creative_format,
+            rotate_theme_hook,
+            video_v2,
+            video_v3,
+            cta_type,
+            proof_type,
+            script_style,
+            velura_branding,
+        )
 
 
 def _run_auto(count: int, should_post: bool, creative_format: str | None = None, video_v2: bool = False,
               video_v3: bool = False,
-              cta_type: str | None = None, proof_type: str | None = None, script_style: str | None = None):
+              cta_type: str | None = None, proof_type: str | None = None,
+              script_style: str | None = None, velura_branding: bool = True):
     products = db.list_products(
         active_only=True,
         exclude_excluded=True,
@@ -1045,7 +1117,8 @@ def _run_auto(count: int, should_post: bool, creative_format: str | None = None,
             idx += 1
 
     total = _generate_batch(jobs, should_post, requested_count=count, creative_format=creative_format, video_v2=video_v2,
-                           video_v3=video_v3, cta_type=cta_type, proof_type=proof_type, script_style=script_style)
+                           video_v3=video_v3, cta_type=cta_type, proof_type=proof_type,
+                           script_style=script_style, velura_branding=velura_branding)
 
     piece = "piece" if total == 1 else "pieces"
     console.print(f"\n[green]{total}[/green] {piece} of content generated ({len(products)} products eligible).")
@@ -1055,7 +1128,8 @@ def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
                 hooks: tuple[str, ...], count: int, should_post: bool,
                 creative_format: str | None = None, rotate_theme_hook: bool = False, video_v2: bool = False,
                 video_v3: bool = False,
-                cta_type: str | None = None, proof_type: str | None = None, script_style: str | None = None):
+                cta_type: str | None = None, proof_type: str | None = None,
+                script_style: str | None = None, velura_branding: bool = True):
     if not slugs:
         console.print("[red]Provide at least one --product or use --auto.[/red]")
         sys.exit(1)
@@ -1080,7 +1154,8 @@ def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
             idx += 1
 
     total = _generate_batch(jobs, should_post, requested_count=count, creative_format=creative_format, video_v2=video_v2,
-                           video_v3=video_v3, cta_type=cta_type, proof_type=proof_type, script_style=script_style)
+                           video_v3=video_v3, cta_type=cta_type, proof_type=proof_type,
+                           script_style=script_style, velura_branding=velura_branding)
 
     console.print(f"\n[green]{total}[/green] pieces of content generated.")
 

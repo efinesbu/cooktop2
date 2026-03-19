@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from pathlib import Path
@@ -30,7 +31,7 @@ def generate_starting_image(content: Content, product: Product) -> Path:
     client = genai.Client(api_key=api_key)
 
     prompt = _build_prompt(content, product)
-    reference_image_path = _first_hero_image_path(product)
+    reference_image_path = _hero_image_path_for_content(content, product)
     contents = _build_contents(prompt, reference_image_path)
 
     out_dir = config.videos_dir() / product.sku
@@ -78,21 +79,84 @@ def _first_hero_image_path(product: Product) -> Path | None:
     return hero_images[0] if hero_images else image_paths[0]
 
 
+def _hero_image_path_for_content(content: Content, product: Product) -> Path | None:
+    """Content-aware hero selection: prefer -nolabel- when non-branded, else use normal hero."""
+    image_dir = _product_image_dir(product)
+    if not image_dir.exists():
+        return None
+
+    image_paths = [
+        path
+        for path in sorted(image_dir.glob("*"))
+        if path.is_file() and path.suffix.lower() in _IMAGE_MIME
+    ]
+    if not image_paths:
+        return None
+
+    hero_images = [path for path in image_paths if "hero" in path.stem.lower()]
+    heroes = hero_images if hero_images else image_paths
+
+    if not _velura_branding_enabled(content):
+        nolabel_heroes = [p for p in heroes if "-nolabel-" in p.stem]
+        if nolabel_heroes:
+            return sorted(nolabel_heroes)[0]
+    return heroes[0]
+
+
+def _nolabel_detail_reference_paths(product: Product) -> list[Path]:
+    """Return nolabel detail/texture product images for non-branded detail-style frames."""
+    image_dir = _product_image_dir(product)
+    if not image_dir.exists():
+        return []
+    paths = [
+        p
+        for p in image_dir.glob("*")
+        if p.is_file()
+        and p.suffix.lower() in _IMAGE_MIME
+        and "-nolabel-" in p.stem
+        and ("detail" in p.stem.lower() or "texture" in p.stem.lower())
+    ]
+    return sorted(paths)
+
+
 def _mime_type_for_path(path: Path) -> str:
     suffix = path.suffix.lower()
     return _IMAGE_MIME.get(suffix, "image/png")
 
 
+def _velura_branding_enabled(content: Content) -> bool:
+    raw_manifest = content.asset_manifest_json or ""
+    if not raw_manifest.strip():
+        return True
+    try:
+        manifest = json.loads(raw_manifest)
+    except json.JSONDecodeError:
+        return True
+    if not isinstance(manifest, dict):
+        return True
+    value = manifest.get("velura_branding")
+    return value if isinstance(value, bool) else True
+
+
 def _build_prompt(content: Content, product: Product) -> str:
     base_prompt = content.starting_image_prompt or ""
+    velura_branding = _velura_branding_enabled(content)
 
     if _first_hero_image_path(product):
-        base_prompt += (
-            f"\n\nUse the attached reference image of the product '{product.name}' "
-            "to match its real appearance, packaging, label layout, and visible brand "
-            "wordmark as closely as possible. Do not replace, omit, or genericize the "
-            "on-pack branding from the reference."
-        )
+        if velura_branding:
+            base_prompt += (
+                f"\n\nUse the attached reference image of the product '{product.name}' "
+                "to match its real appearance, packaging, label layout, and visible brand "
+                "wordmark as closely as possible. Do not replace, omit, or genericize the "
+                "on-pack branding from the reference."
+            )
+        else:
+            base_prompt += (
+                f"\n\nUse the attached reference image of the product '{product.name}' "
+                "to match its real appearance, colors, packaging, and label layout as closely "
+                "as possible. Keep the packaging grounded in the reference without forcing an "
+                "added brand wordmark."
+            )
 
     return base_prompt
 
@@ -119,7 +183,7 @@ def generate_frame_images_for_plan(
 ) -> list[Path]:
     """Generate 3–5 frame images from an image_plan using Gemini.
 
-    Reference rules: hero (always), brand-kit (always), models (lifestyle frames only).
+    Reference rules: hero (always), brand-kit (when branding enabled), models (lifestyle frames only).
     Saves to output_dir/{content_id}_frame_{i}.png. Returns list of paths.
     """
     api_key = config.get("gemini.api_key")
@@ -138,26 +202,41 @@ def generate_frame_images_for_plan(
     out_dir = output_dir or (config.videos_dir() / product.sku)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    hero_path = _first_hero_image_path(product)
-    brand_paths = _brand_reference_paths()
+    hero_path = _hero_image_path_for_content(content, product)
+    velura_branding = _velura_branding_enabled(content)
+    brand_paths = _brand_reference_paths() if velura_branding else []
     model_paths = _model_reference_paths()
 
     LIFESTYLE_ROLES = {"lifestyle_portrait", "lifestyle_in_use"}
+    DETAIL_STYLE_ROLES = {"hero_macro", "hero_tabletop", "texture_detail"}
     result_paths: list[Path] = []
     for i, frame in enumerate(frames):
         role = (frame.get("role") or "").strip()
         is_lifestyle = role in LIFESTYLE_ROLES
+        is_detail_style = role in DETAIL_STYLE_ROLES
+        extra_detail_paths = (
+            _nolabel_detail_reference_paths(product)
+            if (not velura_branding and is_detail_style)
+            else []
+        )
         ref_paths = _collect_reference_paths(
-            hero_path, brand_paths, model_paths, is_lifestyle
+            hero_path, brand_paths, model_paths, is_lifestyle, extra_detail_paths
         )
         prompt = frame.get("image_prompt") or ""
         if not prompt.strip():
             raise ValueError(f"Frame {i} has no image_prompt")
         if hero_path:
-            prompt += (
-                f"\n\nUse the attached reference image of the product '{product.name}' "
-                "to match its real appearance, colors, and branding as closely as possible."
-            )
+            if velura_branding:
+                prompt += (
+                    f"\n\nUse the attached reference image of the product '{product.name}' "
+                    "to match its real appearance, colors, and branding as closely as possible."
+                )
+            else:
+                prompt += (
+                    f"\n\nUse the attached reference image of the product '{product.name}' "
+                    "to match its real appearance, colors, packaging, and label layout as "
+                    "closely as possible without forcing an explicit wordmark."
+                )
         contents = _build_contents_multi(ref_paths, prompt)
         image_bytes = _generate_with_retries(
             client, model_name, contents, aspect_ratio, max_attempts=3
@@ -200,8 +279,9 @@ def _collect_reference_paths(
     brand_paths: list[Path],
     model_paths: list[Path],
     include_models: bool,
+    extra_paths: list[Path] | None = None,
 ) -> list[Path]:
-    """Collect reference paths: hero + brand + (models if include_models)."""
+    """Collect reference paths: hero + brand + (models if include_models) + extra_paths."""
     out: list[Path] = []
     if hero_path and hero_path.is_file():
         out.append(hero_path)
@@ -212,6 +292,9 @@ def _collect_reference_paths(
         for p in model_paths:
             if p.is_file():
                 out.append(p)
+    for p in extra_paths or []:
+        if p.is_file():
+            out.append(p)
     return out
 
 

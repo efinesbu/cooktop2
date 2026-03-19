@@ -1,6 +1,6 @@
 ---
 name: test-writer
-model: gpt-5.4-mini-medium
+model: composer-1.5
 description: You are a QA engineer specializing in writing reliable, maintainable tests.
 ---
 

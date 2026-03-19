@@ -29,7 +29,7 @@ cp .env.example .env
 # Optional: `openai.classify_model` defaults to `gpt-4.1-mini` for `--video-v3` post-generation classification.
 
 # 6. Add a product to the local catalog
-python cli.py add-product --sku <product-slug> --name "Product Name" --url https://your-site.com/products/<handle>
+python cli.py add-product --sku <product-slug> --name "Product Name" --url https://your-site.com/products/<handle>  # use --descrption "product description"
 
 # 7. Register product images
 python cli.py register-images --product <product-slug>
@@ -103,12 +103,14 @@ This yields 8 creatives with bandit-recommended strategies from the current them
 
 - Theme is the only locked creative input during generation.
 - The LLM generates the scene script first, then a smaller model classifies the finished script into the closest `hook_type`, `script_style`, and `proof_type`.
+- xAI generates the visual video; OpenAI TTS generates narration separately, then Velura muxes the audio after render.
 - The product stays the only on-screen character and remains the center of attention.
 - The narrator is third-person, not the product speaking in first person.
 - The starting frame stays anamorphic and is still animated with Grok.
 - Environments are flexible and chosen from the script and theme instead of being locked to a luxury bathroom counter.
 - The final CTA is soft and engagement-oriented.
 - Background music is generated as metadata for later use and should support, not overpower, the voice script.
+- To enable stitched narration for this path, include `ai_video_flex_15s` in `openai.tts_enabled_formats`.
 
 Behavior:
 

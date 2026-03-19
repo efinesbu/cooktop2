@@ -198,6 +198,54 @@ def test_build_flex_video_prompt_includes_anatomy_guardrail() -> None:
 
     assert ANATOMY_GUARDRAIL in prompt
     assert "realistic hands, lips, teeth, and facial structure" in prompt
+    assert "Scene 1 voiceover: Why does this lipstick look expensive instantly?" in prompt
+    assert "Scene 2 voiceover: It is the smooth glide and rich color." in prompt
+
+
+def test_build_flex_video_prompt_omits_voiceover_lines_for_v3_manifest() -> None:
+    product = Product(sku="lipstick", name="Lux Lipstick")
+    content = Content(
+        id="content-flex-v3",
+        product_sku=product.sku,
+        theme="hidden_knowledge",
+        hook_type="question",
+        creative_format="ai_video_flex_15s",
+        asset_manifest_json=jsonlib.dumps(
+            {
+                "format": "ai_video_flex_15s",
+                "schema_version": 3,
+                "video_plan": {
+                    "total_duration_seconds": 14,
+                    "style_family": "anamorphic",
+                    "style_rationale": "Premium beauty finish.",
+                    "scenes": [
+                        {
+                            "duration_seconds": 2.0,
+                            "scene_description": "Macro lipstick hero shot.",
+                            "script": "Why does this lipstick look expensive instantly?",
+                        },
+                        {
+                            "duration_seconds": 2.0,
+                            "scene_description": "HARD CUT to a close swipe across lips and an arm swatch.",
+                            "script": "It is the smooth glide and rich color.",
+                        },
+                        {
+                            "duration_seconds": 2.0,
+                            "scene_description": "HARD CUT to finished lip look in mirror.",
+                            "script": "The creamy formula helps lips look polished fast.",
+                        },
+                    ],
+                },
+            }
+        ),
+    )
+
+    prompt = _build_flex_video_prompt(content, product)
+
+    assert "Scene 1 voiceover:" not in prompt
+    assert "Scene 2 voiceover:" not in prompt
+    assert "Scene 3 voiceover:" not in prompt
+    assert "Do not animate mouth movements or attempt lip sync; keep expression and motion readable without spoken-mouth performance because narration will be stitched separately." in prompt
 
 
 def test_generate_video_surfaces_413_for_original_image(
@@ -252,3 +300,127 @@ def test_generate_video_surfaces_413_for_original_image(
 
     with pytest.raises(RuntimeError, match="starting image as too large"):
         generate_video(content, starting_image, product)
+
+
+def test_generate_video_surfaces_poll_400_json_error(
+    tmp_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "xai": {
+                "api_key": "test-xai-key",
+                "model": "grok-imagine-video",
+                "poll_interval_seconds": 15,
+                "poll_timeout_seconds": 900,
+            },
+            "data_root": str(tmp_path / "velura-data"),
+        },
+    )
+    monkeypatch.setattr("src.video_generator.time.sleep", lambda _: None)
+
+    product = Product(sku="serum-x", name="Serum X")
+    content = Content(
+        id="content-poll-400",
+        product_sku=product.sku,
+        theme="benefit_spotlight",
+        hook_type="question",
+        scene_1_desc="Scene one.",
+        scene_1_script="Scene one voiceover.",
+        scene_2_desc="Scene two.",
+        scene_2_script="Scene two voiceover.",
+    )
+    db.upsert_product(product)
+    db.insert_content(content)
+
+    starting_image = tmp_path / "start.png"
+    starting_image.write_bytes(b"fake-png-image")
+
+    def post_handler(request: httpx.Request, payload: dict) -> httpx.Response:
+        del payload
+        return httpx.Response(200, json={"request_id": "req-400"}, request=request)
+
+    def get_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={"error": "invalid request id"},
+            request=request,
+        )
+
+    monkeypatch.setattr(
+        "src.video_generator.httpx.Client",
+        lambda **kwargs: FakeClient(post_handler=post_handler, get_handler=get_handler, **kwargs),
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        generate_video(content, starting_image, product)
+
+    message = str(exc_info.value)
+    assert "req-400" in message
+    assert "status 400" in message
+    assert "invalid request id" in message
+
+
+def test_generate_video_surfaces_failed_poll_status(
+    tmp_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "xai": {
+                "api_key": "test-xai-key",
+                "model": "grok-imagine-video",
+                "poll_interval_seconds": 15,
+                "poll_timeout_seconds": 900,
+            },
+            "data_root": str(tmp_path / "velura-data"),
+        },
+    )
+    monkeypatch.setattr("src.video_generator.time.sleep", lambda _: None)
+
+    product = Product(sku="serum-x", name="Serum X")
+    content = Content(
+        id="content-poll-failed",
+        product_sku=product.sku,
+        theme="benefit_spotlight",
+        hook_type="question",
+        scene_1_desc="Scene one.",
+        scene_1_script="Scene one voiceover.",
+        scene_2_desc="Scene two.",
+        scene_2_script="Scene two voiceover.",
+    )
+    db.upsert_product(product)
+    db.insert_content(content)
+
+    starting_image = tmp_path / "start.png"
+    starting_image.write_bytes(b"fake-png-image")
+
+    def post_handler(request: httpx.Request, payload: dict) -> httpx.Response:
+        del payload
+        return httpx.Response(200, json={"request_id": "req-failed"}, request=request)
+
+    def get_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "failed",
+                "error": {"message": "provider rejected video job"},
+            },
+            request=request,
+        )
+
+    monkeypatch.setattr(
+        "src.video_generator.httpx.Client",
+        lambda **kwargs: FakeClient(post_handler=post_handler, get_handler=get_handler, **kwargs),
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        generate_video(content, starting_image, product)
+
+    message = str(exc_info.value)
+    assert "req-failed" in message
+    assert "provider rejected video job" in message
