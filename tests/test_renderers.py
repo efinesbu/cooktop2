@@ -27,6 +27,28 @@ def test_tts_enabled_for_format_defaults_include_ai_video_flex(
     assert _tts_enabled_for_format("ai_video_15s") is False
 
 
+def test_tts_enabled_for_format_respects_tts_enabled_formats(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """tts.enabled_formats takes precedence over legacy openai.tts_enabled_formats."""
+    from src.renderers.ffmpeg_utils import _tts_enabled_for_format
+
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "tts": {"enabled_formats": ["image_motion_15s"]},
+            "openai": {
+                "api_key": "test-key",
+                "tts_enabled_formats": ["ai_video_flex_15s"],
+            },
+            "platforms": {"enabled": []},
+        },
+    )
+
+    assert _tts_enabled_for_format("image_motion_15s") is True
+    assert _tts_enabled_for_format("ai_video_flex_15s") is False
+
+
 def test_get_renderer_returns_ai_video_for_ai_video_15s() -> None:
     r = get_renderer("ai_video_15s")
     assert r is not None

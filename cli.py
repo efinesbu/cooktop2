@@ -16,7 +16,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from src import bandit, config, db, storage
+from src import bandit, config, content_eval, db, storage
 from src.analytics import PULLERS
 from src.cost_tracker import check_budget, content_cost_summary
 from src.instagram_sheet_sync import (
@@ -384,6 +384,7 @@ def _run_generation_job(
     creative_format: str | None = None,
     video_v2: bool = False,
     video_v3: bool = False,
+    video_v4: bool = False,
     cta_type: str | None = None,
     proof_type: str | None = None,
     script_style: str | None = None,
@@ -400,6 +401,7 @@ def _run_generation_job(
         creative_format,
         video_v2,
         video_v3,
+        video_v4,
         cta_type,
         proof_type,
         script_style,
@@ -414,6 +416,7 @@ def _generate_batch(
     creative_format: str | None = None,
     video_v2: bool = False,
     video_v3: bool = False,
+    video_v4: bool = False,
     cta_type: str | None = None,
     proof_type: str | None = None,
     script_style: str | None = None,
@@ -429,6 +432,7 @@ def _generate_batch(
             creative_format,
             video_v2,
             video_v3,
+            video_v4,
             cta_type,
             proof_type,
             script_style,
@@ -453,6 +457,7 @@ def _generate_batch(
             creative_format,
             video_v2,
             video_v3,
+            video_v4,
             cta_type,
             proof_type,
             script_style,
@@ -463,7 +468,7 @@ def _generate_batch(
 
 def _generate_single(product: Product, theme: str | None, hook_type: str | None, generation_index: int,
                      should_post: bool, creative_format: str | None = None, video_v2: bool = False,
-                     video_v3: bool = False,
+                     video_v3: bool = False, video_v4: bool = False,
                      cta_type: str | None = None, proof_type: str | None = None,
                      script_style: str | None = None, velura_branding: bool = True) -> Optional[Content]:
     spent, budget, within = check_budget()
@@ -479,14 +484,16 @@ def _generate_single(product: Product, theme: str | None, hook_type: str | None,
     if not images:
         console.print(f"[yellow]{product.sku}: no images registered, continuing anyway.[/yellow]")
 
-    resolved = resolve_deterministic_fields(theme, hook_type, cta_type, proof_type, script_style, generation_index, video_v3=video_v3)
-    if video_v3:
+    resolved = resolve_deterministic_fields(theme, hook_type, cta_type, proof_type, script_style, generation_index, video_v3=(video_v3 or video_v4))
+    if video_v4:
+        console.print(f"  {product.sku}: generating V4 prompt ... (theme: {resolved['theme']})")
+    elif video_v3:
         console.print(f"  {product.sku}: generating V3 prompt ... (theme: {resolved['theme']})")
     else:
         console.print(f"  {product.sku}: generating prompt ... ({_format_strategy_label(resolved['theme'], resolved['hook_type'])})")
     content, extras = generate_content(
         product, resolved["theme"], resolved["hook_type"], images,
-        creative_format, video_v2=video_v2, video_v3=video_v3,
+        creative_format, video_v2=video_v2, video_v3=video_v3, video_v4=video_v4,
         cta_type=resolved["cta_type"], proof_type=resolved["proof_type"], script_style=resolved["script_style"],
         velura_branding=velura_branding,
     )
@@ -843,6 +850,57 @@ def paid_seed_clone_cmd(content_id: str, variants: int):
     console.print(table)
 
 
+@cli.command("repost")
+@click.option(
+    "--content-id",
+    "content_id",
+    required=True,
+    help="Source content ID (full id or preview row number)",
+)
+@click.option(
+    "--pending",
+    is_flag=True,
+    help="Leave the repost in pending review instead of auto-approving",
+)
+@click.option(
+    "--row-scope",
+    type=click.Choice(["today", "last-24h", "all"]),
+    default=None,
+    help="Preview scope when --content-id is a numeric row number",
+)
+def repost_cmd(content_id: str, pending: bool, row_scope: str | None):
+    """Queue a repost of an existing video as a new content row (separate payloads and metrics).
+
+    Requires a persisted video file path on the source item. Creates a linked clone
+    (source_content_id) with fresh platform payloads and new UTM attribution.
+    """
+    _init()
+    content = (
+        _resolve_content_for_scope(content_id, row_scope)
+        if row_scope
+        else _resolve_content(content_id)
+    )
+    if not content:
+        console.print(f"[red]Content {content_id} not found.[/red]")
+        sys.exit(1)
+
+    try:
+        clone = db.clone_content_for_repost(content.id, auto_approve=not pending)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        sys.exit(1)
+
+    console.print(
+        f"[green]Repost created[/green] from [bold]{content.id[:12]}[/bold] → "
+        f"[bold]{clone.id[:12]}[/bold]. "
+        + (
+            "Pending review — run `approve` then `schedule` when ready."
+            if pending
+            else "Approved — run `schedule` then `post` / `post-due` as usual."
+        )
+    )
+
+
 @cli.command("commerce-ingest")
 @click.argument("csv_path", type=click.Path(exists=True, path_type=Path))
 @click.option("--source", default="shopify_import", help="Source label for ingested rows")
@@ -974,7 +1032,13 @@ def briefing_diagnose_cmd():
     "--video-v3",
     "video_v3",
     is_flag=True,
-    help="Use video-v3 theme-driven prompts (forces ai_video_flex_15s, 6-8 scenes, third-person narrator, post-gen classification). Incompatible with --video-v2 and --format image_motion_15s.",
+    help="Use video-v3 theme-driven prompts (forces ai_video_flex_15s, 6-8 scenes, third-person narrator, post-gen classification). Incompatible with --video-v2, --video-v4, and --format image_motion_15s.",
+)
+@click.option(
+    "--video-v4",
+    "video_v4",
+    is_flag=True,
+    help="Use video-v4 educational/entertaining prompts (forces ai_video_flex_15s, 6-8 scenes, product as context not hero, content_mode, viewer_takeaway). Incompatible with --video-v2, --video-v3, and --format image_motion_15s.",
 )
 @click.option("--count", default=8, show_default=True, help="Total clips across all products in --auto mode")
 @click.option(
@@ -995,14 +1059,15 @@ def briefing_diagnose_cmd():
 @click.option("--post", "should_post", is_flag=True, help="Deprecated: use preview, approve, schedule, and post-due")
 def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
         hooks: tuple[str, ...], creative_format: str | None, video_v2: bool,
-        video_v3: bool,
+        video_v3: bool, video_v4: bool,
         count: int, rotate_theme_hook: bool, cta_type: str | None, proof_type: str | None,
         script_style: str | None, velura_branding: bool, should_post: bool):
     """Generate content — manually or via bandit recommendations."""
     _init()
 
-    if video_v2 and video_v3:
-        console.print("[red]--video-v2 and --video-v3 cannot be used together.[/red]")
+    video_flags = sum([video_v2, video_v3, video_v4])
+    if video_flags > 1:
+        console.print("[red]--video-v2, --video-v3, and --video-v4 are mutually exclusive.[/red]")
         sys.exit(1)
 
     if video_v2 and creative_format == "image_motion_15s":
@@ -1019,9 +1084,18 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
         )
         sys.exit(1)
 
+    if video_v4 and creative_format == "image_motion_15s":
+        console.print(
+            "[red]--video-v4 cannot be combined with --format image_motion_15s.[/red] "
+            "Use --video-v4 alone (it forces ai_video_flex_15s) or omit --video-v4."
+        )
+        sys.exit(1)
+
     if video_v2:
         creative_format = "ai_video_flex_15s"
     if video_v3:
+        creative_format = "ai_video_flex_15s"
+    if video_v4:
         creative_format = "ai_video_flex_15s"
 
     if should_post:
@@ -1044,6 +1118,7 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
             creative_format,
             video_v2,
             video_v3,
+            video_v4,
             cta_type,
             proof_type,
             script_style,
@@ -1060,6 +1135,7 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
             rotate_theme_hook,
             video_v2,
             video_v3,
+            video_v4,
             cta_type,
             proof_type,
             script_style,
@@ -1068,7 +1144,7 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
 
 
 def _run_auto(count: int, should_post: bool, creative_format: str | None = None, video_v2: bool = False,
-              video_v3: bool = False,
+              video_v3: bool = False, video_v4: bool = False,
               cta_type: str | None = None, proof_type: str | None = None,
               script_style: str | None = None, velura_branding: bool = True):
     products = db.list_products(
@@ -1090,11 +1166,11 @@ def _run_auto(count: int, should_post: bool, creative_format: str | None = None,
 
     summary = Table(title="Global Bandit Allocation")
     summary.add_column("Theme", style="cyan")
-    if not video_v3:
+    if not (video_v3 or video_v4):
         summary.add_column("Hook Type")
     summary.add_column("Clips", justify="right")
     for alloc in recommendation.allocations:
-        if video_v3:
+        if video_v3 or video_v4:
             summary.add_row(alloc.theme, str(alloc.count))
         else:
             summary.add_row(alloc.theme, alloc.hook_type, str(alloc.count))
@@ -1117,7 +1193,7 @@ def _run_auto(count: int, should_post: bool, creative_format: str | None = None,
             idx += 1
 
     total = _generate_batch(jobs, should_post, requested_count=count, creative_format=creative_format, video_v2=video_v2,
-                           video_v3=video_v3, cta_type=cta_type, proof_type=proof_type,
+                           video_v3=video_v3, video_v4=video_v4, cta_type=cta_type, proof_type=proof_type,
                            script_style=script_style, velura_branding=velura_branding)
 
     piece = "piece" if total == 1 else "pieces"
@@ -1127,7 +1203,7 @@ def _run_auto(count: int, should_post: bool, creative_format: str | None = None,
 def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
                 hooks: tuple[str, ...], count: int, should_post: bool,
                 creative_format: str | None = None, rotate_theme_hook: bool = False, video_v2: bool = False,
-                video_v3: bool = False,
+                video_v3: bool = False, video_v4: bool = False,
                 cta_type: str | None = None, proof_type: str | None = None,
                 script_style: str | None = None, velura_branding: bool = True):
     if not slugs:
@@ -1154,7 +1230,7 @@ def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
             idx += 1
 
     total = _generate_batch(jobs, should_post, requested_count=count, creative_format=creative_format, video_v2=video_v2,
-                           video_v3=video_v3, cta_type=cta_type, proof_type=proof_type,
+                           video_v3=video_v3, video_v4=video_v4, cta_type=cta_type, proof_type=proof_type,
                            script_style=script_style, velura_branding=velura_branding)
 
     console.print(f"\n[green]{total}[/green] pieces of content generated.")
@@ -1314,12 +1390,18 @@ def preview(today: bool, last_24h: bool, show_all: bool):
     table.add_column("Type", justify="center")
     table.add_column("Theme")
     table.add_column("Hook Type")
+    table.add_column("From", style="dim", max_width=10)
     table.add_column("Review", justify="center")
     table.add_column("Payloads", justify="right")
     for i, c in enumerate(items, start=1):
         payloads = db.list_platform_payloads(c.id)
         review_status = _review_display_status(c, payloads)
         media_type = _media_type_from_format(c.creative_format)
+        if c.source_content_id:
+            src = c.source_content_id
+            source_hint = (src[:8] + "…") if len(src) > 8 else src
+        else:
+            source_hint = "—"
         table.add_row(
             str(i),
             c.id[:12],
@@ -1327,6 +1409,7 @@ def preview(today: bool, last_24h: bool, show_all: bool):
             media_type,
             c.theme,
             c.hook_type,
+            source_hint,
             review_status,
             str(len(payloads)),
         )
@@ -2071,6 +2154,106 @@ def _report_costs(content_list: list[Content]):
         total += summary["total"]
 
     console.print(Panel(f"Total spend for this product: [bold]${total:.2f}[/bold]", style="green"))
+
+
+# ---------------------------------------------------------------------------
+# eval-content / eval-batch / daily-loop
+# ---------------------------------------------------------------------------
+
+
+@cli.command("eval-content")
+@click.option("--content-id", required=True, help="Content ID to evaluate")
+def eval_content_cmd(content_id: str):
+    """Score a single content item against the 6-criterion eval checklist."""
+    _init()
+    content = db.get_content(content_id)
+    if content is None:
+        console.print(f"[red]Content {content_id} not found.[/red]")
+        sys.exit(1)
+    score = content_eval.score_content(content)
+    evals = db.get_content_evals(content_id)
+    for ev in evals:
+        status = "[green]PASS[/green]" if ev.passed else "[red]FAIL[/red]"
+        console.print(f"  {ev.criterion}: {status}")
+    console.print(f"\n[bold]Total: {score}/6[/bold]")
+
+
+@cli.command("eval-batch")
+@click.option("--lookback-days", type=int, default=7, help="Score content from last N days")
+def eval_batch_cmd(lookback_days: int):
+    """Score all unscored content from the lookback window."""
+    _init()
+    scored = content_eval.score_batch(lookback_days=lookback_days)
+    console.print(f"[green]Scored {scored} content item(s).[/green]")
+
+
+@cli.command("daily-loop")
+@click.option("--lookback-days", type=int, default=7, help="Lookback window for eval and review")
+def daily_loop_cmd(lookback_days: int):
+    """Run the full daily analysis loop: pull-analytics, eval-batch, review-text, report."""
+    _init()
+
+    console.print("[bold]Step 1/4: pull-analytics[/bold]")
+    try:
+        try:
+            sync_instagram_post_ids_from_sheet()
+        except Exception:
+            pass
+        enabled = config.enabled_platforms("analytics")
+        total_metrics = 0
+        for name in enabled:
+            puller = PULLERS[name]()
+            total_metrics += puller.pull()
+        updated = bandit.update_from_metrics()
+        console.print(f"  {total_metrics} metric rows, {updated} bandit arms updated.")
+    except Exception as exc:
+        console.print(f"[yellow]pull-analytics warning:[/yellow] {exc}")
+
+    console.print("\n[bold]Step 2/4: eval-batch[/bold]")
+    try:
+        scored = content_eval.score_batch(lookback_days=lookback_days)
+        console.print(f"  Scored {scored} content item(s).")
+    except Exception as exc:
+        console.print(f"[yellow]eval-batch warning:[/yellow] {exc}")
+
+    console.print("\n[bold]Step 3/4: review-text[/bold]")
+    try:
+        min_posts = int(config.get("text_review.min_posts", 5))
+        review_lookback = int(config.get("text_review.lookback_days", 30))
+        insight = run_text_review(
+            min_posts=min_posts,
+            lookback_days=review_lookback,
+        )
+        if insight:
+            console.print(f"  Created text insight {insight.id} from {insight.source_post_count} post(s).")
+            console.print()
+            console.print(Panel(
+                _console_safe_text(insight.insight_text),
+                title="[bold]Text insight (review-text)[/bold]",
+                border_style="cyan",
+                padding=(0, 2),
+            ))
+        else:
+            console.print("  [yellow]No text insight created (not enough posts).[/yellow]")
+    except Exception as exc:
+        console.print(f"[yellow]review-text warning:[/yellow] {exc}")
+
+    console.print("\n[bold]Step 4/4: report[/bold]")
+    try:
+        briefing = generate_briefing()
+        display_briefing(briefing)
+        email_briefing(briefing)
+        console.print("[green]Briefing sent.[/green]")
+    except Exception as exc:
+        console.print(f"[yellow]report warning:[/yellow] {exc}")
+
+    console.print("\n[bold cyan]Bandit recommendations[/bold cyan]")
+    try:
+        _report_bandit_weights("")
+    except Exception as exc:
+        console.print(f"[yellow]Could not print recommendations:[/yellow] {exc}")
+
+    console.print("\n[green]Daily loop complete.[/green]")
 
 
 # ---------------------------------------------------------------------------

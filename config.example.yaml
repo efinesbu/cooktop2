@@ -24,12 +24,27 @@ openai:
   # GPT-5.4 pricing (defaults): $2.50/1M input, $15/1M output
   # input_per_million_usd: 2.50
   # output_per_million_usd: 15.0
-  # TTS voiceover for image_motion_15s and stitched ai_video_flex_15s (uses same api_key)
+  # When tts.provider is openai: OpenAI speech settings (uses openai.api_key)
   # tts_model: "gpt-4o-mini-tts"
   # tts_voice_cycle: ["marin"]
   # tts_response_format: "wav"
   # tts_language: "english"
-  # tts_enabled_formats: ["image_motion_15s", "ai_video_flex_15s"]
+
+# Text-to-speech for image_motion_15s and ai_video_flex_15s (incl. --video-v3 / --video-v4)
+tts:
+  provider: elevenlabs
+  # Optional OpenAI voice name when ElevenLabs fails but openai.api_key is set (default: marin or first tts_voice_cycle)
+  # fallback_openai_voice: marin
+  # Formats that receive stitched narration (default matches previous openai.tts_enabled_formats)
+  # enabled_formats: ["image_motion_15s", "ai_video_flex_15s"]
+
+elevenlabs:
+  api_key: "xi-XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  model: eleven_multilingual_v2
+  # Default mp3_44100_128 works on typical API tiers; pcm_44100 needs Pro+ (ElevenLabs API).
+  # output_format: mp3_44100_128
+  # Voice library: https://elevenlabs.io/app/voice-library?voiceId=K7W7zLWeGoxU9YqWoB7A
+  voice_id: "K7W7zLWeGoxU9YqWoB7A"
 
 gemini:
   api_key: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
@@ -116,6 +131,9 @@ posting:
 text_review:
   min_posts: 5
   lookback_days: 30
+
+eval:
+  model: "gpt-4.1-mini"
 
 data_root: "~/.velura"
 

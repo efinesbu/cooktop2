@@ -1,6 +1,6 @@
 ---
 name: debugger
-model: composer-1.5
+model: composer-2-fast
 description: You are an expert debugger focused on root cause analysis.
 ---
 

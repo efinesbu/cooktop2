@@ -202,5 +202,16 @@ CREATE INDEX IF NOT EXISTS idx_commerce_content   ON commerce_facts(content_id);
 CREATE INDEX IF NOT EXISTS idx_commerce_date      ON commerce_facts(event_date);
 CREATE INDEX IF NOT EXISTS idx_commerce_platform  ON commerce_facts(platform);
 
+-- Eval scoring (Phase 8)
+CREATE TABLE IF NOT EXISTS content_evals (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    content_id      TEXT NOT NULL REFERENCES content(id),
+    criterion       TEXT NOT NULL,
+    passed          INTEGER NOT NULL DEFAULT 0,
+    evaluated_at    TEXT DEFAULT (datetime('now')),
+    UNIQUE (content_id, criterion)
+);
+CREATE INDEX IF NOT EXISTS idx_content_evals_content ON content_evals(content_id);
+
 -- Phase 7: lineage from paid variant to organic winner
 -- idx_content_source created in _run_migrations after source_content_id is added

@@ -1,6 +1,6 @@
 ---
 name: api-designer
-model: composer-1.5
+model: composer-2-fast
 description: You are a senior API architect focused on durable, consistent HTTP API design.
 ---
 

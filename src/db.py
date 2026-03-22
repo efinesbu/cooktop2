@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -9,8 +10,8 @@ from typing import Generator, Optional
 from src import config
 from src.models import (
     Product, ProductImage, Content, PlatformPayload, Post, Metric, BanditArm,
-    BanditObservation, Cost, CommerceFact, ResearchSnapshot, TextInsight,
-    HOOK_TYPES, THEMES,
+    BanditObservation, ContentEval, Cost, CommerceFact, ResearchSnapshot, TextInsight,
+    EVAL_CRITERIA, HOOK_TYPES, THEMES,
 )
 
 _DB_PATH: Path | None = None
@@ -70,6 +71,7 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
         ("asset_manifest_json", "ALTER TABLE content ADD COLUMN asset_manifest_json TEXT"),
         ("source_content_id", "ALTER TABLE content ADD COLUMN source_content_id TEXT"),
         ("strategy_metadata_json", "ALTER TABLE content ADD COLUMN strategy_metadata_json TEXT"),
+        ("eval_score", "ALTER TABLE content ADD COLUMN eval_score INTEGER"),
     ):
         if name not in content_columns:
             conn.execute(ddl)
@@ -124,6 +126,21 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
 
     # Phase 4: expand costs.step for slideshow and image_motion renderers
     _migrate_costs_step(conn)
+
+    if not _table_exists(conn, "content_evals"):
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS content_evals (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                content_id      TEXT NOT NULL REFERENCES content(id),
+                criterion       TEXT NOT NULL,
+                passed          INTEGER NOT NULL DEFAULT 0,
+                evaluated_at    TEXT DEFAULT (datetime('now')),
+                UNIQUE (content_id, criterion)
+            );
+            CREATE INDEX IF NOT EXISTS idx_content_evals_content ON content_evals(content_id);
+            """
+        )
 
     if not _table_exists(conn, "commerce_facts"):
         conn.executescript(
@@ -811,6 +828,102 @@ def list_content_for_product(sku: str, limit: int = 50) -> list[Content]:
     return [_row_to_content(r) for r in rows]
 
 
+def clone_content_for_repost(
+    source_content_id: str,
+    *,
+    auto_approve: bool = True,
+) -> Content:
+    """Clone content into a new row for reposting.
+
+    The new row references the original via ``source_content_id``. Fresh
+    ``platform_payloads`` are inserted for each enabled posting platform with
+    new UTM attribution (``utm_content`` = new content id). The source content
+    and its payloads are not modified.
+    """
+    from src.utm import build_attribution_data
+
+    source = get_content(source_content_id)
+    if not source:
+        raise ValueError(f"Content {source_content_id} not found.")
+
+    product = get_product(source.product_sku)
+    if not product:
+        raise ValueError(f"Product {source.product_sku} not found.")
+
+    if not (source.video_local_path or "").strip():
+        raise ValueError(
+            f"Content {source_content_id} has no video_local_path; "
+            "repost requires a rendered video path."
+        )
+
+    video_path = Path(source.video_local_path)
+    if not video_path.is_file():
+        raise ValueError(
+            f"Content {source_content_id} video file not found: {source.video_local_path}"
+        )
+
+    new_id = uuid.uuid4().hex[:16]
+    now_iso = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+    new = Content(
+        id=new_id,
+        product_sku=source.product_sku,
+        theme=source.theme,
+        hook_type=source.hook_type,
+        hook_text=source.hook_text,
+        starting_image_prompt=source.starting_image_prompt,
+        scene_1_desc=source.scene_1_desc,
+        scene_2_desc=source.scene_2_desc,
+        scene_1_script=source.scene_1_script,
+        scene_2_script=source.scene_2_script,
+        video_local_path=source.video_local_path,
+        approved=auto_approve,
+        review_status="approved" if auto_approve else "pending",
+        review_notes=None,
+        approved_at=now_iso if auto_approve else None,
+        rejected_at=None,
+        creative_format=source.creative_format or "ai_video_15s",
+        cta_type=source.cta_type or "see_product",
+        cta_text=source.cta_text,
+        problem_angle=source.problem_angle,
+        proof_type=source.proof_type,
+        script_style=source.script_style,
+        research_snapshot_id=source.research_snapshot_id,
+        asset_manifest_json=source.asset_manifest_json,
+        source_content_id=source_content_id,
+        strategy_metadata_json=getattr(source, "strategy_metadata_json", None),
+    )
+    insert_content(new)
+
+    for platform in config.enabled_platforms("posting"):
+        src_payload = get_platform_payload(source.id, platform)
+        caption = (
+            (src_payload.caption if src_payload else None)
+            or source.hook_text
+            or product.name
+        )
+        hashtags = (src_payload.hashtags if src_payload else None) or ""
+        attr_data = build_attribution_data(new, product, platform)
+        payload = PlatformPayload(
+            content_id=new.id,
+            platform=platform,
+            caption=caption,
+            hashtags=hashtags,
+            utm_url=attr_data.get("utm_url"),
+            destination_url=attr_data.get("destination_url"),
+            utm_source=attr_data.get("utm_source"),
+            utm_medium=attr_data.get("utm_medium"),
+            utm_campaign=attr_data.get("utm_campaign"),
+            utm_content=attr_data.get("utm_content"),
+            link_mode=attr_data.get("link_mode", "direct"),
+            status="pending",
+        )
+        upsert_platform_payload(payload)
+
+    refreshed = get_content(new_id)
+    return refreshed if refreshed is not None else new
+
+
 def _row_to_content(row: sqlite3.Row) -> Content:
     keys = row.keys()
     return Content(
@@ -836,6 +949,7 @@ def _row_to_content(row: sqlite3.Row) -> Content:
         asset_manifest_json=row["asset_manifest_json"] if "asset_manifest_json" in keys else None,
         source_content_id=row["source_content_id"] if "source_content_id" in keys else None,
         strategy_metadata_json=row["strategy_metadata_json"] if "strategy_metadata_json" in keys else None,
+        eval_score=row["eval_score"] if "eval_score" in keys else None,
     )
 
 
@@ -1203,6 +1317,7 @@ def list_recent_text_review_rows(
                 c.hook_type,
                 c.hook_text,
                 c.creative_format,
+                c.eval_score,
                 COUNT(DISTINCT p.id) AS post_count,
                 MAX(p.published_at) AS latest_posted_at,
                 MAX(lm.pulled_at) AS latest_metric_pulled_at,
@@ -1226,7 +1341,8 @@ def list_recent_text_review_rows(
                 c.theme,
                 c.hook_type,
                 c.hook_text,
-                c.creative_format
+                c.creative_format,
+                c.eval_score
             ORDER BY
                 latest_posted_at DESC,
                 latest_metric_pulled_at DESC,
@@ -1684,3 +1800,56 @@ def _row_to_text_insight(row: sqlite3.Row) -> TextInsight:
         source_post_count=int(row["source_post_count"] or 0),
         created_at=row["created_at"],
     )
+
+
+# ---------------------------------------------------------------------------
+# Content Evals (Phase 8)
+# ---------------------------------------------------------------------------
+
+def insert_content_evals(content_id: str, evals: list[ContentEval]) -> None:
+    with _connect() as conn:
+        conn.executemany(
+            """INSERT OR REPLACE INTO content_evals
+               (content_id, criterion, passed)
+               VALUES (?, ?, ?)""",
+            [(content_id, e.criterion, int(e.passed)) for e in evals],
+        )
+
+
+def update_content_eval_score(content_id: str, score: int) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE content SET eval_score = ? WHERE id = ?",
+            (score, content_id),
+        )
+
+
+def get_content_evals(content_id: str) -> list[ContentEval]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, content_id, criterion, passed, evaluated_at "
+            "FROM content_evals WHERE content_id = ? ORDER BY criterion",
+            (content_id,),
+        ).fetchall()
+        return [
+            ContentEval(
+                id=row[0],
+                content_id=row[1],
+                criterion=row[2],
+                passed=bool(row[3]),
+                evaluated_at=row[4],
+            )
+            for row in rows
+        ]
+
+
+def list_unscored_content(lookback_days: int = 7) -> list[Content]:
+    with _connect() as conn:
+        rows = conn.execute(
+            """SELECT * FROM content
+               WHERE eval_score IS NULL
+                 AND created_at >= datetime('now', '-' || ? || ' days')
+               ORDER BY created_at DESC""",
+            (lookback_days,),
+        ).fetchall()
+        return [_row_to_content(row) for row in rows]

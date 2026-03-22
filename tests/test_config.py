@@ -67,3 +67,20 @@ def test_tts_config_from_yaml(monkeypatch: pytest.MonkeyPatch) -> None:
     assert config.get("openai.tts_response_format") == "wav"
     assert config.get("openai.tts_language") == "english"
     assert config.get("openai.tts_enabled_formats") == ["image_motion_15s"]
+
+
+def test_tts_enabled_formats_top_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    """tts.enabled_formats overrides legacy openai.tts_enabled_formats when set."""
+    config.reload()
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "tts": {"enabled_formats": ["ai_video_flex_15s"]},
+            "openai": {
+                "api_key": "test-key",
+                "tts_enabled_formats": ["image_motion_15s"],
+            },
+            "platforms": {"enabled": []},
+        },
+    )
+    assert config.get("tts.enabled_formats") == ["ai_video_flex_15s"]

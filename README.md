@@ -26,7 +26,8 @@ cp .env.example .env
 # Put API keys and tokens in .env (never commit .env). Env vars override config.yaml.
 # Fill in config.yaml for non-secret settings. Set `platforms.enabled` to the platforms you want.
 # `openai.model` is used for content and paid-variant generation; keep `openai.voiceover_model` on `gpt-4.1` for image-motion voiceover planning.
-# Optional: `openai.classify_model` defaults to `gpt-4.1-mini` for `--video-v3` post-generation classification.
+# Optional: `openai.classify_model` defaults to `gpt-4.1-mini` for `--video-v3`/`--video-v4` post-generation classification.
+# Optional: `eval.model` defaults to `gpt-4.1-mini` for the 7-criterion creative quality scoring pass.
 
 # 6. Add a product to the local catalog
 python cli.py add-product --sku <product-slug> --name "Product Name" --url https://your-site.com/products/<handle>  # use --descrption "product description"
@@ -41,16 +42,25 @@ python cli.py sync-products
 ## Daily Workflow
 
 ```
-8:00 AM   pull-analytics + report (cron)
-          Operator reviews briefing
-          Operator runs: python cli.py run --auto --count 8
+8:00 AM   Run: python cli.py daily-loop --lookback-days 7
+          Operator reviews briefing + refreshed text insight
+          Operator runs: python cli.py run --auto --count 8 --video-v4
           Preview: python cli.py preview --today
-          Approve: python cli.py approve --content-id <id>
+          Approve: python cli.py approve --content-id <id> --row-scope today
           Schedule: python cli.py schedule --today
           Publish due posts: python cli.py post-due
-          Periodic learning: python cli.py review-text --min-posts 5
-8:00 PM   pull-analytics (cron)
 ```
+
+`daily-loop` is the recommended morning analysis command. It chains:
+
+1. `pull-analytics`
+2. `eval-batch`
+3. `review-text`
+4. `report`
+
+It does **not** generate or post content. The approval-first workflow remains:
+
+`run` -> `preview` -> `approve` -> `schedule` -> `post-due`
 
 ## 8-Creative Matrix Launch
 
@@ -83,7 +93,7 @@ python cli.py run --product moisturizer --product eye-cream --theme problem_solu
 python cli.py run --product moisturizer --product eye-cream --theme problem_solution --theme hidden_knowledge --hook relatable_pain --hook question --rotate-theme-hook --count 2 --format image_motion_15s
 ```
 
-**Result:** 8 creatives total (4 per product). Then: `preview --today` → `approve` → `schedule --today` → `post-due` or `post --today`.
+**Result:** 8 creatives total (4 per product). Then: `preview --today` -> `approve --row-scope today` -> `schedule --today` -> `post-due` or `post --today`.
 
 ### Bandit-driven alternative
 
@@ -103,14 +113,14 @@ This yields 8 creatives with bandit-recommended strategies from the current them
 
 - Theme is the only locked creative input during generation.
 - The LLM generates the scene script first, then a smaller model classifies the finished script into the closest `hook_type`, `script_style`, and `proof_type`.
-- xAI generates the visual video; OpenAI TTS generates narration separately, then Velura muxes the audio after render.
+- xAI generates the visual video; ElevenLabs TTS (default) or OpenAI TTS generates narration separately, then Velura muxes the audio after render.
 - The product stays the only on-screen character and remains the center of attention.
 - The narrator is third-person, not the product speaking in first person.
 - The starting frame stays anamorphic and is still animated with Grok.
 - Environments are flexible and chosen from the script and theme instead of being locked to a luxury bathroom counter.
 - The final CTA is soft and engagement-oriented.
 - Background music is generated as metadata for later use and should support, not overpower, the voice script.
-- To enable stitched narration for this path, include `ai_video_flex_15s` in `openai.tts_enabled_formats`.
+- To enable stitched narration for this path, include `ai_video_flex_15s` in `tts.enabled_formats` (or legacy `openai.tts_enabled_formats`).
 
 Behavior:
 
@@ -133,6 +143,42 @@ If you want to lock the theme while testing one variation:
 python cli.py run --product skincare --video-v3 --theme hidden_knowledge --count 1
 ```
 
+## Video V4
+
+`--video-v4` is an educational-first content path that shifts the creative philosophy from product showcase to standalone viewer value. The product is context and a supporting character, not the hero.
+
+Key differences from V3:
+
+- The content leads with education, entertainment, or sensory satisfaction. The product earns its place by being relevant, not by being center-frame in every scene.
+- The product appears in 3-5 of 6-8 scenes. Some scenes can show the environment, a routine detail, or a visual metaphor without the product.
+- `viewer_takeaway` replaces `problem_angle` — it describes what the viewer knows, feels, or finds satisfying after watching, independent of the product.
+- `content_mode` in `strategy_metadata` declares the arc: `educational` (surprising facts, "did you know"), `entertaining` (mini-story, humor beat), or `satisfying` (ASMR-adjacent, process-focused).
+- When CTA is disabled (90% of the time), the final scene closes with a non-commercial ending: restate the takeaway, satisfying visual payoff, or "follow for more." No product mention or link.
+- When CTA is enabled (10%), a soft sell is permitted.
+- Third-person narration, anamorphic visual style, background music, FTC compliance, and theme-only locking are all kept from V3.
+- Post-generation classification (hook_type, script_style, proof_type) works the same as V3.
+
+Behavior:
+
+- Format is forced to `ai_video_flex_15s`.
+- Timeline uses 6-8 scenes, each 1.5-2.5 seconds, totaling 13-15 seconds.
+- Asset manifest stores `schema_version: 4`, `viewer_takeaway`, and `content_mode`.
+- The eval checklist includes a 7th criterion (`standalone_value`) that asks whether a viewer with zero purchase intent would still watch the video to the end.
+
+Recommended test command:
+
+```bash
+python cli.py run --product skincare --video-v4 --count 1
+```
+
+To lock a specific theme:
+
+```bash
+python cli.py run --product skincare --video-v4 --theme hidden_knowledge --count 1
+```
+
+`--video-v4` is mutually exclusive with `--video-v2`, `--video-v3`, and `--format image_motion_15s`.
+
 ## CLI Commands
 
 | Command | Purpose |
@@ -146,6 +192,7 @@ python cli.py run --product skincare --video-v3 --theme hidden_knowledge --count
 | `run --product SLUG --theme T --hook H --count N` | Generate with manual strategy overrides |
 | `run --product SLUG --product SLUG2 --theme T --theme T2 --hook H --hook H2 --count N --rotate-theme-hook` | Cycle through provided theme/hook pairs; repeat `--product`, `--theme`, `--hook` for each value |
 | `run --product SLUG --video-v3 --count N` | Generate theme-first anamorphic flex videos with post-generation classification of hook/proof/style |
+| `run --product SLUG --video-v4 --count N` | Generate educational/entertaining content where the product is context, not the hero; includes viewer_takeaway and content_mode |
 | `exclude --product SLUG --reason "..."` | Exclude product from generation |
 | `include --product SLUG` | Re-include excluded product |
 | `preview --today` | Review today's generated content |
@@ -159,9 +206,13 @@ python cli.py run --product skincare --video-v3 --theme hidden_knowledge --count
 | `post --today` | Immediately post approved content from the last 24 hours; repeated posts on the same platform wait 5 minutes by default |
 | `post --content-id ID` | Manually post a specific content piece; add `--delay-XXX` to change the same-platform wait or `--nodelay` to post everything immediately |
 | `pull-analytics` | Pull metrics from all platforms |
+| `eval-content --content-id ID` | Score one content item against the 7-criterion eval checklist and persist per-criterion results |
+| `eval-batch [--lookback-days N]` | Score recent unscored content and store `eval_score` plus per-criterion eval rows |
 | `review-text [--product SLUG] [--platform PLATFORM] [--format FORMAT] [--min-posts N] [--lookback-days N]` | Analyze recent post performance and store one reusable text insight for future prompt injection |
+| `daily-loop [--lookback-days N]` | Run the morning analysis loop: pull analytics, score unscored content, refresh text insight, and generate the report |
 | `commerce-ingest PATH` | Ingest commerce facts (sessions, purchases, revenue) from CSV for revenue-aware ranking |
 | `paid-seed-clone --content-id ID [--variants N]` | Clone an organic winner into 3–5 ad-safe variants for paid promotion |
+| `repost --content-id ID` | Queue a **new** posting instance of an existing video (new content row, payloads, metrics, and UTM attribution; original history unchanged). Optional `--pending` to skip auto-approve; optional `--row-scope` when using preview row numbers |
 | `report-product --product SLUG` | Product performance report, including total tracked spend |
 | `archive` | Archive old videos to GCS |
 
@@ -199,12 +250,13 @@ Velura now treats `theme` and `hook_type` as real creative strategy labels inste
 - `run --auto` now uses one shared global bandit across eligible products, allocates a daily total number of clips, and learns once per creative instead of once per platform post.
 - Reporting, UTM campaign naming, morning briefing recommendations, and bandit learning all use the persisted labels returned by generation.
 
-`--video-v3` changes that flow slightly:
+`--video-v3` and `--video-v4` change that flow slightly:
 
 - The bandit still chooses the theme up front.
 - `hook_type`, `script_style`, and `proof_type` are not used to generate the script.
 - After the script is generated, Velura classifies it into the closest hook, script style, and proof labels using `gpt-4.1-mini` by default.
 - Those classified labels are then persisted so reporting and learning stay consistent with the final creative.
+- V4 additionally stores `viewer_takeaway` and `content_mode` in the asset manifest and strategy metadata.
 
 Current curated whitelist:
 
@@ -222,7 +274,8 @@ Prompt reuse and feedback:
 
 - `research-add` stores scoped `RESEARCH INSIGHT` text for future generations.
 - `review-text` analyzes recent posts with metrics and stores one scoped `TEXT_LEVEL_INSIGHTS` paragraph focused on hook wording, framing, proof language, and CTA phrasing.
-- When a matching research snapshot or text insight exists, generation automatically injects it into the prompt for `ai_video_15s`, `ai_video_flex_15s`, `video-v2`, `video-v3`, and `image_motion_15s`.
+- When a matching research snapshot or text insight exists, generation automatically injects it into the prompt for `ai_video_15s`, `ai_video_flex_15s`, `video-v2`, `video-v3`, `video-v4`, and `image_motion_15s`.
+- Video formats (`ai_video_flex_15s`) now receive a `PERFORMANCE_SUMMARY` block with historical engagement winners, closing the feedback loop that was previously only available for `image_motion_15s`.
 
 ### Commerce and Revenue-Aware Ranking
 
@@ -253,6 +306,23 @@ Velura supports a lightweight handoff from organic winners to paid ad variants:
 
 This is a manual or semi-manual handoff, not a full paid automation system.
 
+### Reposting a published video (organic)
+
+To publish the same rendered video again as a **separate** post (its own `posts` row, analytics, and shop attribution), use **`repost`**. Velura inserts a **new** `content` row with `source_content_id` pointing at the original; it does **not** mutate the original content or its existing `platform_payloads` (including `posted` rows).
+
+- **Requirements:** the source item must have a valid on-disk `video_local_path` (the same file can be reused).
+- **Attribution:** new `platform_payloads` are created with fresh UTM fields via `utm.py` (`utm_content` is the **new** content id), so commerce and metrics stay separate from the first run.
+- **Workflow:** same as any other item — `repost` → `preview` (the **From** column shows truncated source id for clones) → `schedule` → `post-due` / `post`, unless you pass **`--pending`** so you must **`approve`** first.
+
+```bash
+python cli.py repost --content-id <source-content-id>
+python cli.py repost --content-id <source-content-id> --pending
+# If you pass a numeric preview row instead of the full id:
+python cli.py repost --content-id 3 --row-scope last-24h
+```
+
+This is distinct from **`paid-seed-clone`**, which creates multiple **paid** caption/CTA variants for handoff to ad platforms. Use **`repost`** when you want another organic post of the same asset.
+
 ## Project Structure
 
 ```
@@ -269,8 +339,9 @@ This is a manual or semi-manual handoff, not a full paid automation system.
 │   ├── product_images.py     # Local image registration
 │   ├── storage.py            # File storage + GCS archival
 │   ├── bandit.py             # Thompson Sampling optimizer
+│   ├── content_eval.py       # 7-criterion creative quality scoring
 │   ├── prompt_generator.py   # OpenAI-powered script generation
-│   ├── voiceover_generator.py # OpenAI TTS for image_motion voiceover
+│   ├── voiceover_generator.py # ElevenLabs or OpenAI TTS for stitched voiceover
 │   ├── image_generator.py    # Gemini-powered image generation
 │   ├── video_generator.py    # xAI-powered video generation
 │   ├── cost_tracker.py       # API cost tracking + budget
@@ -290,7 +361,8 @@ Copy `config.example.yaml` to `config.yaml` and fill in:
 - **Site URL** — public storefront base URL used to build product links and UTMs
 - **Platforms** — optional `platforms.enabled` list to limit the workflow to only the platforms you are ready to test, e.g. `["youtube"]`
 - **Shopify** — optional store URL + Client ID + Client Secret if you want automatic product sync
-- **OpenAI** — API key + model for script generation. For image_motion_15s voiceover, TTS uses the same key; optional `openai.voiceover_model` for image-motion voiceover planning, optional `openai.classify_model` for `--video-v3` post-generation classification (default `gpt-4.1-mini`), optional `openai.tts_model` (default `gpt-4o-mini-tts`), `openai.tts_voice_cycle` (default `[marin]`), `openai.tts_response_format` (default `wav`), `openai.tts_language` (default `english`), and `openai.tts_enabled_formats` (default `[image_motion_15s]`)
+- **OpenAI** — API key + model for script generation. Optional `openai.voiceover_model` for image-motion voiceover planning, optional `openai.classify_model` for `--video-v3`/`--video-v4` post-generation classification (default `gpt-4.1-mini`). If `tts.provider` is `openai`, TTS uses `openai.api_key` with optional `openai.tts_model` (default `gpt-4o-mini-tts`), `openai.tts_voice_cycle` (default `[marin]`), `openai.tts_response_format` (default `wav`), and `openai.tts_language` (default `english`).
+- **TTS** — `tts.provider` (`elevenlabs` default, or `openai`) and `tts.enabled_formats` (default `image_motion_15s` + `ai_video_flex_15s` when unset; legacy `openai.tts_enabled_formats` still supported). **ElevenLabs** — `elevenlabs.api_key`, `elevenlabs.model` (default `eleven_multilingual_v2`), and `elevenlabs.voice_id` for narration (`image_motion_15s`, `ai_video_flex_15s`, including `--video-v3` and `--video-v4`). If ElevenLabs errors and `openai.api_key` is set, Velura falls back to OpenAI TTS (optional `tts.fallback_openai_voice`, else `openai.tts_voice_cycle` or `marin`).
 - **Gemini** — Google AI API key, optional `gemini.aspect_ratio` (default `9:16` for vertical short-form)
 - **xAI** — Video generation API key, optional `xai.model` (default `grok-imagine-video`), optional `xai.resolution`/`xai.aspect_ratio` (default `9:16` for vertical short-form), and polling controls via `xai.poll_interval_seconds` and `xai.poll_timeout_seconds`
 - **YouTube** — Google OAuth Desktop app client secrets JSON for posting, optional `youtube.token_file` for the cached login token, optional `youtube.login_hint` to suggest the correct Google account during auth, plus `youtube.api_key` for analytics pulls
@@ -298,6 +370,7 @@ Copy `config.example.yaml` to `config.yaml` and fill in:
 - **Instagram sync** — optional `instagram_sync.spreadsheet_id`, `instagram_sync.worksheet_name`, and `instagram_sync.credentials_file` if you want `pull-analytics` to read a Google Sheet exported from Make and replace temporary `make:...` handoff ids with real Instagram media ids before analytics pulls run
 - **TikTok** — `tiktok.client_key`, `tiktok.client_secret`, `tiktok.access_token`, and `tiktok.refresh_token` for posting; Content Posting API approval is required. Analytics only need the client key + secret. The separate review demo uses `tiktok-sandbox.*` settings.
 - **Bandit** — optional shared-bandit controls for `bandit.daily_slots`, `bandit.min_top_k`, `bandit.allocation_ceiling`, `bandit.expand_after_creatives`, and `bandit.starter_arms`; used by `run --auto` and `run --product SLUG` (when no `--theme`/`--hook` is given)
+- **Eval** — optional `eval.model` override for the 7-criterion creative quality scoring pass used by `eval-content`, `eval-batch`, and `daily-loop`; defaults to `gpt-4.1-mini`. The 7th criterion (`standalone_value`) measures whether content has viewer value independent of purchase intent.
 - **Text review** — optional `text_review.min_posts` and `text_review.lookback_days` defaults for `review-text`, which creates reusable `TEXT_LEVEL_INSIGHTS` from recent post performance
 - **X** — API key/secret + access token/secret (Basic tier for posting)
 - **Make bridge** — optional `make_bridge.webhook_url` plus `make_bridge.r2.account_id`, `make_bridge.r2.access_key_id`, `make_bridge.r2.secret_access_key`, and `make_bridge.r2.bucket_name` if you want to upload finished `.mp4` files to Cloudflare R2 and forward a presigned URL to Make.com
@@ -450,6 +523,7 @@ For the full runbook, see `tiktok-demo/README.md`.
 - **image_motion_15s reference folders:** `~/.velura/brand/` (brand-kit images, always used), `~/.velura/models/` (human-model images for lifestyle frames only). When TTS is enabled, voiceover WAV and silent MP4 sidecars are stored alongside the final voiced `{content-id}.mp4`.
 - **ai_video_flex_15s:** Experimental format; uses the same Gemini + xAI pipeline as ai_video_15s but with a flexible multi-scene plan (3–7 scenes, 6–15 seconds) stored in `asset_manifest_json`
 - **video-v3:** Uses `ai_video_flex_15s` under the hood but with a 6-8 scene, 13-15 second theme-first timeline. `asset_manifest_json` stores the normalized timeline, strategy metadata, and background music metadata.
+- **video-v4:** Same timeline format as V3 but with `schema_version: 4`. `asset_manifest_json` additionally stores `viewer_takeaway` and `content_mode` in strategy metadata. The `problem_angle` column stores the viewer takeaway for consistency.
 
 On Windows, `~` resolves to `%USERPROFILE%`.
 
@@ -500,14 +574,14 @@ pytest tests/ -v
 ### Windows (Task Scheduler)
 
 Create two tasks:
-- **Morning (8:00 AM):** `.venv\Scripts\python cli.py pull-analytics` then `cli.py report`
-- **Evening (8:00 PM):** `.venv\Scripts\python cli.py pull-analytics`
+- **Morning (8:00 AM):** `.venv\Scripts\python cli.py daily-loop --lookback-days 7`
+- **Evening (optional catch-up analytics):** `.venv\Scripts\python cli.py pull-analytics`
 - **Optional publish worker (every 15 minutes):** `.venv\Scripts\python cli.py post-due`
 
 ### Linux/macOS (crontab)
 
 ```cron
-0 7 * * * cd /path/to/repo && .venv/bin/python cli.py pull-analytics && .venv/bin/python cli.py report
+0 7 * * * cd /path/to/repo && .venv/bin/python cli.py daily-loop --lookback-days 7
 0 19 * * * cd /path/to/repo && .venv/bin/python cli.py pull-analytics
 */15 * * * * cd /path/to/repo && .venv/bin/python cli.py post-due
 ```

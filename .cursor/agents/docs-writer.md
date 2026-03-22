@@ -1,6 +1,6 @@
 ---
 name: docs-writer
-model: gpt-5.4-mini-high
+model: composer-2-fast
 description: You are a senior technical writer focused on developer and API documentation.
 ---
 

@@ -58,7 +58,7 @@ sys.modules.setdefault(
 import cli as cli_module
 from src import db
 from src.make_bridge import BridgeResult
-from src.models import Content, PlatformPayload, Post, Product
+from src.models import Content, Metric, PlatformPayload, Post, Product
 
 
 class FakeYouTubePoster:
@@ -198,16 +198,18 @@ def test_preview_all_shows_every_saved_row(tmp_db: Path) -> None:
     all_result = runner.invoke(cli_module.cli, ["preview", "--all"])
     assert all_result.exit_code == 0
     assert "All Content" in all_result.output
-    assert "benefit\u2026" in all_result.output
-    assert "problem\u2026" in all_result.output
+    # Theme column truncates depending on table width (extra From column).
+    assert "benefi" in all_result.output
+    assert "proble" in all_result.output
     assert "Product" in all_result.output
     assert "Theme" in all_result.output
-    assert "Hook Type" in all_result.output
+    # Rich may wrap the hook column header across lines ("Hook" / "Type").
+    assert "Hook" in all_result.output
 
     last_24h_result = runner.invoke(cli_module.cli, ["preview", "--last-24h"])
     assert last_24h_result.exit_code == 0
-    assert "benefit_\u2026" in last_24h_result.output
-    assert "problem\u2026" not in last_24h_result.output
+    assert "benefi" in last_24h_result.output
+    assert "proble" not in last_24h_result.output
 
 
 def _seed_recent_content_rows(product: Product, total: int = 23) -> list[str]:
@@ -844,6 +846,180 @@ def test_add_product_command_saves_manual_catalog_entry(
     assert product.name == "Brow Pomade"
     assert product.product_url == "https://veluraesthetics.com/products/brow-pomade"
     assert product.generation_ready is False
+
+
+def test_repost_cli_schedule_post_preserves_original_and_separate_metrics(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    client_secrets = tmp_path / "youtube_client_secrets.json"
+    client_secrets.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "posting": {"stagger_minutes": {"youtube": 0}},
+            "platforms": {"enabled": ["youtube"]},
+            "youtube": {"client_secrets_file": str(client_secrets)},
+            "site_url": "https://test.com",
+            "shopify": {"store_url": "https://test.com"},
+            "data_root": str(tmp_path / "velura-data"),
+        },
+    )
+
+    product = Product(sku="serum-repost", name="Serum Repost")
+    db.upsert_product(product)
+
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(b"video")
+    content = Content(
+        id="content-original-repost",
+        product_sku=product.sku,
+        theme="benefit_spotlight",
+        hook_type="question",
+        video_local_path=str(video_path),
+    )
+    db.insert_content(content)
+    db.upsert_platform_payload(
+        PlatformPayload(
+            content_id=content.id,
+            platform="youtube",
+            caption="Launch caption",
+            hashtags="launch,velura",
+            utm_url=f"https://example.com/products/{product.sku}?utm_content={content.id}",
+            destination_url=f"https://example.com/products/{product.sku}",
+            utm_source="youtube",
+            utm_medium="social",
+            utm_campaign="benefit_spotlight_question",
+            utm_content=content.id,
+            link_mode="direct",
+        )
+    )
+
+    class FakeYouTubePoster:
+        _calls = 0
+
+        def upload(self, video_path: Path, caption: str, hashtags: list[str]) -> str:
+            FakeYouTubePoster._calls += 1
+            return f"yt-remote-{FakeYouTubePoster._calls}"
+
+    monkeypatch.setitem(cli_module.POSTERS, "youtube", FakeYouTubePoster)
+    runner = CliRunner()
+
+    assert runner.invoke(cli_module.cli, ["approve", "--content-id", content.id]).exit_code == 0
+    assert runner.invoke(cli_module.cli, ["schedule", "--content-id", content.id]).exit_code == 0
+    assert runner.invoke(cli_module.cli, ["post-due", "--allow-quiet-hours"]).exit_code == 0
+
+    orig_payload = db.get_platform_payload(content.id, "youtube")
+    assert orig_payload is not None
+    assert orig_payload.status == "posted"
+    orig_posts = db.list_posts_for_content(content.id)
+    assert len(orig_posts) == 1
+    orig_post_id = orig_posts[0].id
+
+    repost_out = runner.invoke(cli_module.cli, ["repost", "--content-id", content.id])
+    assert repost_out.exit_code == 0
+    assert "Repost created" in repost_out.output
+
+    clones = [c for c in db.list_all_content() if c.source_content_id == content.id]
+    assert len(clones) == 1
+    repost = clones[0]
+    assert repost.id != content.id
+
+    again = db.get_platform_payload(content.id, "youtube")
+    assert again.status == "posted"
+    assert again.id == orig_payload.id
+
+    rep_payload_before = db.get_platform_payload(repost.id, "youtube")
+    assert rep_payload_before is not None
+    assert rep_payload_before.utm_content == repost.id
+
+    assert runner.invoke(cli_module.cli, ["schedule", "--content-id", repost.id]).exit_code == 0
+    assert runner.invoke(cli_module.cli, ["post-due", "--allow-quiet-hours"]).exit_code == 0
+
+    rep_posts = db.list_posts_for_content(repost.id)
+    assert len(rep_posts) == 1
+    assert rep_posts[0].post_id != orig_posts[0].post_id
+    assert rep_posts[0].utm_content == repost.id
+
+    db.insert_metric(Metric(post_id=rep_posts[0].id, platform="youtube", views=50))
+    db.insert_metric(Metric(post_id=orig_post_id, platform="youtube", views=10))
+
+    assert db.latest_metrics_for_post(rep_posts[0].id).views == 50
+    assert db.latest_metrics_for_post(orig_post_id).views == 10
+
+
+def test_repost_pending_cli_leaves_review_pending(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "posting": {"stagger_minutes": {"youtube": 0}},
+            "platforms": {"enabled": ["youtube"]},
+            "site_url": "https://test.com",
+            "shopify": {"store_url": "https://test.com"},
+            "youtube": {"client_secrets_file": str(tmp_path / "yt.json")},
+            "data_root": str(tmp_path / "velura-data"),
+        },
+    )
+    (tmp_path / "yt.json").write_text("{}", encoding="utf-8")
+
+    product = Product(sku="serum-pend", name="Serum Pend")
+    db.upsert_product(product)
+    video_path = tmp_path / "v.mp4"
+    video_path.write_bytes(b"v")
+    content = Content(
+        id="src-pending-cli",
+        product_sku=product.sku,
+        theme="benefit_spotlight",
+        hook_type="question",
+        video_local_path=str(video_path),
+    )
+    db.insert_content(content)
+
+    runner = CliRunner()
+    out = runner.invoke(
+        cli_module.cli,
+        ["repost", "--content-id", content.id, "--pending"],
+    )
+    assert out.exit_code == 0
+    assert "Pending review" in out.output
+    clones = [c for c in db.list_all_content() if c.source_content_id == content.id]
+    assert len(clones) == 1
+    assert clones[0].review_status == "pending"
+
+
+def test_preview_shows_source_lineage_column(tmp_db: Path) -> None:
+    product = Product(sku="serum-lineage", name="Serum Lineage")
+    db.upsert_product(product)
+    db.insert_content(
+        Content(
+            id="parent-id-xx",
+            product_sku=product.sku,
+            theme="benefit_spotlight",
+            hook_type="question",
+        )
+    )
+    db.insert_content(
+        Content(
+            id="child-repost-yy",
+            product_sku=product.sku,
+            theme="benefit_spotlight",
+            hook_type="question",
+            source_content_id="parent-id-xx",
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli_module.cli, ["preview", "--all"])
+    assert result.exit_code == 0
+    assert "From" in result.output
+    # Child row shows truncated source id prefix in the From column (Rich may ellipsis-wrap).
+    assert "paren" in result.output
 
 
 def _load_real_instagram_module():

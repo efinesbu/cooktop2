@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Task Sizing
 
-- If a task touches more than 3 files, split it into smaller batches before editing.
+- If a task touches more than 4 files, split it into smaller batches before editing.
 - Prefer completing one stable interface change before starting the next dependent batch.
 - Parallelize only independent workstreams with explicit handoff points.
 - Add rules and guidance first when introducing new project-wide constraints.

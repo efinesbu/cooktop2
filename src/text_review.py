@@ -24,6 +24,9 @@ Write a single concise paragraph for future prompt injection.
 - If the evidence is mixed, state what seems to correlate rather than overclaiming.
 - Keep the insight practical and reusable.
 - Use plain text only. No bullets, no markdown, no JSON.
+- When eval_score is available (0-6 quality checklist), note whether high-scoring content
+  also performs well. If high-eval content underperforms, flag which aspects of the checklist
+  may not predict real engagement.
 """
 
 
@@ -112,6 +115,11 @@ def _build_analysis_prompt(
         f"- lookback_days: {lookback_days}",
         f"- analyzed_content_rows: {len(rows)}",
         f"- overall_avg_engagement_rate: {_format_rate(overall_avg)}",
+    ]
+    eval_scores = [int(row.get("eval_score") or 0) for row in rows if row.get("eval_score") is not None]
+    if eval_scores:
+        lines.append(f"- eval_score_avg: {sum(eval_scores)/len(eval_scores):.1f}/6")
+    lines += [
         "",
         "Theme pattern summary:",
         *theme_summary,
@@ -165,6 +173,7 @@ def _format_row_lines(rows: list[dict[str, object]]) -> list[str]:
             f"rate {_format_rate(float(row.get('engagement_rate') or 0.0))} | "
             f"views {int(row.get('total_views') or 0)} | "
             f"engagements {int(row.get('total_engagements') or 0)} | "
+            f"eval {int(row.get('eval_score') or 0)}/6 | "
             f"theme {row.get('theme') or 'unknown'} | "
             f"hook_type {row.get('hook_type') or 'unknown'} | "
             f"hook_text \"{_clean_text_fragment(row.get('hook_text'), limit=160)}\""

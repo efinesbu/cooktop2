@@ -44,6 +44,7 @@ _ENV_OVERRIDES: dict[str, str] = {
     "briefing.smtp_user": "SMTP_USER",
     "briefing.smtp_pass": "SMTP_PASS",
     "briefing.from_email": "BRIEFING_FROM_EMAIL",
+    "elevenlabs.api_key": "ELEVENLABS_API_KEY",
 }
 
 _POSTING_REQUIREMENTS: dict[str, tuple[str, ...]] = {

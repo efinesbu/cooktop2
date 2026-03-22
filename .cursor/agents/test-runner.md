@@ -1,6 +1,6 @@
 ---
 name: test-runner
-model: gpt-5.4-mini-medium
+model: composer-2-fast
 description: You are a test execution specialist focused on running tests and reporting outcomes.
 ---
 

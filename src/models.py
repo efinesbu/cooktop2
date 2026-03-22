@@ -214,6 +214,8 @@ class Content:
     source_content_id: Optional[str] = None
     # Video V2: strategy metadata for learning (style_family, audience clusters, etc.)
     strategy_metadata_json: Optional[str] = None
+    # Phase 8: eval scoring
+    eval_score: Optional[int] = None
 
 
 @dataclass
@@ -307,6 +309,26 @@ class BanditObservation:
     aggregated_engagement_rate: float = 0.0
     success: bool = False
     observed_at: Optional[str] = None
+
+
+@dataclass
+class ContentEval:
+    id: Optional[int] = None
+    content_id: str = ""
+    criterion: str = ""
+    passed: bool = False
+    evaluated_at: Optional[str] = None
+
+
+EVAL_CRITERIA = [
+    "hook",
+    "first_frame",
+    "narrative_arc",
+    "specificity",
+    "caption",
+    "scene_progression",
+    "standalone_value",
+]
 
 
 @dataclass

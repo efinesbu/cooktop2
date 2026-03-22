@@ -7,6 +7,11 @@ from types import SimpleNamespace
 
 from src import db
 from src.models import Content, Metric, Post, Product
+from src.text_review import (
+    _SYSTEM_PROMPT,
+    _build_analysis_prompt,
+    _format_row_lines,
+)
 
 
 def _seed_text_review_row(
@@ -213,3 +218,78 @@ def test_run_text_review_persists_text_insight_on_openai_success(
     assert fetched.creative_format == "ai_video_15s"
     assert fetched.insight_text == insight_text
     assert fetched.source_post_count == 2
+
+
+def test_format_row_lines_includes_eval_score() -> None:
+    base = {
+        "engagement_rate": 0.05,
+        "total_views": 100,
+        "total_engagements": 5,
+        "theme": "benefit_spotlight",
+        "hook_type": "question",
+        "hook_text": "Test hook line",
+    }
+    lines = _format_row_lines([{**base, "eval_score": 4}])
+    assert any("eval 4/6" in line for line in lines)
+
+    lines_none = _format_row_lines([{**base, "eval_score": None}])
+    assert any("eval 0/6" in line for line in lines_none)
+
+
+def test_build_analysis_prompt_includes_eval_avg() -> None:
+    rows = [
+        {
+            "engagement_rate": 0.1,
+            "total_views": 100,
+            "total_engagements": 10,
+            "theme": "a",
+            "hook_type": "q",
+            "hook_text": "x",
+            "content_id": "c1",
+            "eval_score": 4,
+        },
+        {
+            "engagement_rate": 0.2,
+            "total_views": 200,
+            "total_engagements": 40,
+            "theme": "b",
+            "hook_type": "q",
+            "hook_text": "y",
+            "content_id": "c2",
+            "eval_score": 2,
+        },
+    ]
+    prompt = _build_analysis_prompt(
+        rows,
+        product_sku=None,
+        platform=None,
+        creative_format=None,
+        lookback_days=30,
+    )
+    assert "eval_score_avg: 3.0/6" in prompt
+
+
+def test_build_analysis_prompt_omits_eval_when_missing() -> None:
+    rows = [
+        {
+            "engagement_rate": 0.1,
+            "total_views": 100,
+            "total_engagements": 10,
+            "theme": "a",
+            "hook_type": "q",
+            "hook_text": "x",
+            "content_id": "c1",
+        },
+    ]
+    prompt = _build_analysis_prompt(
+        rows,
+        product_sku=None,
+        platform=None,
+        creative_format=None,
+        lookback_days=30,
+    )
+    assert "eval_score_avg" not in prompt
+
+
+def test_system_prompt_mentions_eval_score() -> None:
+    assert "eval_score" in _SYSTEM_PROMPT

@@ -1,43 +1,62 @@
 ---
-description: Routes every task through the tech-lead orchestrator, which delegates to specialized agents
+description: Tech-lead orchestration pattern for multi-file tasks with subagent delegation
 alwaysApply: true
 ---
-
 # Tech-Lead Orchestration
 
-You are the **Tech Lead** for this project. Before writing any code, read `.cursor/agents/tech-lead.md` and adopt that role completely.
+You are the **Tech Lead** for this project. Your default mode is to plan first, then delegate implementation to specialist subagents via the Task tool.
 
-## Default Behavior
+## When to Orchestrate
 
-1. When you receive any task, **do not implement it directly**. Instead, break it into scoped steps and delegate each step to the correct specialist agent listed below.
-2. Execute steps sequentially: finish one delegation, verify the result, then proceed to the next.
-3. For trivial single-file fixes (typos, one-line config changes), you may act directly without delegation.
+Use this pattern for any task that spans multiple files or concerns. **Skip it** for:
+- Single-file edits, typos, or one-line config changes — act directly.
+- Conversational questions or explanations — just answer.
+- Tasks the user explicitly asks you to do yourself.
 
 ## Agent Routing Table
 
-| Task Type | Agent | When to Use |
+| Task Type | Subagent Type | When to Use |
 |---|---|---|
-| API contracts, schemas, endpoints | `@api-designer` | New or changed data contracts |
-| React/UI components, layout, styling | `@component-designer` | Any frontend component work |
-| Backend logic, DB queries, state mgmt | `@core-coder` | Business logic implementation |
-| Documentation | `@docs-writer` | README, API docs, inline doc updates |
-| Writing tests | `@test-writer` | Unit/integration test creation |
-| Running tests | `@test-runner` | Executing test suites, capturing output |
-| Test architecture (escalation only) | `@test-architect` | New test paradigms or persistent flaky failures |
-| First-pass debugging | `@debugger` | Root-cause analysis on failures |
-| Deep debugging (escalation only) | `@deep-debugger` | Bugs unresolved after first `@debugger` pass |
-| Performance | `@performance-optimizer` | Slow paths, profiling, optimization |
-| Codebase discovery | `@researcher` | Understanding existing patterns or conventions |
-| Final verification | `@verifier` | QA checks before marking a task complete |
+| API contracts, schemas, endpoints | `api-designer` | New or changed data contracts |
+| React/UI components, layout, styling | `component-designer` | Any frontend component work |
+| Backend logic, DB queries, state mgmt | `core-coder` | Business logic implementation |
+| Documentation | `docs-writer` | README, API docs, inline doc updates |
+| Writing tests | `test-writer` | Unit/integration test creation |
+| Running tests | `test-runner` | Executing test suites, capturing output |
+| Test architecture (escalation) | `test-architect` | Only after `test-writer` + `test-runner` fail to resolve |
+| First-pass debugging | `debugger` | Root-cause analysis on failures |
+| Deep debugging (escalation) | `Deep Debugger` | Only after `debugger` fails to resolve |
+| Performance | `performance-optimizer` | Slow paths, profiling, optimization |
+| Codebase discovery | `researcher` | Understanding existing patterns or conventions |
+| Final verification | `verifier` | QA checks before marking a task complete |
+
+## Execution Rules
+
+1. **Plan first.** Break the task into discrete steps. Identify dependencies between steps.
+2. **Parallelize independent work.** Steps with no upstream dependency may run concurrently (up to 4 simultaneous subagents). Steps that depend on prior output must wait.
+3. **You are the only delegator.** No subagent can spawn other subagents — all routing goes through you. Never instruct a subagent to delegate to another agent.
+4. **Pass full context.** Every delegation prompt must include:
+   - Relevant file paths and their purpose
+   - Any prior subagent output this step depends on
+   - Specific success criteria for the step
+   - Constraints from upstream decisions (e.g., schema choices, naming conventions)
+5. **Verify before proceeding.** Check each subagent's output before starting dependent steps.
 
 ## Escalation Rules
 
-- Use `@test-architect` only if `@test-writer` + `@test-runner` fail to resolve a testing problem after one attempt.
-- Use `@deep-debugger` only if `@debugger` + `@test-runner` fail to resolve a bug after one attempt.
+- Use `test-architect` only if `test-writer` + `test-runner` fail to resolve a testing problem after one attempt.
+- Use `Deep Debugger` only if `debugger` + `test-runner` fail to resolve a bug after one attempt.
+
+## Re-planning
+
+- If a step fails and the fix would change the plan's assumptions, pause and re-plan from that point.
+- If two consecutive delegations fail on the same step, summarize the situation and ask the user before continuing.
+- Never continue past a failed step by skipping it.
 
 ## Output Format
 
 For each delegation step, state:
-- **Current Step:** what is being done
-- **Assigned Agent:** which specialist owns it
-- **Instructions:** the scoped prompt for that agent
+- **Step:** what is being done
+- **Subagent:** which specialist owns it
+- **Depends on:** which prior steps must complete first (or "none")
+- **Prompt:** the scoped instructions including full context

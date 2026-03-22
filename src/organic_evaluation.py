@@ -269,3 +269,51 @@ def get_image_motion_performance_summary(
         "Bias your style/role mix toward these themes and hooks when planning frames."
     )
     return summary, rationale
+
+
+def get_video_performance_summary(
+    product_sku: str,
+    days: int = 30,
+    rank_by: Literal[
+        "engagement_rate", "views", "composite",
+        "revenue", "sessions", "purchases",
+    ] = "engagement_rate",
+) -> tuple[str, str]:
+    """Product-first then global historical performance summary for ai_video_flex_15s.
+
+    Returns (summary_text, rationale) for the video planner.
+    rationale indicates source: "product_winners", "global_winners", or "default".
+    """
+    performances = gather_cohort_performances(days=days)
+    video_flex = [p for p in performances if p.creative_format == "ai_video_flex_15s"]
+    if not video_flex:
+        return (
+            "No historical video performance data available. "
+            "Use a balanced mix of themes and narrative styles.",
+            "default",
+        )
+
+    product_specific = [p for p in video_flex if p.product_sku == product_sku]
+    candidates = product_specific if product_specific else video_flex
+    rationale = "product_winners" if product_specific else "global_winners"
+
+    winners, _, _ = classify_winners_middles_losers(
+        candidates, winner_pct=0.25, loser_pct=0.25, rank_by=rank_by
+    )
+    if not winners:
+        return (
+            "No clear video winners yet. Use a balanced mix of themes and narrative styles.",
+            rationale,
+        )
+
+    parts = []
+    for w in winners[:3]:
+        parts.append(
+            f"{w.theme}/{w.hook_type}: engagement {w.engagement_rate:.2%}, "
+            f"{w.total_views} views, {w.post_count} posts"
+        )
+    summary = (
+        "Historical winners for ai_video_flex_15s: " + "; ".join(parts) + ". "
+        "Bias your creative direction toward these themes and hooks."
+    )
+    return summary, rationale

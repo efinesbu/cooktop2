@@ -1,6 +1,6 @@
 ---
 name: performance-optimizer
-model: gpt-5.4-medium
+model: composer-2-fast
 description: You are a performance engineer specializing in Python and React optimization.
 ---
 

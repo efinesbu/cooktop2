@@ -11,13 +11,16 @@ import uuid
 from typing import Any
 
 
-def _should_include_v3_cta() -> bool:
-    """10% chance of including CTA in V3 video. Deterministic tests can monkeypatch this."""
+def _should_include_soft_cta() -> bool:
+    """10% chance of including CTA in V3/V4 video. Deterministic tests can monkeypatch this."""
     return random.random() < 0.10
+
+
+_should_include_v3_cta = _should_include_soft_cta
 
 from src import config, db
 from src.creative_strategy import whitelist_prompt_lines
-from src.organic_evaluation import get_image_motion_performance_summary
+from src.organic_evaluation import get_image_motion_performance_summary, get_video_performance_summary
 from src.models import (
     Content, Cost, CTA_TYPES, CREATIVE_FORMATS, HOOK_DEFINITIONS, HOOK_TYPES,
     PlatformPayload, Product, ProductImage, PROOF_TYPES, SCRIPT_STYLES, THEMES,
@@ -136,11 +139,11 @@ TARGET PRODUCT: provided in the user message.
 PRODUCT TRUTH: Base all product claims, benefits, and ingredient references ONLY on the product description provided in the user message. Do not invent features, ingredients, or benefits not mentioned in the description. If no product description is provided, keep claims generic and avoid specific ingredient or benefit references.
 
 CORE DIRECTIVE
-Generate exactly 1 unique creative for image_motion_15s: a 5-7 frame vertical (9:16) image sequence.
+Generate exactly 1 unique creative for image_motion_15s: a 7-8 frame vertical (9:16) image sequence.
 - Use the theme, hook_type, cta_type, proof_type, and script_style from the locked constraints in the user message. Echo them exactly in your response.
 - Return hook_text, platform_captions, hashtags.
 - Choose content_goal: "conversion" or "engagement".
-- Also return an image_plan: a structured multi-frame plan for Gemini to generate 5-7 images.
+- Also return an image_plan: a structured multi-frame plan for Gemini to generate 7-8 images.
 - Use plain ASCII characters only in every field. No emoji or Unicode punctuation.
 
 VISUAL DIRECTORY
@@ -162,8 +165,8 @@ CONTROLLED VARIETY (use this vocabulary; vary at most 1-2 axes per creative):
 PLANNER RULES:
 - Require at least 1 hero-led frame (hero_macro, hero_tabletop, or texture_detail) in every sequence.
 - Allow lifestyle frames (lifestyle_portrait, lifestyle_in_use) only when model reference assets exist (check user message).
-- total_duration_seconds must be <= 15; shorter clips are allowed (e.g. 9–12 seconds).
-- Each frame duration_seconds: 1.5–2.0.
+- total_duration_seconds must equal the sum of frame durations and be between 14.5 and 15.0 seconds inclusive (always fill the 15s format).
+- Each frame duration_seconds: 1.5–2.2 (choose values so the sum lands in 14.5–15.0).
 - Bias style/role mix from PERFORMANCE_SUMMARY when provided.
 - Build a mini-story across frames. Use at least 3 distinct narrative_role beats, and end on cta.
 - Each frame must introduce a NEW idea. Do not repeat the same concept with different wording.
@@ -194,7 +197,7 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
   "hashtags": ["list", "of", "hashtags", "without #"],
   "image_plan": {
     "strategy_summary": "string — one-line creative strategy for this sequence",
-    "total_duration_seconds": number — sum of frame durations, <= 15,
+    "total_duration_seconds": number — sum of frame durations, 14.5–15.0,
     "performance_rationale": "string — product_winners, global_winners, or default",
     "strategy_metadata": {
       "content_goal": "string — conversion | engagement",
@@ -208,7 +211,7 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
         "narrative_role": "string — hook | problem | proof | cta",
         "frame_intent": "string — what the viewer should feel or understand from this frame",
         "mood": "string — intrigue | concern | delight | invitation | calm_confidence | soft_curiosity",
-        "duration_seconds": number — 1.5 to 2.0,
+        "duration_seconds": number — 1.5 to 2.2,
         "style_family": "string — anamorphic | realistic_cinematic",
         "lighting": "string — golden_window_light | soft_diffused_daylight | clean_studio_backlight",
         "camera_distance": "string — macro_closeup | closeup | medium_shot",
@@ -229,9 +232,10 @@ TTS_SCRIPT_TEMPLATES = ("caption_led", "strategy_led", "proof_led")
 TTS_WORDS_PER_SECOND_MAX = 2.5
 TTS_WORDS_PER_SECOND_MIN = 2.1
 VOICEOVER_TARGET_WORDS_PER_SECOND = 2.3
-VOICEOVER_END_BUFFER_MIN_SECONDS = 1.0
-VOICEOVER_END_BUFFER_TARGET_SECONDS = 1.25
-VOICEOVER_END_BUFFER_MAX_SECONDS = 1.5
+# Small mux/TTS safety margin; large buffers caused hard word-cuts mid-sentence.
+VOICEOVER_END_BUFFER_MIN_SECONDS = 0.35
+VOICEOVER_END_BUFFER_TARGET_SECONDS = 0.45
+VOICEOVER_END_BUFFER_MAX_SECONDS = 0.55
 VOICEOVER_GUARDRAIL_MAX_ATTEMPTS = 3
 # Patterns to reject or normalize (brand guardrails)
 TTS_GUARDRAIL_FORBIDDEN = (
@@ -270,6 +274,13 @@ IMAGE_MOTION_MOODS = (
 IMAGE_MOTION_CONTENT_GOALS = ("conversion", "engagement")
 IMAGE_MOTION_PRIMARY_ENGAGEMENT_INTENTS = ("follow", "save", "share", "comment", "click")
 IMAGE_MOTION_PERFORMANCE_RATIONALES = ("product_winners", "global_winners", "default")
+# Image motion must nearly fill the 15s slot so voiceover and rendered video are not cut short.
+IMAGE_MOTION_MIN_FRAMES = 7
+IMAGE_MOTION_MAX_FRAMES = 8
+IMAGE_MOTION_FRAME_DURATION_MIN = 1.5
+IMAGE_MOTION_FRAME_DURATION_MAX = 2.2
+IMAGE_MOTION_TOTAL_DURATION_MIN = 14.5
+IMAGE_MOTION_TOTAL_DURATION_MAX = 15.0
 
 _UNICODE_TEXT_REPLACEMENTS = {
     "\u00a0": " ",
@@ -371,13 +382,26 @@ def _voiceover_duration_targets(total_duration_seconds: float) -> tuple[float, f
 
 
 def _trim_script_to_duration(script: str, total_duration_seconds: float) -> str:
-    """Trim script to a safer voiceover budget that leaves an end buffer."""
+    """Trim script to a voiceover budget that leaves a small end buffer for mux safety.
+
+    When over the word cap, cut after the last sentence-ending punctuation within the
+    capped region so the line does not stop on a stray fragment (e.g. ... unique, not).
+    """
     _, _, max_spoken_duration = _voiceover_duration_targets(total_duration_seconds)
-    max_words = max(1, int(max_spoken_duration * VOICEOVER_TARGET_WORDS_PER_SECOND))
+    max_words = max(1, round(max_spoken_duration * VOICEOVER_TARGET_WORDS_PER_SECOND))
     words = script.split()
     if len(words) <= max_words:
         return script
-    return " ".join(words[:max_words])
+    text = " ".join(words[:max_words])
+    best_end = -1
+    for i, ch in enumerate(text):
+        if ch not in ".?!":
+            continue
+        if i + 1 == len(text) or text[i + 1].isspace():
+            best_end = i
+    if best_end != -1:
+        return text[: best_end + 1].strip()
+    return text
 
 
 def _guardrail_check(script: str) -> dict:
@@ -396,7 +420,16 @@ def _guardrail_check(script: str) -> dict:
 
 
 def _pick_voice(content_id: str) -> str:
-    """Use marin voice."""
+    """Resolve TTS voice id for the manifest (ElevenLabs voice id or OpenAI voice name)."""
+    provider = config.get("tts.provider", "elevenlabs")
+    if isinstance(provider, str) and provider.strip().lower() == "elevenlabs":
+        vid = config.get("elevenlabs.voice_id")
+        if isinstance(vid, str) and vid.strip():
+            return vid.strip()
+    cycle = config.get("openai.tts_voice_cycle")
+    if isinstance(cycle, list) and cycle:
+        idx = abs(hash(content_id)) % len(cycle)
+        return str(cycle[idx]).strip()
     return TTS_VOICES[0]
 
 
@@ -433,17 +466,19 @@ def _build_voiceover_plan(
     }
 
 
-def _collect_timeline_scripts(timeline: list[Any]) -> list[str]:
+def _collect_timeline_scripts(timeline: list[Any], strict: bool = False) -> list[str]:
     """Return non-empty timeline script lines in scene order."""
     scripts: list[str] = []
-    for scene in timeline:
+    for i, scene in enumerate(timeline):
         if not isinstance(scene, dict):
+            if strict:
+                raise ValueError(f"timeline[{i}] is not a dict")
             continue
         script = scene.get("script")
-        if isinstance(script, str):
-            script = script.strip()
-            if script:
-                scripts.append(script)
+        if isinstance(script, str) and script.strip():
+            scripts.append(script.strip())
+        elif strict:
+            raise ValueError(f"timeline[{i}] must have a non-empty script")
     return scripts
 
 
@@ -453,10 +488,10 @@ def _build_v3_voiceover_plan(
     total_duration_seconds: float,
 ) -> dict[str, Any] | None:
     """Build durable stitched voiceover plan for V3 timeline manifests."""
-    timeline_scripts = _collect_timeline_scripts(timeline)
-    if not timeline_scripts:
-        return None
+    timeline_scripts = _collect_timeline_scripts(timeline, strict=True)
+    assert timeline_scripts, "strict collection guarantees non-empty scripts for valid V3 timelines"
     voiceover_script = _sanitize_generated_text(" ".join(timeline_scripts))
+    voiceover_script = _trim_script_to_duration(voiceover_script, total_duration_seconds)
     word_count = len(voiceover_script.split())
     speech_rate = (
         word_count / total_duration_seconds
@@ -482,8 +517,11 @@ TASK
 Write exactly 1 voiceover script for an already-planned `image_motion_15s` clip.
 - The visual plan is final. Do not invent scenes that are not represented in the provided frame plan.
 - The script must fit the exact clip duration supplied in the user message.
-- Aim for the spoken line to finish 1.0 to 1.5 seconds before the clip ends.
+- Aim for the spoken line to finish about 0.35 to 0.55 seconds before the clip ends.
 - The script must feel natural when read aloud in one continuous take.
+- Output natural marketing copy ONLY: words meant for a voice actor. Never paste, quote, or read aloud
+  image-generation prompts, camera or lighting directions, JSON labels, or bullet lists from the frame plan.
+  Use `frame_intent`, roles, and mood to align the spoken line — do not narrate technical scene descriptions.
 
 TIMING RULES
 - Keep the full script within the provided word budget.
@@ -541,11 +579,50 @@ def _build_voiceover_guardrail_lines() -> list[str]:
     ]
 
 
+VOICEOVER_PROMPT_ECHO_ERROR_PREFIX = "Voiceover script rejected prompt-like output:"
+
+
+def _voiceover_prompt_metadata_signals(script: str) -> list[str]:
+    """Return reason codes if the script looks like pasted planner metadata, not spoken copy."""
+    reasons: list[str] = []
+    s = script.strip()
+    if not s:
+        return reasons
+
+    if re.search(r"(?i)\bframe\s+\d+\s*:", s):
+        reasons.append("numbered_frame_label")
+
+    if re.search(
+        r"(?i)(duration_seconds|style_family|camera_distance|narrative_role|frame_intent)\s*:",
+        s,
+    ):
+        reasons.append("schema_field_labels")
+
+    if re.search(r"(?i)\blighting\s*:", s):
+        reasons.append("lighting_field_label")
+
+    if re.search(
+        r"(?i)\b(hero_macro|hero_tabletop|texture_detail|lifestyle_portrait|lifestyle_in_use)\b",
+        s,
+    ):
+        reasons.append("frame_role_token")
+
+    if re.search(
+        r"(?i)\b(golden_window_light|soft_diffused_daylight|clean_studio_backlight|"
+        r"macro_closeup|realistic_cinematic|anamorphic)\b",
+        s,
+    ):
+        reasons.append("planner_vocab_token")
+
+    return reasons
+
+
 def _build_image_motion_voiceover_user_message(
     parsed: dict,
     product_name: str,
     total_duration_seconds: float,
     violations: list[str] | None = None,
+    extra_retry_instructions: list[str] | None = None,
 ) -> str:
     plan = parsed.get("image_plan") or {}
     frames = plan.get("frames") or []
@@ -553,7 +630,7 @@ def _build_image_motion_voiceover_user_message(
         total_duration_seconds
     )
     min_words = max(1, round(min_spoken_duration * VOICEOVER_TARGET_WORDS_PER_SECOND))
-    max_words = max(1, int(max_spoken_duration * VOICEOVER_TARGET_WORDS_PER_SECOND))
+    max_words = max(1, round(max_spoken_duration * VOICEOVER_TARGET_WORDS_PER_SECOND))
     target_words = max(1, round(target_spoken_duration * VOICEOVER_TARGET_WORDS_PER_SECOND))
 
     lines = [
@@ -573,8 +650,9 @@ def _build_image_motion_voiceover_user_message(
         f"{(((plan.get('strategy_metadata') or {}).get('audience_fear_cluster')) or '').strip() or 'none'}",
         "",
         f"Exact clip duration seconds: {total_duration_seconds:.1f}",
-        "Voiceover should finish 1.0 to 1.5 seconds before clip end.",
-        f"Preferred spoken duration: {min_spoken_duration:.1f}-{max_spoken_duration:.1f} seconds",
+        f"Voiceover should finish {VOICEOVER_END_BUFFER_MIN_SECONDS:.2f} to "
+        f"{VOICEOVER_END_BUFFER_MAX_SECONDS:.2f} seconds before clip end.",
+        f"Preferred spoken duration: {min_spoken_duration:.2f}-{max_spoken_duration:.2f} seconds",
         f"Preferred spoken word range: {min_words}-{max_words} words",
         f"Target word count: {target_words}",
         "",
@@ -588,6 +666,13 @@ def _build_image_motion_voiceover_user_message(
             "Return a new script that avoids every forbidden term listed above.",
             "",
         ])
+    if extra_retry_instructions:
+        for note in extra_retry_instructions:
+            lines.extend([
+                "Retry instruction:",
+                note,
+                "",
+            ])
     mood_sequence = [
         str(frame.get("mood", "")).strip()
         for frame in frames
@@ -611,10 +696,6 @@ def _build_image_motion_voiceover_user_message(
             f"  - narrative_role: {frame.get('narrative_role', '')}",
             f"  - frame_intent: {(frame.get('frame_intent') or '').strip()}",
             f"  - mood: {frame.get('mood', '')}",
-            f"  - style_family: {frame.get('style_family', '')}",
-            f"  - lighting: {frame.get('lighting', '')}",
-            f"  - camera_distance: {frame.get('camera_distance', '')}",
-            f"  - scene_description: {(frame.get('image_prompt') or '').strip()}",
         ])
     return "\n".join(lines)
 
@@ -631,6 +712,12 @@ def _parse_voiceover_response(raw: str, total_duration_seconds: float) -> dict[s
         raise ValueError("OpenAI voiceover response missing `voiceover_script`.")
 
     script = _trim_script_to_duration(script, total_duration_seconds)
+    echo_signals = _voiceover_prompt_metadata_signals(script)
+    if echo_signals:
+        raise ValueError(
+            f"{VOICEOVER_PROMPT_ECHO_ERROR_PREFIX} {', '.join(echo_signals)}"
+        )
+
     guardrail = _guardrail_check(script)
     if not guardrail["passed"]:
         raise ValueError(
@@ -656,12 +743,14 @@ def _generate_image_motion_voiceover_plan(
     raw = ""
     response = None
     data: dict[str, Any] | None = None
+    extra_retry_instructions: list[str] = []
     for attempt in range(1, VOICEOVER_GUARDRAIL_MAX_ATTEMPTS + 1):
         user_msg = _build_image_motion_voiceover_user_message(
             parsed,
             product_name,
             total_duration_seconds,
             violations=guardrail_violations or None,
+            extra_retry_instructions=extra_retry_instructions or None,
         )
         response = _call_with_retries(
             client,
@@ -676,13 +765,30 @@ def _generate_image_motion_voiceover_plan(
             data = _parse_voiceover_response(raw, total_duration_seconds)
             break
         except ValueError as exc:
-            if "Voiceover script violated brand guardrails:" not in str(exc):
+            msg = str(exc)
+            if VOICEOVER_PROMPT_ECHO_ERROR_PREFIX in msg:
+                if attempt == VOICEOVER_GUARDRAIL_MAX_ATTEMPTS:
+                    raise
+                extra_retry_instructions = [
+                    "The previous draft read like technical metadata or shot directions (frame labels, "
+                    "schema field names, lighting or camera tokens) instead of one continuous spoken line. "
+                    "Rewrite as natural voiceover only: no 'Frame N:', no role or lighting keywords from the plan, "
+                    "no pasted field names.",
+                ]
+                logger.warning(
+                    "Voiceover prompt-echo rejection on attempt %d/%d: %s",
+                    attempt,
+                    VOICEOVER_GUARDRAIL_MAX_ATTEMPTS,
+                    msg,
+                )
+                continue
+            if "Voiceover script violated brand guardrails:" not in msg:
                 raise
             if attempt == VOICEOVER_GUARDRAIL_MAX_ATTEMPTS:
                 raise
             guardrail_violations = [
                 violation.strip()
-                for violation in str(exc).split(":", 1)[1].split(",")
+                for violation in msg.split(":", 1)[1].split(",")
                 if violation.strip()
             ]
             logger.warning(
@@ -924,10 +1030,15 @@ NARRATION STYLE: THIRD PERSON
 - The narrator tone should feel like a friend telling you about something they discovered. Warm, confident, slightly conspiratorial.
 - Use simple vocabulary. Short sentences. Easy to follow at 2-3 words per second.
 
-PACING
-- Write voiceover scripts that fit a moderate speaking pace of 2-3 words per second for each scene duration.
-- Not every scene needs voiceover. 1-2 scenes can be visual-only beats (music and visual) for breathing room. Mark these with script: null.
-- The final narration may be stitched separately from the visuals, so do not depend on precise lip sync or talking-mouth performance.
+PACING (STRICT WORD BUDGET)
+- The voiceover is generated by TTS at ~2.3 words per second. Scripts that exceed the word budget will be REJECTED and regenerated.
+- Per-scene word budget: multiply the scene duration in seconds by 2.5 and round down. Examples:
+  - 1.5s scene: max 3 words
+  - 2.0s scene: max 5 words
+  - 2.5s scene: max 6 words
+- Total word count across ALL scene scripts MUST NOT exceed (total_duration_seconds x 2.5). For a 14s video that is 35 words. For a 15s video that is 37 words.
+- Every scene must include a narrator voiceover line. Write a short, punchy line within the word budget that advances the story. Prefer sentence fragments and crisp phrases over full sentences.
+- The final narration is stitched separately from the visuals, so do not depend on precise lip sync or talking-mouth performance.
 
 CTA APPROACH: SOFT ENGAGEMENT
 - The final scene should close with a soft, curiosity-driven call to action. Never hard-sell.
@@ -935,7 +1046,7 @@ CTA APPROACH: SOFT ENGAGEMENT
 - The goal is to drive saves, shares, and profile visits -- not immediate purchases.
 
 SCENE RULES
-- Each scene needs a scene_description (visual direction) and an optional script (narrator voiceover or null for visual-only beats).
+- Each scene needs a scene_description (visual direction) and a non-empty script (narrator voiceover).
 - Each scene needs a tone field describing the emotional register (e.g. curious, warm, playful, conspiratorial, confident, inviting, surprised, wistful).
 - Scenes after the first MUST start their scene_description with "HARD CUT:" to force visual cuts and prevent subject melting.
 - The product facial expression must follow a distinct emotional arc across scenes. No two consecutive scenes should use the same emotional register.
@@ -982,7 +1093,7 @@ RESPOND WITH ONLY valid JSON -- no markdown fences, no commentary:
       "start_seconds": 0,
       "end_seconds": number,
       "scene_description": "string -- visual direction; first scene has no HARD CUT prefix; all subsequent scenes MUST start with 'HARD CUT:'; must include the anthropomorphic product as sole subject with expression detail",
-      "script": "string or null -- third-person narrator voiceover for this scene; null for visual-only beats",
+      "script": "string -- required third-person narrator voiceover for this scene",
       "tone": "string -- emotional register for this scene (e.g. curious, warm, playful, conspiratorial)"
     }
   ]
@@ -997,6 +1108,124 @@ RULES:
 - Voiceover scripts must sound natural when spoken aloud.
 - Use only plain ASCII characters in every field. No emoji or Unicode punctuation.
 - Use only simple vocabulary.
+"""
+
+_AI_VIDEO_V4_SYSTEM_PROMPT = """\
+You are an expert short-form content creator for social platforms. You make educational, entertaining, and satisfying videos that happen to feature a product -- not ads disguised as content. Your goal is engagement: saves, shares, follows, and watch-through.
+
+TARGET PRODUCT: provided in the user message. The product is context and a supporting character, not the hero.
+
+PRODUCT TRUTH: Base all product claims, benefits, and ingredient references ONLY on the product description provided in the user message. Do not invent features, ingredients, or benefits not mentioned in the description. Treat the product description as context for accuracy -- you have creative freedom in how you present it as long as claims stay truthful and FTC-compliant.
+
+BRANDING CONTEXT: provided in the user message. Use the brand name and palette as soft visual anchors for consistency but let the creative breathe.
+
+VISUAL STYLE: ANAMORPHIC
+- Cinematic 3D closeup of an anthropomorphic version of the target product. Pixar-style face with large expressive eyes and an articulated mouth. Volumetric lighting, octane render, unreal engine 5, 4k. Brand "velura" in brown serif (Cormorant Garamond, Georgia, Times New Roman).
+- The anthropomorphic product may appear in 3-5 of 6-8 scenes. Some scenes can show the environment, a routine moment, a texture detail, or a visual metaphor without the product center-frame.
+- Scene variety comes from camera angle, expression, lighting, environment changes, and the balance between product scenes and environment scenes.
+- The environment is FLEXIBLE. Choose a setting that fits the theme and narrative (bathroom counter, kitchen windowsill, bedroom vanity, sunlit shelf, garden ledge, etc.). The environment can shift between scenes when it serves the story.
+
+CONTENT MODE: choose one of three modes based on the theme. The mode shapes the narrative arc.
+- educational: Open with a surprising fact, "did you know," or a common misconception. Build understanding scene by scene. The product is the example or proof point, not the pitch. The viewer should learn something real.
+- entertaining: Open with a visual hook, character moment, or humor beat. Build a mini-story with a beginning, middle, and payoff. The product is a character in the story, not the subject of a sales pitch.
+- satisfying: Open with a sensory or process-focused moment. Build a sequence that is visually or aurally satisfying (texture, pour, application, transformation). The product is part of the sensory experience.
+
+CORE DIRECTIVE
+Generate exactly 1 unique creative for a short-form video. The theme from the user message is your ONLY locked creative constraint -- let it shape the entire narrative freely.
+- Output MUST use a timeline with 6-8 scenes. Each scene lasts 1.5-2.5 seconds. Total duration MUST be between 13 and 15 seconds.
+- Target a scene change every 1.5-2.5 seconds for quick, engaging pacing.
+- The video must deliver standalone value: a viewer who never buys the product should still enjoy watching.
+- Return hook_text, platform_captions, hashtags.
+- If product reference images are provided, preserve the real package silhouette, label layout, and visible brand wordmark in scenes where the product appears.
+- Use plain ASCII characters only in every field. No emoji or Unicode punctuation.
+
+NARRATION STYLE: THIRD PERSON
+- All voiceover scripts are written from a narrator perspective -- someone sharing a tip, telling a story, or describing a satisfying moment.
+- The narrator tone should feel like a friend sharing something interesting. Warm, confident, slightly conspiratorial.
+- Use simple vocabulary. Short sentences. Easy to follow at 2-3 words per second.
+
+PACING (STRICT WORD BUDGET)
+- The voiceover is generated by TTS at ~2.3 words per second. Scripts that exceed the word budget will be REJECTED and regenerated.
+- Per-scene word budget: multiply the scene duration in seconds by 2.5 and round down. Examples:
+  - 1.5s scene: max 3 words
+  - 2.0s scene: max 5 words
+  - 2.5s scene: max 6 words
+- Total word count across ALL scene scripts MUST NOT exceed (total_duration_seconds x 2.5). For a 14s video that is 35 words. For a 15s video that is 37 words.
+- Every scene must include a narrator voiceover line. Write a short, punchy line within the word budget that advances the story. Prefer sentence fragments and crisp phrases over full sentences.
+- The final narration is stitched separately from the visuals, so do not depend on precise lip sync or talking-mouth performance.
+
+ENDING APPROACH
+- When the user message says "Soft CTA allowed", the final scene may close with a gentle curiosity-driven call to action: "worth a look", "see what you think", "link in bio for the curious". Never hard-sell.
+- When the user message says "No CTA", the final scene must close with a non-commercial ending: restate the takeaway, deliver a satisfying visual payoff, or leave the viewer with something memorable. Do NOT mention the product, a link, or any purchase action in the final scene.
+
+SCENE RULES
+- Each scene needs a scene_description (visual direction) and a non-empty script (narrator voiceover).
+- Each scene needs a tone field describing the emotional register (e.g. curious, warm, playful, conspiratorial, confident, inviting, surprised, wistful).
+- Scenes after the first MUST start their scene_description with "HARD CUT:" to force visual cuts and prevent subject melting.
+- The product facial expression must follow a distinct emotional arc across scenes where it appears. No two consecutive product scenes should use the same emotional register.
+- Each scene_description must include at least one specific visual detail that reinforces the voiceover line or narrative beat for that scene.
+- Scenes without the product should still serve the narrative: show the environment, a detail, a before/after, or a visual metaphor.
+
+BACKGROUND MUSIC
+- Include a background_music object describing the ideal soundtrack mood, tempo, and instrument feel.
+- The music must complement the narrative without overpowering the voiceover. It plays at background level underneath the narrator voice.
+- Keep the description specific enough for music selection (mood, tempo bpm, instruments) but not overly technical.
+
+FTC COMPLIANCE
+- No medical or health claims. Use approved softeners: "appears to", "feels like", "helps skin look", "designed to".
+- Keep movements subtle for AI video generation.
+
+RESPOND WITH ONLY valid JSON -- no markdown fences, no commentary:
+
+{
+  "theme": "string -- must match the locked theme in the user message",
+  "hook_text": "string -- short opening hook line for overlay or caption fallback",
+  "creative_format": "ai_video_flex_15s",
+  "cta_text": "string -- the soft CTA phrase used in the final scene, or empty string if no CTA",
+  "viewer_takeaway": "string -- what the viewer knows, feels, or finds satisfying after watching, independent of the product",
+  "starting_image_prompt": "string -- anamorphic starting frame; anthropomorphic product with Pixar-style face, expressive eyes, articulated mouth; environment chosen to match the theme; volumetric lighting, octane render, unreal engine 5, 4k; brand 'velura' in brown serif (Cormorant Garamond, Georgia, Times New Roman, serif); preserve packaging branding from hero reference images when provided",
+  "background_music": {
+    "description": "string -- mood, tempo, and instrument description (e.g. 'gentle lo-fi piano with soft ambient pads, 85 bpm, warm and curious')",
+    "energy_level": "string -- low | medium | high"
+  },
+  "platform_captions": {
+    "youtube": "string -- YouTube Shorts caption (max 100 chars, keyword-rich, must end with 'Link in bio')",
+    "instagram": "string -- Instagram Reels caption (conversational plain text, 1-2 sentences, no emoji)",
+    "tiktok": "string -- TikTok caption (trendy, casual, max 150 chars)",
+    "x": "string -- X/Twitter caption (max 280 chars, concise and punchy)"
+  },
+  "hashtags": ["list", "of", "relevant", "hashtags", "without #"],
+  "strategy_metadata": {
+    "style_family": "anamorphic",
+    "style_angle": "string -- one-line summary of the creative execution",
+    "content_goal": "engagement",
+    "content_mode": "string -- educational | entertaining | satisfying",
+    "environment": "string -- the primary environment chosen (e.g. 'sunlit bathroom counter', 'kitchen windowsill at golden hour')",
+    "expression_arc": "string -- brief description of the emotional progression across scenes"
+  },
+  "timeline": [
+    {
+      "start_seconds": 0,
+      "end_seconds": number,
+      "scene_description": "string -- visual direction; first scene has no HARD CUT prefix; all subsequent scenes MUST start with 'HARD CUT:'; product scenes include anthropomorphic product with expression detail; non-product scenes show environment or detail",
+      "script": "string -- required third-person narrator voiceover for this scene",
+      "tone": "string -- emotional register for this scene (e.g. curious, warm, playful, conspiratorial)"
+    }
+  ]
+}
+
+RULES:
+- `theme` must exactly match the locked value in the user message.
+- `creative_format` must be exactly 'ai_video_flex_15s'.
+- Timeline must have 6-8 scenes. Total duration must be 13-15 seconds.
+- Each scene duration must be 1.5-2.5 seconds.
+- Scene timestamps must be contiguous (each start_seconds equals the previous end_seconds). Start at 0.
+- Voiceover scripts must sound natural when spoken aloud.
+- Use only plain ASCII characters in every field. No emoji or Unicode punctuation.
+- Use only simple vocabulary.
+- The product does NOT need to appear in every scene. 3-5 of 6-8 scenes should feature the product; the rest can be environment, detail, or metaphor shots.
+- `viewer_takeaway` must describe standalone value independent of the product.
+- `content_mode` must be one of: educational, entertaining, satisfying.
 """
 
 _V3_CLASSIFY_SYSTEM_PROMPT = """\
@@ -1148,6 +1377,7 @@ def _build_user_message(
     performance_summary: str | None = None,
     video_v2: bool = False,
     video_v3: bool = False,
+    video_v4: bool = False,
     v3_cta_enabled: bool = True,
     cta_type: str = "see_product",
     proof_type: str = "none",
@@ -1163,7 +1393,7 @@ def _build_user_message(
     if product.description:
         lines.append(f"Description: {product.description}")
 
-    if video_v3:
+    if video_v3 or video_v4:
         lines.append("Locked creative constraints:")
         lines.append(f"  - Theme must be: {theme}")
         theme_def = THEME_MAP.get(theme)
@@ -1223,7 +1453,7 @@ def _build_user_message(
         has_models = _has_model_reference_assets()
         lines.append("")
         lines.append(f"Model reference assets for lifestyle frames: {'available' if has_models else 'not configured'}")
-    if creative_format == "ai_video_flex_15s" and not video_v3:
+    if creative_format == "ai_video_flex_15s" and not video_v3 and not video_v4:
         lines.append("")
         lines.append("AUDIENCE: prefers quicker scene changes; avoid long 7.5s scenes.")
     if video_v2:
@@ -1241,6 +1471,20 @@ def _build_user_message(
             f"totaling 13-15 seconds. Scenes 2+ must start with 'HARD CUT:'. "
             f"Third-person narrator voice. Include background_music metadata. {cta_instruction}"
         )
+    if video_v4:
+        lines.append("")
+        cta_instruction = (
+            "Soft CTA allowed. You may include a soft call to action in the final scene and set cta_text to the phrase used."
+            if v3_cta_enabled
+            else "No CTA. Do not include any call to action or product mention in the final scene. Set cta_text to empty string."
+        )
+        lines.append(
+            f"VIDEO V4: Educational/entertaining content. Use the flexible timeline format with 6-8 scenes, each 1.5-2.5 seconds, "
+            f"totaling 13-15 seconds. Scenes 2+ must start with 'HARD CUT:'. "
+            f"Third-person narrator voice. Include background_music metadata. "
+            f"The product appears in 3-5 scenes, not all. Use viewer_takeaway instead of problem_angle. "
+            f"Include content_mode in strategy_metadata (educational, entertaining, or satisfying). {cta_instruction}"
+        )
     return "\n".join(lines)
 
 
@@ -1252,12 +1496,13 @@ def generate_content(
     creative_format: str | None = None,
     video_v2: bool = False,
     video_v3: bool = False,
+    video_v4: bool = False,
     cta_type: str = "see_product",
     proof_type: str = "none",
     script_style: str = "conversational",
     velura_branding: bool = True,
 ) -> tuple[Content, dict]:
-    """Call OpenAI to generate a structured content script for a 15-second video ad.
+    """Call OpenAI to generate a structured content script for a 15-second video.
 
     Returns (Content persisted to DB, dict with platform_captions and hashtags).
     """
@@ -1281,7 +1526,7 @@ def generate_content(
 
     # Phase 3: inject research snapshot for reuse across generation cycles
     fmt = creative_format or "ai_video_15s"
-    if video_v2 or video_v3:
+    if video_v2 or video_v3 or video_v4:
         fmt = "ai_video_flex_15s"
     snapshot = db.get_best_matching_snapshot(
         product_sku=product.sku,
@@ -1297,14 +1542,18 @@ def generate_content(
     text_insights = latest_text_insight.insight_text if latest_text_insight else None
     performance_summary = None
     performance_rationale = "default"
+    rank_by = str(config.get("bandit.ranking_objective", "engagement_rate"))
+    if rank_by not in ("engagement_rate", "views", "composite", "revenue", "sessions", "purchases"):
+        rank_by = "engagement_rate"
     if fmt == "image_motion_15s":
-        rank_by = str(config.get("bandit.ranking_objective", "engagement_rate"))
-        if rank_by not in ("engagement_rate", "views", "composite", "revenue", "sessions", "purchases"):
-            rank_by = "engagement_rate"
         performance_summary, performance_rationale = get_image_motion_performance_summary(
             product.sku, rank_by=rank_by
         )
-    v3_cta_enabled = _should_include_v3_cta() if video_v3 else True
+    elif fmt == "ai_video_flex_15s":
+        performance_summary, performance_rationale = get_video_performance_summary(
+            product.sku, rank_by=rank_by
+        )
+    v3_cta_enabled = _should_include_soft_cta() if (video_v3 or video_v4) else True
     user_msg = _build_user_message(
         product, theme, hook_type, product_images,
         research_summary=research_summary,
@@ -1313,6 +1562,7 @@ def generate_content(
         performance_summary=performance_summary,
         video_v2=video_v2,
         video_v3=video_v3,
+        video_v4=video_v4,
         v3_cta_enabled=v3_cta_enabled,
         cta_type=cta_type,
         proof_type=proof_type,
@@ -1325,19 +1575,21 @@ def generate_content(
     use_ai_video_flex = fmt == "ai_video_flex_15s"
     use_ai_video_v2 = video_v2
     use_ai_video_v3 = video_v3
+    use_ai_video_v4 = video_v4
     base_system_prompt = (
         _IMAGE_MOTION_SYSTEM_PROMPT if use_image_motion else
-        (_AI_VIDEO_V3_SYSTEM_PROMPT if use_ai_video_v3 else
-         (_AI_VIDEO_V2_SYSTEM_PROMPT if use_ai_video_v2 else
-          (_AI_VIDEO_FLEX_SYSTEM_PROMPT if use_ai_video_flex else
-           (_SIMPLIFIED_SYSTEM_PROMPT if fmt != "ai_video_15s" else _SYSTEM_PROMPT))))
+        (_AI_VIDEO_V4_SYSTEM_PROMPT if use_ai_video_v4 else
+         (_AI_VIDEO_V3_SYSTEM_PROMPT if use_ai_video_v3 else
+          (_AI_VIDEO_V2_SYSTEM_PROMPT if use_ai_video_v2 else
+           (_AI_VIDEO_FLEX_SYSTEM_PROMPT if use_ai_video_flex else
+            (_SIMPLIFIED_SYSTEM_PROMPT if fmt != "ai_video_15s" else _SYSTEM_PROMPT)))))
     )
     system_prompt = _system_prompt_for_branding(base_system_prompt, velura_branding)
 
-    # V3 needs higher token budget for 6-8 scenes + background_music
+    # V3/V4 need higher token budget for 6-8 scenes + background_music
     if use_image_motion:
         max_tokens = 4000
-    elif use_ai_video_v3:
+    elif use_ai_video_v3 or use_ai_video_v4:
         max_tokens = 2500
     else:
         max_tokens = 1500
@@ -1362,7 +1614,7 @@ def generate_content(
         try:
             parsed = _parse_response(
                 response, theme=theme, hook_type=hook_type, creative_format=fmt,
-                video_v2=video_v2, video_v3=video_v3,
+                video_v2=video_v2, video_v3=video_v3, video_v4=video_v4,
                 v3_cta_enabled=v3_cta_enabled,
                 cta_type=cta_type, proof_type=proof_type, script_style=script_style,
             )
@@ -1396,11 +1648,19 @@ def generate_content(
         if not isinstance(plan, dict):
             raise ValueError("OpenAI response image_plan must be an object")
         frames = plan.get("frames", [])
-        if not isinstance(frames, list) or len(frames) < 5 or len(frames) > 7:
-            raise ValueError("image_plan.frames must have 5-7 entries")
+        if (
+            not isinstance(frames, list)
+            or len(frames) < IMAGE_MOTION_MIN_FRAMES
+            or len(frames) > IMAGE_MOTION_MAX_FRAMES
+        ):
+            raise ValueError(
+                f"image_plan.frames must have {IMAGE_MOTION_MIN_FRAMES}-{IMAGE_MOTION_MAX_FRAMES} entries"
+            )
         total = plan.get("total_duration_seconds", 0)
-        if not isinstance(total, (int, float)) or total > 15:
-            raise ValueError("image_plan.total_duration_seconds must be <= 15")
+        if not isinstance(total, (int, float)) or total > IMAGE_MOTION_TOTAL_DURATION_MAX + 0.01:
+            raise ValueError(
+                f"image_plan.total_duration_seconds must be <= {IMAGE_MOTION_TOTAL_DURATION_MAX}"
+            )
         plan["performance_rationale"] = plan.get("performance_rationale", performance_rationale)
         voiceover_model = config.get("openai.voiceover_model", "gpt-4.1")
         voiceover_plan, voice_prompt_input, voice_prompt_output, voiceover_response = _generate_image_motion_voiceover_plan(
@@ -1423,15 +1683,15 @@ def generate_content(
         if not isinstance(plan, dict):
             raise ValueError("OpenAI response video_plan must be an object")
         scenes = plan.get("scenes", [])
-        max_scenes = 8 if video_v3 else 7
+        max_scenes = 8 if (video_v3 or video_v4) else 7
         if not isinstance(scenes, list) or len(scenes) < 3 or len(scenes) > max_scenes:
-            raise ValueError(f"video_plan.scenes must have 3\u20137 entries" if not video_v3 else f"video_plan.scenes must have 3-8 entries")
+            raise ValueError(f"video_plan.scenes must have 3-8 entries" if (video_v3 or video_v4) else f"video_plan.scenes must have 3\u20137 entries")
         total = plan.get("total_duration_seconds", 0)
         if not isinstance(total, (int, float)):
             raise ValueError("video_plan.total_duration_seconds must be a number")
         # V2 timeline uses fixed 15s format with 3,4,4,4 second scenes; skip clamp for that path.
-        # V3 timeline is validated by _validate_and_normalize_v3_timeline; skip clamp.
-        if not video_v2 and not video_v3:
+        # V3/V4 timeline is validated by _validate_and_normalize_v3_timeline; skip clamp.
+        if not video_v2 and not video_v3 and not video_v4:
             for i, s in enumerate(scenes):
                 if not isinstance(s, dict):
                     raise ValueError(f"video_plan.scenes[{i}] must be an object")
@@ -1474,8 +1734,8 @@ def generate_content(
             manifest_payload["strategy_metadata"] = parsed["strategy_metadata"]
             if "timeline" in parsed:
                 manifest_payload["timeline"] = parsed["timeline"]
-        if video_v3:
-            manifest_payload["schema_version"] = 3
+        if video_v3 or video_v4:
+            manifest_payload["schema_version"] = 4 if video_v4 else 3
             if "strategy_metadata" in parsed:
                 manifest_payload["strategy_metadata"] = parsed["strategy_metadata"]
             if "timeline" in parsed:
@@ -1489,6 +1749,8 @@ def generate_content(
                     manifest_payload["voiceover_plan"] = voiceover_plan
             if "background_music" in parsed:
                 manifest_payload["background_music"] = parsed["background_music"]
+            if video_v4 and "viewer_takeaway" in parsed:
+                manifest_payload["viewer_takeaway"] = parsed["viewer_takeaway"]
         asset_manifest_json = json.dumps(manifest_payload)
 
     strategy_metadata_json = None
@@ -1497,13 +1759,13 @@ def generate_content(
         strategy_metadata = plan.get("strategy_metadata") if isinstance(plan, dict) else None
         if isinstance(strategy_metadata, dict):
             strategy_metadata_json = json.dumps(strategy_metadata)
-    elif (video_v2 or video_v3) and "strategy_metadata" in parsed:
+    elif (video_v2 or video_v3 or video_v4) and "strategy_metadata" in parsed:
         strategy_metadata_json = json.dumps(parsed["strategy_metadata"])
 
     cta_text_for_content = parsed.get("cta_text")
-    # V3: classify hook_type, script_style, proof_type from the generated script
+    # V3/V4: classify hook_type, script_style, proof_type from the generated script
     v3_classified: dict[str, str] = {}
-    if video_v3:
+    if video_v3 or video_v4:
         cta_type = "soft_cta" if v3_cta_enabled else "see_product"
         cta_text_for_content = parsed.get("cta_text") if v3_cta_enabled else None
         timeline_scripts = _collect_timeline_scripts(parsed.get("timeline") or [])
@@ -1516,20 +1778,23 @@ def generate_content(
         proof_type = v3_classified["proof_type"]
         script_style = v3_classified["script_style"]
         logger.info(
-            "V3 classification: hook_type=%s, script_style=%s, proof_type=%s",
+            "V3/V4 classification: hook_type=%s, script_style=%s, proof_type=%s",
             hook_type, script_style, proof_type,
         )
+
+    # V4 uses viewer_takeaway; store it in problem_angle column for consistency
+    problem_angle = parsed.get("viewer_takeaway") if video_v4 else parsed.get("problem_angle")
 
     content = Content(
         id=content_id,
         product_sku=product.sku,
         theme=parsed["theme"],
-        hook_type=hook_type if video_v3 else parsed["hook_type"],
+        hook_type=hook_type if (video_v3 or video_v4) else parsed["hook_type"],
         hook_text=parsed["hook_text"],
         creative_format=parsed.get("creative_format") or fmt or "ai_video_15s",
         cta_type=cta_type,
         cta_text=cta_text_for_content,
-        problem_angle=parsed.get("problem_angle"),
+        problem_angle=problem_angle,
         proof_type=proof_type,
         script_style=script_style,
         research_snapshot_id=snapshot.id if snapshot else None,
@@ -1720,6 +1985,7 @@ def _parse_response(
     creative_format: str | None = None,
     video_v2: bool = False,
     video_v3: bool = False,
+    video_v4: bool = False,
     v3_cta_enabled: bool = True,
     cta_type: str = "see_product",
     proof_type: str = "none",
@@ -1737,16 +2003,19 @@ def _parse_response(
     data = _sanitize_generated_payload(data)
 
     use_image_motion = creative_format == "image_motion_15s"
-    use_ai_video_flex = creative_format == "ai_video_flex_15s" and not video_v2 and not video_v3
+    use_ai_video_flex = creative_format == "ai_video_flex_15s" and not video_v2 and not video_v3 and not video_v4
     use_ai_video_v2 = video_v2
     use_ai_video_v3 = video_v3
+    use_ai_video_v4 = video_v4
 
-    if use_ai_video_v3:
+    if use_ai_video_v3 or use_ai_video_v4:
         required = [
             "theme", "hook_text", "creative_format",
             "starting_image_prompt", "timeline", "strategy_metadata",
             "background_music", "platform_captions", "hashtags",
         ]
+        if use_ai_video_v4:
+            required.append("viewer_takeaway")
         if v3_cta_enabled:
             required.append("cta_text")
     else:
@@ -1772,9 +2041,11 @@ def _parse_response(
     if missing:
         raise ValueError(f"OpenAI response missing required fields: {missing}")
 
-    if use_ai_video_v3:
+    if use_ai_video_v3 or use_ai_video_v4:
         _validate_v3_response_shape(data, theme=theme, v3_cta_enabled=v3_cta_enabled)
         _validate_and_normalize_v3_timeline(data)
+        if use_ai_video_v4:
+            _validate_v4_extras(data)
     else:
         _validate_response_shape(data, theme=theme, hook_type=hook_type, cta_type=cta_type, proof_type=proof_type, script_style=script_style)
         if use_image_motion:
@@ -1799,8 +2070,10 @@ def _validate_and_normalize_image_motion_plan(data: dict[str, Any]) -> None:
     if not isinstance(total_duration, (int, float)):
         raise ValueError("image_plan.total_duration_seconds must be a number")
     total_duration = float(total_duration)
-    if total_duration <= 0 or total_duration > 15:
-        raise ValueError("image_plan.total_duration_seconds must be > 0 and <= 15")
+    if total_duration <= 0 or total_duration > IMAGE_MOTION_TOTAL_DURATION_MAX + 0.01:
+        raise ValueError(
+            f"image_plan.total_duration_seconds must be > 0 and <= {IMAGE_MOTION_TOTAL_DURATION_MAX}"
+        )
     plan["total_duration_seconds"] = total_duration
 
     performance_rationale = str(plan.get("performance_rationale") or "default").strip() or "default"
@@ -1847,8 +2120,14 @@ def _validate_and_normalize_image_motion_plan(data: dict[str, Any]) -> None:
     strategy_metadata["audience_fear_cluster"] = audience_fear_cluster
 
     frames = plan.get("frames")
-    if not isinstance(frames, list) or len(frames) < 5 or len(frames) > 7:
-        raise ValueError("image_plan.frames must have 5-7 entries")
+    if (
+        not isinstance(frames, list)
+        or len(frames) < IMAGE_MOTION_MIN_FRAMES
+        or len(frames) > IMAGE_MOTION_MAX_FRAMES
+    ):
+        raise ValueError(
+            f"image_plan.frames must have {IMAGE_MOTION_MIN_FRAMES}-{IMAGE_MOTION_MAX_FRAMES} entries"
+        )
 
     has_models = _has_model_reference_assets()
     seen_narrative_roles: list[str] = []
@@ -1904,9 +2183,13 @@ def _validate_and_normalize_image_motion_plan(data: dict[str, Any]) -> None:
         if not isinstance(duration_seconds, (int, float)):
             raise ValueError(f"image_plan.frames[{idx}].duration_seconds must be a number")
         duration_seconds = float(duration_seconds)
-        if duration_seconds < 1.5 or duration_seconds > 2.0:
+        if (
+            duration_seconds < IMAGE_MOTION_FRAME_DURATION_MIN
+            or duration_seconds > IMAGE_MOTION_FRAME_DURATION_MAX
+        ):
             raise ValueError(
-                f"image_plan.frames[{idx}].duration_seconds must be between 1.5 and 2.0"
+                f"image_plan.frames[{idx}].duration_seconds must be between "
+                f"{IMAGE_MOTION_FRAME_DURATION_MIN} and {IMAGE_MOTION_FRAME_DURATION_MAX}"
             )
         frame["duration_seconds"] = duration_seconds
         total_frame_duration += duration_seconds
@@ -1953,6 +2236,16 @@ def _validate_and_normalize_image_motion_plan(data: dict[str, Any]) -> None:
         raise ValueError("image_plan.frames must use at least 3 distinct narrative_role values")
     if seen_narrative_roles[-1] != "cta":
         raise ValueError("The final image_motion_15s frame must use narrative_role 'cta'")
+    if total_frame_duration < IMAGE_MOTION_TOTAL_DURATION_MIN - 0.05:
+        raise ValueError(
+            f"image_plan frame durations must sum to at least {IMAGE_MOTION_TOTAL_DURATION_MIN} seconds; "
+            f"got {total_frame_duration:.2f}"
+        )
+    if total_frame_duration > IMAGE_MOTION_TOTAL_DURATION_MAX + 0.05:
+        raise ValueError(
+            f"image_plan frame durations must sum to at most {IMAGE_MOTION_TOTAL_DURATION_MAX} seconds; "
+            f"got {total_frame_duration:.2f}"
+        )
     if abs(total_frame_duration - total_duration) > 0.05:
         plan["total_duration_seconds"] = round(total_frame_duration, 1)
 
@@ -2047,6 +2340,24 @@ def _validate_v3_response_shape(
         raise ValueError("V3 response must include `strategy_metadata` as an object.")
 
 
+_V4_CONTENT_MODES = ("educational", "entertaining", "satisfying")
+
+
+def _validate_v4_extras(data: dict[str, Any]) -> None:
+    """Validate V4-specific fields beyond the shared V3 shape."""
+    viewer_takeaway = str(data.get("viewer_takeaway", "")).strip()
+    if not viewer_takeaway:
+        raise ValueError("V4 response field `viewer_takeaway` must be a non-empty string.")
+
+    strategy = data.get("strategy_metadata")
+    if isinstance(strategy, dict):
+        content_mode = str(strategy.get("content_mode", "")).strip()
+        if content_mode not in _V4_CONTENT_MODES:
+            raise ValueError(
+                f"V4 strategy_metadata.content_mode must be one of {_V4_CONTENT_MODES}, got '{content_mode}'."
+            )
+
+
 def _validate_and_normalize_v3_timeline(data: dict[str, Any]) -> None:
     """Validate V3 timeline (6-8 scenes, 1.5-2.5s each, 13-15s total) and normalize to video_plan."""
     timeline = data.get("timeline", [])
@@ -2088,15 +2399,23 @@ def _validate_and_normalize_v3_timeline(data: dict[str, Any]) -> None:
             raise ValueError(
                 f"V3 timeline[{i}].scene_description must start with 'HARD CUT:' for scenes 2+"
             )
-        script = (scene.get("script") or "")
-        if isinstance(script, str):
-            script = script.strip() or None
+        script = scene.get("script")
+        if not isinstance(script, str) or not script.strip():
+            raise ValueError(f"V3 timeline[{i}] must have a non-empty script (no visual-only beats)")
+        scene["script"] = script.strip()
+        scene_word_count = len(scene["script"].split())
+        scene_word_max = int(duration * TTS_WORDS_PER_SECOND_MAX)
+        if scene_word_count > scene_word_max:
+            raise ValueError(
+                f"V3 timeline[{i}] script has {scene_word_count} words but the {duration:.1f}s scene "
+                f"allows at most {scene_word_max} at TTS pace. Shorten the line to fit."
+            )
         tone = (scene.get("tone") or "").strip()
 
         scenes_normalized.append({
             "duration_seconds": round(duration, 1),
             "scene_description": desc,
-            "script": script,
+            "script": scene["script"],
             "tone": tone if tone else None,
         })
         prev_end = end_f
@@ -2105,6 +2424,14 @@ def _validate_and_normalize_v3_timeline(data: dict[str, Any]) -> None:
     if total_duration < 12.9 or total_duration > 15.1:
         raise ValueError(
             f"V3 timeline total duration {total_duration:.1f}s outside allowed range 13-15s"
+        )
+
+    total_words = sum(len(s["script"].split()) for s in scenes_normalized)
+    total_word_max = int(total_duration * TTS_WORDS_PER_SECOND_MAX)
+    if total_words > total_word_max:
+        raise ValueError(
+            f"V3 timeline total script word count is {total_words} but {total_duration:.1f}s "
+            f"of video allows at most {total_word_max} words at TTS pace. Shorten the scripts."
         )
 
     video_plan = {

@@ -1,6 +1,6 @@
 ---
 description: Guide for configuring a new MCP server in Cursor with auth and verification steps
-globs: "{.cursor/mcp.json,**/.cursor/mcp.json,README.md,.env.example}"
+globs: "{.cursor/mcp.json,README.md}"
 alwaysApply: false
 ---
 

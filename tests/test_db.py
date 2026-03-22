@@ -4,6 +4,8 @@ import sqlite3
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from src import db
 from src.models import (
     BanditArm, BanditObservation, Content, Cost, Metric, PlatformPayload, Post,
@@ -490,6 +492,24 @@ def test_latest_metrics_for_post_prefers_newest_metric_row(
     assert latest.likes == 25
 
 
+def test_metric_roundtrip_preserves_avg_watch_time(
+    db_with_product: Path, sample_content: Content
+) -> None:
+    db.insert_content(sample_content)
+    post_id = db.insert_post(
+        Post(content_id=sample_content.id, platform="instagram", post_id="ig-1")
+    )
+
+    db.insert_metric(
+        Metric(post_id=post_id, platform="instagram", views=100, avg_watch_time=7.5)
+    )
+
+    latest = db.latest_metrics_for_post(post_id)
+
+    assert latest is not None
+    assert latest.avg_watch_time == 7.5
+
+
 def test_insert_post_roundtrip_preserves_published_at(
     db_with_product: Path, sample_content: Content
 ) -> None:
@@ -684,3 +704,136 @@ def test_list_research_snapshots(
 
     all_snapshots = db.list_research_snapshots(limit=10)
     assert len(all_snapshots) >= 3
+
+
+def test_clone_content_for_repost_requires_video_path(tmp_db: Path, sample_product: Product) -> None:
+    db.upsert_product(sample_product)
+    db.insert_content(
+        Content(
+            id="orig-no-video",
+            product_sku=sample_product.sku,
+            theme="benefit_spotlight",
+            hook_type="question",
+            video_local_path=None,
+        )
+    )
+    with pytest.raises(ValueError, match="video_local_path"):
+        db.clone_content_for_repost("orig-no-video")
+
+
+def test_clone_content_for_repost_requires_existing_video_file(
+    tmp_db: Path, sample_product: Product, tmp_path: Path
+) -> None:
+    db.upsert_product(sample_product)
+    missing = tmp_path / "nope.mp4"
+    db.insert_content(
+        Content(
+            id="orig-missing-file",
+            product_sku=sample_product.sku,
+            theme="benefit_spotlight",
+            hook_type="question",
+            video_local_path=str(missing),
+        )
+    )
+    with pytest.raises(ValueError, match="video file not found"):
+        db.clone_content_for_repost("orig-missing-file")
+
+
+def test_clone_content_for_repost_linked_row_fresh_utm_and_repeat_distinct(
+    tmp_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    sample_product: Product,
+) -> None:
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "posting": {"stagger_minutes": {"youtube": 0}},
+            "platforms": {"enabled": ["youtube"]},
+            "site_url": "https://example.com",
+            "shopify": {"store_url": "https://example.com"},
+            "youtube": {"client_secrets_file": str(tmp_path / "yt.json")},
+            "data_root": str(tmp_path / "velura-data"),
+        },
+    )
+    (tmp_path / "yt.json").write_text("{}", encoding="utf-8")
+
+    db.upsert_product(sample_product)
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(b"v")
+    orig_id = "original-content-aa"
+    db.insert_content(
+        Content(
+            id=orig_id,
+            product_sku=sample_product.sku,
+            theme="benefit_spotlight",
+            hook_type="question",
+            video_local_path=str(video_path),
+        )
+    )
+    db.upsert_platform_payload(
+        PlatformPayload(
+            content_id=orig_id,
+            platform="youtube",
+            caption="Original caption",
+            hashtags="a,b",
+            utm_content=orig_id,
+            utm_campaign="benefit_spotlight_question",
+        )
+    )
+
+    r1 = db.clone_content_for_repost(orig_id)
+    r2 = db.clone_content_for_repost(orig_id)
+
+    assert r1.id != r2.id != orig_id
+    assert r1.source_content_id == orig_id
+    assert r2.source_content_id == orig_id
+
+    orig_payload = db.get_platform_payload(orig_id, "youtube")
+    assert orig_payload is not None
+    assert orig_payload.utm_content == orig_id
+
+    p1 = db.get_platform_payload(r1.id, "youtube")
+    p2 = db.get_platform_payload(r2.id, "youtube")
+    assert p1 is not None and p2 is not None
+    assert p1.utm_content == r1.id
+    assert p2.utm_content == r2.id
+    assert p1.caption == "Original caption"
+
+
+def test_clone_content_for_repost_pending_review(
+    tmp_db: Path,
+    tmp_path: Path,
+    sample_product: Product,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "posting": {"stagger_minutes": {"youtube": 0}},
+            "platforms": {"enabled": ["youtube"]},
+            "site_url": "https://example.com",
+            "shopify": {"store_url": "https://example.com"},
+            "youtube": {"client_secrets_file": str(tmp_path / "yt.json")},
+            "data_root": str(tmp_path / "velura-data"),
+        },
+    )
+    (tmp_path / "yt.json").write_text("{}", encoding="utf-8")
+
+    db.upsert_product(sample_product)
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(b"v")
+    orig_id = "original-pending"
+    db.insert_content(
+        Content(
+            id=orig_id,
+            product_sku=sample_product.sku,
+            theme="benefit_spotlight",
+            hook_type="question",
+            video_local_path=str(video_path),
+        )
+    )
+
+    r = db.clone_content_for_repost(orig_id, auto_approve=False)
+    assert r.review_status == "pending"
+    assert not r.approved

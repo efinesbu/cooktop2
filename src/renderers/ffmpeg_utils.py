@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import subprocess
@@ -9,6 +10,11 @@ import sys
 from pathlib import Path
 
 from src import config
+
+logger = logging.getLogger(__name__)
+
+# If video and audio are within this of each other, mux with -shortest (clips at most ~25 ms).
+_MUX_NEAR_EQUAL_SECONDS = 0.025
 
 
 def _refresh_windows_path() -> None:
@@ -83,8 +89,51 @@ def find_ffmpeg() -> str:
     )
 
 
-def _mux_audio_into_video(ffmpeg: str, video_path: Path, audio_path: Path, output_path: Path) -> None:
-    """Mux audio track into video. Uses -shortest to trim to shorter stream."""
+def find_ffprobe() -> str | None:
+    """Return path to ffprobe next to ffmpeg, on PATH, or None."""
+    try:
+        ffmpeg_path = Path(find_ffmpeg())
+    except RuntimeError:
+        return None
+    if ffmpeg_path.name.lower() == "ffmpeg.exe":
+        probe = ffmpeg_path.parent / "ffprobe.exe"
+    else:
+        probe = ffmpeg_path.parent / "ffprobe"
+    if probe.is_file():
+        return str(probe)
+    return shutil.which("ffprobe")
+
+
+def _ffprobe_duration_seconds(ffprobe: str, media_path: Path) -> float | None:
+    """Return container duration in seconds, or None if probing fails."""
+    try:
+        proc = subprocess.run(
+            [
+                ffprobe,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(media_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        line = (proc.stdout or "").strip().splitlines()[0] if proc.stdout else ""
+        if not line:
+            return None
+        return float(line)
+    except (subprocess.CalledProcessError, ValueError, IndexError, OSError):
+        return None
+
+
+def _mux_audio_into_video_shortest(
+    ffmpeg: str, video_path: Path, audio_path: Path, output_path: Path
+) -> None:
+    """Mux with -shortest (legacy): output length is min(video, audio)."""
     cmd = [
         ffmpeg,
         "-y",
@@ -106,9 +155,89 @@ def _mux_audio_into_video(ffmpeg: str, video_path: Path, audio_path: Path, outpu
     subprocess.run(cmd, check=True, capture_output=True)
 
 
+def _mux_audio_into_video(ffmpeg: str, video_path: Path, audio_path: Path, output_path: Path) -> None:
+    """Mux audio into video without clipping narration when TTS runs slightly longer than video.
+
+    TTS duration can exceed the word-budget estimate by a small margin; the previous
+    implementation used ``-shortest``, which always trimmed the *longer* stream and cut off
+    the end of the voiceover. We ffprobe both inputs and pad/extend the shorter stream so
+    the output covers max(video, audio).
+    """
+    ffprobe = find_ffprobe()
+    v_dur = _ffprobe_duration_seconds(ffprobe, video_path) if ffprobe else None
+    a_dur = _ffprobe_duration_seconds(ffprobe, audio_path) if ffprobe else None
+
+    if v_dur is None or a_dur is None:
+        logger.warning(
+            "ffprobe unavailable or duration probe failed; mux uses -shortest (may clip TTS). "
+            "Install ffmpeg with ffprobe on PATH."
+        )
+        _mux_audio_into_video_shortest(ffmpeg, video_path, audio_path, output_path)
+        return
+
+    diff = abs(v_dur - a_dur)
+    if diff <= _MUX_NEAR_EQUAL_SECONDS:
+        _mux_audio_into_video_shortest(ffmpeg, video_path, audio_path, output_path)
+        return
+
+    if v_dur < a_dur:
+        # Narration longer than video: hold last frame (typical TTS overrun vs rendered frames).
+        v_pad = a_dur - v_dur
+        fc = f"[0:v]tpad=stop_mode=clone:stop_duration={v_pad:.6f}[vout]"
+        cmd = [
+            ffmpeg,
+            "-y",
+            "-i",
+            str(video_path),
+            "-i",
+            str(audio_path),
+            "-filter_complex",
+            fc,
+            "-map",
+            "[vout]",
+            "-map",
+            "1:a:0",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            str(output_path),
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
+        return
+
+    # Video longer than audio: pad narration with silence at the end.
+    a_pad = v_dur - a_dur
+    fc = f"[1:a]apad=pad_dur={a_pad:.6f}[aout]"
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i",
+        str(video_path),
+        "-i",
+        str(audio_path),
+        "-filter_complex",
+        fc,
+        "-map",
+        "0:v:0",
+        "-map",
+        "[aout]",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        str(output_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+
+
 def _tts_enabled_for_format(creative_format: str) -> bool:
     """True if TTS is enabled for this creative format."""
-    enabled = config.get("openai.tts_enabled_formats")
+    enabled = config.get("tts.enabled_formats")
+    if enabled is None:
+        enabled = config.get("openai.tts_enabled_formats")
     if enabled is None:
         return creative_format in ("image_motion_15s", "ai_video_flex_15s")
     if not isinstance(enabled, list):

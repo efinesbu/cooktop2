@@ -5,7 +5,11 @@ import types
 
 from click.testing import CliRunner
 
-from src.analytics.instagram import InstagramAnalyticsPuller
+from src.analytics.instagram import (
+    BASE_INSIGHT_METRICS,
+    WATCH_TIME_INSIGHT_METRIC,
+    InstagramAnalyticsPuller,
+)
 from src.instagram_sheet_sync import (
     InstagramSheetSyncDiagnostic,
     InstagramSheetSyncResult,
@@ -81,14 +85,21 @@ def test_instagram_analytics_returns_metric_on_success(monkeypatch) -> None:
         resp.status_code = 200
         if "/insights" in url:
             insight_requests.append(kwargs["params"]["metric"])
-            resp.json.return_value = {
-                "data": [
-                    {"name": "views", "values": [{"value": 150}]},
-                    {"name": "reach", "values": [{"value": 120}]},
-                    {"name": "saved", "values": [{"value": 5}]},
-                    {"name": "shares", "values": [{"value": 3}]},
-                ]
-            }
+            if kwargs["params"]["metric"] == BASE_INSIGHT_METRICS:
+                resp.json.return_value = {
+                    "data": [
+                        {"name": "views", "values": [{"value": 150}]},
+                        {"name": "reach", "values": [{"value": 120}]},
+                        {"name": "saved", "values": [{"value": 5}]},
+                        {"name": "shares", "values": [{"value": 3}]},
+                    ]
+                }
+            else:
+                resp.json.return_value = {
+                    "data": [
+                        {"name": WATCH_TIME_INSIGHT_METRIC, "values": [{"value": 7.5}]},
+                    ]
+                }
         else:
             resp.json.return_value = {"like_count": 12, "comments_count": 2}
         resp.raise_for_status = lambda: None
@@ -108,7 +119,50 @@ def test_instagram_analytics_returns_metric_on_success(monkeypatch) -> None:
     assert metric.comments == 2
     assert metric.shares == 3
     assert metric.saves == 5
-    assert insight_requests == ["views,reach,saved,shares"]
+    assert metric.avg_watch_time == 7.5
+    assert insight_requests == [BASE_INSIGHT_METRICS, WATCH_TIME_INSIGHT_METRIC]
+
+
+def test_instagram_analytics_leaves_watch_time_empty_when_metric_missing(monkeypatch) -> None:
+    monkeypatch.setattr("src.config.get", lambda key, default=None: "token" if key == "instagram.access_token" else default)
+    insight_requests: list[str] = []
+
+    def mock_get(url, **kwargs):
+        from unittest.mock import Mock
+        resp = Mock()
+        resp.status_code = 200
+        if "/insights" in url:
+            insight_requests.append(kwargs["params"]["metric"])
+            if kwargs["params"]["metric"] == BASE_INSIGHT_METRICS:
+                resp.json.return_value = {
+                    "data": [
+                        {"name": "views", "values": [{"value": 150}]},
+                        {"name": "saved", "values": [{"value": 5}]},
+                        {"name": "shares", "values": [{"value": 3}]},
+                    ]
+                }
+            else:
+                resp.json.return_value = {"data": []}
+        else:
+            resp.json.return_value = {"like_count": 12, "comments_count": 2}
+        resp.raise_for_status = lambda: None
+        return resp
+
+    monkeypatch.setattr("src.analytics.instagram.httpx.get", mock_get)
+
+    puller = InstagramAnalyticsPuller()
+    metric = puller.fetch_metrics(
+        Post(id=1, platform="instagram", post_id="18211139935321169")
+    )
+
+    assert metric is not None
+    assert metric.views == 150
+    assert metric.likes == 12
+    assert metric.comments == 2
+    assert metric.shares == 3
+    assert metric.saves == 5
+    assert metric.avg_watch_time is None
+    assert insight_requests == [BASE_INSIGHT_METRICS, WATCH_TIME_INSIGHT_METRIC]
 
 
 def test_pull_analytics_reports_saved_metric_rows(monkeypatch) -> None:
