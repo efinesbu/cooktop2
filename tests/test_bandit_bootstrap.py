@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src import bandit, db, product_images
-from src.models import Product
+from src.models import Product, V5_NAMES, ZODIAC_SIGNS
 
 
 def test_recommend_initializes_missing_arms(tmp_db: Path) -> None:
@@ -61,3 +61,17 @@ def test_register_images_initializes_bandit_for_ready_product(
 
     assert len(images) == 1
     init_mock.assert_called_once_with("hero-product")
+
+
+def test_recommend_v5_seeds_horoscope_name_arms(tmp_db: Path) -> None:
+    """First recommend_v5 initializes the full zodiac x presenter arm grid."""
+    db.upsert_product(Product(sku="v5-boot", name="V5 Boot"))
+    with patch("numpy.random.beta", return_value=0.5):
+        bandit.recommend_v5(total_slots=1)
+
+    arms = db.list_bandit_arms()
+    v5_keys = {
+        a.arm_key for a in arms
+        if a.theme in ZODIAC_SIGNS and a.hook_type in V5_NAMES
+    }
+    assert len(v5_keys) == len(ZODIAC_SIGNS) * len(V5_NAMES)

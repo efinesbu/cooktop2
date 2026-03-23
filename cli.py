@@ -25,14 +25,15 @@ from src.instagram_sheet_sync import (
 )
 from src.models import (
     Content, CREATIVE_FORMATS, CTA_TYPES, HOOK_TYPES, PLATFORMS, PlatformPayload,
-    Post, Product, PROOF_TYPES, ResearchSnapshot, SCRIPT_STYLES, THEMES,
+    Post, Product, PROOF_TYPES, ResearchSnapshot, SCRIPT_STYLES, THEMES, V5_NAMES,
+    ZODIAC_SIGNS,
 )
 from src.morning_briefing import display_briefing, email_briefing, generate_briefing
 from src.posters.instagram import InstagramPoster
 from src.posters.tiktok import TikTokPoster
 from src.posters.x import XPoster
 from src.posters.youtube import YouTubePoster
-from src.creative_strategy import resolve_deterministic_fields
+from src.creative_strategy import resolve_deterministic_fields, resolve_v5_fields
 from src.product_images import refresh_images_if_changed, register_images
 from src.prompt_generator import generate_content
 from src.renderers import render_media
@@ -61,6 +62,27 @@ def _console_safe_text(text: str) -> str:
 
 def _print_debug_panel(text: str, title: str) -> None:
     console.print(Panel(_console_safe_text(text), title=title, border_style="dim"))
+
+
+def _content_is_v5(content: Content) -> bool:
+    """True when asset manifest declares schema_version 5 (V5 horoscope reels)."""
+    raw = content.asset_manifest_json
+    if not raw or not str(raw).strip():
+        return False
+    try:
+        m = json.loads(raw)
+        if not isinstance(m, dict):
+            return False
+        v = m.get("schema_version")
+        if isinstance(v, int):
+            return v == 5
+        try:
+            return int(str(v).strip()) == 5
+        except (TypeError, ValueError):
+            return False
+    except json.JSONDecodeError:
+        return False
+
 
 # Posting quiet hours: never post between 10pm EST and 8am EST (Eastern Time)
 EASTERN = ZoneInfo("America/New_York")
@@ -239,13 +261,20 @@ def _print_prompt(content: Content) -> None:
     """Print the generated prompt/script to the terminal for visibility."""
     lines = []
     if content.theme or content.hook_type:
-        strategy = _format_strategy_label(content.theme or None, content.hook_type or None)
-        if strategy != "prompt-selected":
-            lines.append(f"[bold]Theme / Hook:[/bold] {strategy}")
+        if _content_is_v5(content):
+            lines.append(f"[bold]Horoscope:[/bold] {content.theme or '—'}")
+            lines.append(f"[bold]Name:[/bold] {content.hook_type or '—'}")
+        else:
+            strategy = _format_strategy_label(content.theme or None, content.hook_type or None)
+            if strategy != "prompt-selected":
+                lines.append(f"[bold]Theme / Hook:[/bold] {strategy}")
     if content.hook_text:
         lines.append(f"[bold]Hook:[/bold] {content.hook_text}")
     if content.starting_image_prompt:
-        lines.append(f"[bold]Starting image:[/bold] {content.starting_image_prompt}")
+        label = "Starting image"
+        if _content_is_v5(content):
+            label = "Starting image (actual Gemini ref prompt)"
+        lines.append(f"[bold]{label}:[/bold] {content.starting_image_prompt}")
     if content.scene_1_desc:
         lines.append(f"[bold]Scene 1 (visual):[/bold] {content.scene_1_desc}")
     if content.scene_1_script:
@@ -254,15 +283,20 @@ def _print_prompt(content: Content) -> None:
         lines.append(f"[bold]Scene 2 (visual):[/bold] {content.scene_2_desc}")
     if content.scene_2_script:
         lines.append(f"[bold]Scene 2 (voiceover):[/bold] {content.scene_2_script}")
-    if content.creative_format == "image_motion_15s" and content.asset_manifest_json:
+    if content.asset_manifest_json:
         try:
             manifest = json.loads(content.asset_manifest_json)
             plan = manifest.get("image_plan") if isinstance(manifest, dict) else None
             voiceover_plan = manifest.get("voiceover_plan") if isinstance(manifest, dict) else None
-            if plan and isinstance(plan, dict) and plan.get("strategy_summary"):
+            if (
+                content.creative_format == "image_motion_15s"
+                and plan
+                and isinstance(plan, dict)
+                and plan.get("strategy_summary")
+            ):
                 lines.append(f"[bold]Overall scene:[/bold] {plan['strategy_summary']}")
             strategy_metadata = plan.get("strategy_metadata") if isinstance(plan, dict) else None
-            if strategy_metadata and isinstance(strategy_metadata, dict):
+            if content.creative_format == "image_motion_15s" and strategy_metadata and isinstance(strategy_metadata, dict):
                 content_goal = (strategy_metadata.get("content_goal") or "").strip()
                 if content_goal:
                     lines.append(f"[bold]Content goal:[/bold] {content_goal}")
@@ -282,6 +316,24 @@ def _print_prompt(content: Content) -> None:
             ):
                 lines.append(
                     f"[bold]Voiceover:[/bold] {voiceover_plan['voiceover_script']}"
+                )
+            delivery_profile = (
+                voiceover_plan.get("delivery_profile")
+                if isinstance(voiceover_plan, dict)
+                else None
+            )
+            if delivery_profile and isinstance(delivery_profile, dict):
+                lines.append(
+                    f"[bold]Speech metadata:[/bold] {json.dumps(delivery_profile, sort_keys=True)}"
+                )
+            elevenlabs_options = None
+            if isinstance(voiceover_plan, dict):
+                provider_options = voiceover_plan.get("provider_options")
+                if isinstance(provider_options, dict):
+                    elevenlabs_options = provider_options.get("elevenlabs")
+            if elevenlabs_options and isinstance(elevenlabs_options, dict):
+                lines.append(
+                    f"[bold]ElevenLabs metadata:[/bold] {json.dumps(elevenlabs_options, sort_keys=True)}"
                 )
         except json.JSONDecodeError:
             pass
@@ -385,26 +437,32 @@ def _run_generation_job(
     video_v2: bool = False,
     video_v3: bool = False,
     video_v4: bool = False,
+    video_v5: bool = False,
     cta_type: str | None = None,
     proof_type: str | None = None,
     script_style: str | None = None,
     velura_branding: bool = True,
 ) -> Optional[Content]:
     product, theme, hook_type, generation_index = job
-    kwargs = {"velura_branding": velura_branding} if not velura_branding else {}
+    kwargs = {
+        "creative_format": creative_format,
+        "video_v2": video_v2,
+        "video_v3": video_v3,
+        "video_v4": video_v4,
+        "cta_type": cta_type,
+        "proof_type": proof_type,
+        "script_style": script_style,
+    }
+    if video_v5:
+        kwargs["video_v5"] = True
+    if not velura_branding:
+        kwargs["velura_branding"] = velura_branding
     return _generate_single(
         product,
         theme,
         hook_type,
         generation_index,
         should_post,
-        creative_format,
-        video_v2,
-        video_v3,
-        video_v4,
-        cta_type,
-        proof_type,
-        script_style,
         **kwargs,
     )
 
@@ -417,6 +475,7 @@ def _generate_batch(
     video_v2: bool = False,
     video_v3: bool = False,
     video_v4: bool = False,
+    video_v5: bool = False,
     cta_type: str | None = None,
     proof_type: str | None = None,
     script_style: str | None = None,
@@ -433,6 +492,7 @@ def _generate_batch(
             video_v2,
             video_v3,
             video_v4,
+            video_v5,
             cta_type,
             proof_type,
             script_style,
@@ -454,13 +514,14 @@ def _generate_batch(
             hook_type,
             idx,
             should_post,
-            creative_format,
-            video_v2,
-            video_v3,
-            video_v4,
-            cta_type,
-            proof_type,
-            script_style,
+            creative_format=creative_format,
+            video_v2=video_v2,
+            video_v3=video_v3,
+            video_v4=video_v4,
+            **({"video_v5": True} if video_v5 else {}),
+            cta_type=cta_type,
+            proof_type=proof_type,
+            script_style=script_style,
             **({"velura_branding": velura_branding} if not velura_branding else {}),
         )
     )
@@ -468,7 +529,7 @@ def _generate_batch(
 
 def _generate_single(product: Product, theme: str | None, hook_type: str | None, generation_index: int,
                      should_post: bool, creative_format: str | None = None, video_v2: bool = False,
-                     video_v3: bool = False, video_v4: bool = False,
+                     video_v3: bool = False, video_v4: bool = False, video_v5: bool = False,
                      cta_type: str | None = None, proof_type: str | None = None,
                      script_style: str | None = None, velura_branding: bool = True) -> Optional[Content]:
     spent, budget, within = check_budget()
@@ -482,18 +543,38 @@ def _generate_single(product: Product, theme: str | None, hook_type: str | None,
     if refreshed_images:
         console.print(f"[dim]{product.sku}: refreshed registered images from disk.[/dim]")
     if not images:
-        console.print(f"[yellow]{product.sku}: no images registered, continuing anyway.[/yellow]")
+        if video_v5:
+            console.print(
+                f"[dim]{product.sku}: no product images registered; "
+                "V5 will use the horoscope reference image asset instead.[/dim]"
+            )
+        else:
+            console.print(f"[yellow]{product.sku}: no images registered, continuing anyway.[/yellow]")
 
-    resolved = resolve_deterministic_fields(theme, hook_type, cta_type, proof_type, script_style, generation_index, video_v3=(video_v3 or video_v4))
-    if video_v4:
-        console.print(f"  {product.sku}: generating V4 prompt ... (theme: {resolved['theme']})")
-    elif video_v3:
-        console.print(f"  {product.sku}: generating V3 prompt ... (theme: {resolved['theme']})")
+    if video_v5:
+        # theme/hook_type slots carry horoscope/name from the job tuple
+        resolved = resolve_v5_fields(hook_type, theme, generation_index)
+        console.print(
+            f"  {product.sku}: generating V5 prompt ... "
+            f"(horoscope: {resolved['theme']}, name: {resolved['hook_type']})"
+        )
     else:
-        console.print(f"  {product.sku}: generating prompt ... ({_format_strategy_label(resolved['theme'], resolved['hook_type'])})")
+        resolved = resolve_deterministic_fields(
+            theme, hook_type, cta_type, proof_type, script_style, generation_index, video_v3=(video_v3 or video_v4)
+        )
+        if video_v4:
+            console.print(f"  {product.sku}: generating V4 prompt ... (theme: {resolved['theme']})")
+        elif video_v3:
+            console.print(f"  {product.sku}: generating V3 prompt ... (theme: {resolved['theme']})")
+        else:
+            console.print(
+                f"  {product.sku}: generating prompt ... ({_format_strategy_label(resolved['theme'], resolved['hook_type'])})"
+            )
     content, extras = generate_content(
         product, resolved["theme"], resolved["hook_type"], images,
         creative_format, video_v2=video_v2, video_v3=video_v3, video_v4=video_v4,
+        video_v5=video_v5,
+        v5_vibe=resolved.get("vibe") if video_v5 else None,
         cta_type=resolved["cta_type"], proof_type=resolved["proof_type"], script_style=resolved["script_style"],
         velura_branding=velura_branding,
     )
@@ -1040,6 +1121,26 @@ def briefing_diagnose_cmd():
     is_flag=True,
     help="Use video-v4 educational/entertaining prompts (forces ai_video_flex_15s, 6-8 scenes, product as context not hero, content_mode, viewer_takeaway). Incompatible with --video-v2, --video-v3, and --format image_motion_15s.",
 )
+@click.option(
+    "--video-v5",
+    "video_v5",
+    is_flag=True,
+    help="V5 horoscope reels (forces ai_video_flex_15s). Incompatible with --video-v2/v3/v4 and --format image_motion_15s.",
+)
+@click.option(
+    "--horoscope",
+    "v5_horoscopes",
+    multiple=True,
+    type=click.Choice(ZODIAC_SIGNS),
+    help="V5 zodiac sign (repeatable). Requires --video-v5.",
+)
+@click.option(
+    "--name",
+    "v5_names",
+    multiple=True,
+    type=click.Choice(V5_NAMES),
+    help="V5 presenter name (repeatable). Requires --video-v5.",
+)
 @click.option("--count", default=8, show_default=True, help="Total clips across all products in --auto mode")
 @click.option(
     "--rotate-theme-hook",
@@ -1059,15 +1160,26 @@ def briefing_diagnose_cmd():
 @click.option("--post", "should_post", is_flag=True, help="Deprecated: use preview, approve, schedule, and post-due")
 def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
         hooks: tuple[str, ...], creative_format: str | None, video_v2: bool,
-        video_v3: bool, video_v4: bool,
+        video_v3: bool, video_v4: bool, video_v5: bool,
+        v5_horoscopes: tuple[str, ...], v5_names: tuple[str, ...],
         count: int, rotate_theme_hook: bool, cta_type: str | None, proof_type: str | None,
         script_style: str | None, velura_branding: bool, should_post: bool):
     """Generate content — manually or via bandit recommendations."""
     _init()
 
-    video_flags = sum([video_v2, video_v3, video_v4])
+    video_flags = sum([video_v2, video_v3, video_v4, video_v5])
     if video_flags > 1:
-        console.print("[red]--video-v2, --video-v3, and --video-v4 are mutually exclusive.[/red]")
+        console.print(
+            "[red]Only one of --video-v2, --video-v3, --video-v4, and --video-v5 may be set.[/red]"
+        )
+        sys.exit(1)
+
+    if (v5_horoscopes or v5_names) and not video_v5:
+        console.print("[red]--horoscope and --name require --video-v5.[/red]")
+        sys.exit(1)
+
+    if video_v5 and (themes or hooks):
+        console.print("[red]--video-v5 uses --horoscope and --name, not --theme/--hook.[/red]")
         sys.exit(1)
 
     if video_v2 and creative_format == "image_motion_15s":
@@ -1091,11 +1203,20 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
         )
         sys.exit(1)
 
+    if video_v5 and creative_format == "image_motion_15s":
+        console.print(
+            "[red]--video-v5 cannot be combined with --format image_motion_15s.[/red] "
+            "Use --video-v5 alone (it forces ai_video_flex_15s) or omit --video-v5."
+        )
+        sys.exit(1)
+
     if video_v2:
         creative_format = "ai_video_flex_15s"
     if video_v3:
         creative_format = "ai_video_flex_15s"
     if video_v4:
+        creative_format = "ai_video_flex_15s"
+    if video_v5:
         creative_format = "ai_video_flex_15s"
 
     if should_post:
@@ -1105,9 +1226,12 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
         )
         sys.exit(1)
 
-    if auto_mode and (slugs or themes or hooks or rotate_theme_hook):
+    if auto_mode and (
+        slugs or themes or hooks or rotate_theme_hook or v5_horoscopes or v5_names
+    ):
         console.print(
-            "[red]--auto cannot be combined with --product/--theme/--hook/--rotate-theme-hook[/red]"
+            "[red]--auto cannot be combined with --product/--theme/--hook/--rotate-theme-hook/"
+            "--horoscope/--name[/red]"
         )
         sys.exit(1)
 
@@ -1119,6 +1243,7 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
             video_v2,
             video_v3,
             video_v4,
+            video_v5,
             cta_type,
             proof_type,
             script_style,
@@ -1136,6 +1261,9 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
             video_v2,
             video_v3,
             video_v4,
+            video_v5,
+            v5_horoscopes,
+            v5_names,
             cta_type,
             proof_type,
             script_style,
@@ -1144,7 +1272,7 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
 
 
 def _run_auto(count: int, should_post: bool, creative_format: str | None = None, video_v2: bool = False,
-              video_v3: bool = False, video_v4: bool = False,
+              video_v3: bool = False, video_v4: bool = False, video_v5: bool = False,
               cta_type: str | None = None, proof_type: str | None = None,
               script_style: str | None = None, velura_branding: bool = True):
     products = db.list_products(
@@ -1156,7 +1284,11 @@ def _run_auto(count: int, should_post: bool, creative_format: str | None = None,
         console.print("[yellow]No eligible products found.[/yellow]")
         return
 
-    recommendation = bandit.recommend(total_slots=count)
+    recommendation = (
+        bandit.recommend_v5(total_slots=count)
+        if video_v5
+        else bandit.recommend(total_slots=count)
+    )
     queued_runs: list[tuple[Product, str, str]] = []
     starting_product_index = random.randrange(len(products))
     for alloc in recommendation.allocations:
@@ -1165,15 +1297,22 @@ def _run_auto(count: int, should_post: bool, creative_format: str | None = None,
             queued_runs.append((product, alloc.theme, alloc.hook_type))
 
     summary = Table(title="Global Bandit Allocation")
-    summary.add_column("Theme", style="cyan")
-    if not (video_v3 or video_v4):
-        summary.add_column("Hook Type")
-    summary.add_column("Clips", justify="right")
-    for alloc in recommendation.allocations:
-        if video_v3 or video_v4:
-            summary.add_row(alloc.theme, str(alloc.count))
-        else:
+    if video_v5:
+        summary.add_column("Horoscope", style="cyan")
+        summary.add_column("Name")
+        summary.add_column("Clips", justify="right")
+        for alloc in recommendation.allocations:
             summary.add_row(alloc.theme, alloc.hook_type, str(alloc.count))
+    else:
+        summary.add_column("Theme", style="cyan")
+        if not (video_v3 or video_v4):
+            summary.add_column("Hook Type")
+        summary.add_column("Clips", justify="right")
+        for alloc in recommendation.allocations:
+            if video_v3 or video_v4:
+                summary.add_row(alloc.theme, str(alloc.count))
+            else:
+                summary.add_row(alloc.theme, alloc.hook_type, str(alloc.count))
     console.print(summary)
 
     jobs: list[tuple[Product, str | None, str | None, int]] = []
@@ -1192,9 +1331,20 @@ def _run_auto(count: int, should_post: bool, creative_format: str | None = None,
             jobs.append((product, theme, hook_type, idx))
             idx += 1
 
-    total = _generate_batch(jobs, should_post, requested_count=count, creative_format=creative_format, video_v2=video_v2,
-                           video_v3=video_v3, video_v4=video_v4, cta_type=cta_type, proof_type=proof_type,
-                           script_style=script_style, velura_branding=velura_branding)
+    total = _generate_batch(
+        jobs,
+        should_post,
+        requested_count=count,
+        creative_format=creative_format,
+        video_v2=video_v2,
+        video_v3=video_v3,
+        video_v4=video_v4,
+        video_v5=video_v5,
+        cta_type=cta_type,
+        proof_type=proof_type,
+        script_style=script_style,
+        velura_branding=velura_branding,
+    )
 
     piece = "piece" if total == 1 else "pieces"
     console.print(f"\n[green]{total}[/green] {piece} of content generated ({len(products)} products eligible).")
@@ -1203,15 +1353,28 @@ def _run_auto(count: int, should_post: bool, creative_format: str | None = None,
 def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
                 hooks: tuple[str, ...], count: int, should_post: bool,
                 creative_format: str | None = None, rotate_theme_hook: bool = False, video_v2: bool = False,
-                video_v3: bool = False, video_v4: bool = False,
+                video_v3: bool = False, video_v4: bool = False, video_v5: bool = False,
+                v5_horoscopes: tuple[str, ...] = (),
+                v5_names: tuple[str, ...] = (),
                 cta_type: str | None = None, proof_type: str | None = None,
                 script_style: str | None = None, velura_branding: bool = True):
     if not slugs:
-        console.print("[red]Provide at least one --product or use --auto.[/red]")
-        sys.exit(1)
+        if video_v5:
+            slugs = ("nk",)
+        else:
+            console.print("[red]Provide at least one --product or use --auto.[/red]")
+            sys.exit(1)
 
     jobs: list[tuple[Product, str | None, str | None, int]] = []
-    if not themes and not hooks:
+    if video_v5:
+        if not v5_horoscopes and not v5_names:
+            rec = bandit.recommend_v5(total_slots=count)
+            strategy_pairs = [
+                (alloc.theme, alloc.hook_type) for alloc in rec.allocations for _ in range(alloc.count)
+            ]
+        else:
+            strategy_pairs = _manual_v5_strategy_runs(v5_horoscopes, v5_names, count, rotate_theme_hook)
+    elif not themes and not hooks:
         rec = bandit.recommend(total_slots=count)
         strategy_pairs = [(alloc.theme, alloc.hook_type) for alloc in rec.allocations for _ in range(alloc.count)]
     else:
@@ -1229,11 +1392,58 @@ def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
             jobs.append((product, theme, hook, idx))
             idx += 1
 
-    total = _generate_batch(jobs, should_post, requested_count=count, creative_format=creative_format, video_v2=video_v2,
-                           video_v3=video_v3, video_v4=video_v4, cta_type=cta_type, proof_type=proof_type,
-                           script_style=script_style, velura_branding=velura_branding)
+    total = _generate_batch(
+        jobs,
+        should_post,
+        requested_count=count,
+        creative_format=creative_format,
+        video_v2=video_v2,
+        video_v3=video_v3,
+        video_v4=video_v4,
+        video_v5=video_v5,
+        cta_type=cta_type,
+        proof_type=proof_type,
+        script_style=script_style,
+        velura_branding=velura_branding,
+    )
 
     console.print(f"\n[green]{total}[/green] pieces of content generated.")
+
+
+def _manual_v5_strategy_runs(
+    horoscopes: tuple[str, ...],
+    names: tuple[str, ...],
+    count: int,
+    rotate_theme_hook: bool,
+) -> list[tuple[str | None, str | None]]:
+    """Build (horoscope, name) pairs for manual V5 runs (mirrors _manual_strategy_runs)."""
+    has_h = bool(horoscopes)
+    has_n = bool(names)
+
+    if has_h and not has_n:
+        rec = bandit.recommend_v5(total_slots=count)
+        allocs_flat = [(a.theme, a.hook_type) for a in rec.allocations for _ in range(a.count)]
+        return [(horoscopes[i % len(horoscopes)], allocs_flat[i][1]) for i in range(count)]
+
+    if has_n and not has_h:
+        rec = bandit.recommend_v5(total_slots=count)
+        allocs_flat = [(a.theme, a.hook_type) for a in rec.allocations for _ in range(a.count)]
+        return [(allocs_flat[i][0], names[i % len(names)]) for i in range(count)]
+
+    h_values: tuple[str | None, ...] = horoscopes or (None,)
+    n_values: tuple[str | None, ...] = names or (None,)
+    if not rotate_theme_hook or count <= 1:
+        return [
+            (h, n)
+            for h in h_values
+            for n in n_values
+            for _ in range(count)
+        ]
+
+    return [
+        (h_values[index % len(h_values)], n_values[index % len(n_values)])
+        for index in range(count)
+    ]
 
 
 def _manual_strategy_runs(
@@ -1383,13 +1593,19 @@ def preview(today: bool, last_24h: bool, show_all: bool):
         console.print(f"[yellow]{empty_msg}[/yellow]")
         return
 
+    preview_all_v5 = all(_content_is_v5(c) for c in items)
+
     table = Table(title=title)
     table.add_column("Row", justify="right", style="dim")
     table.add_column("ID", style="cyan", max_width=12)
     table.add_column("Product")
     table.add_column("Type", justify="center")
-    table.add_column("Theme")
-    table.add_column("Hook Type")
+    if preview_all_v5:
+        table.add_column("Horoscope")
+        table.add_column("Name")
+    else:
+        table.add_column("Theme")
+        table.add_column("Hook Type")
     table.add_column("From", style="dim", max_width=10)
     table.add_column("Review", justify="center")
     table.add_column("Payloads", justify="right")

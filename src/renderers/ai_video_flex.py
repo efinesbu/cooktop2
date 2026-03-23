@@ -7,10 +7,10 @@ import logging
 from pathlib import Path
 
 from src import config, db
-from src.image_generator import generate_starting_image
+from src.image_generator import generate_starting_image, generate_v5_starting_image
 from src.models import Content, Product, ProductImage
 from src.video_generator import generate_video
-from src.voiceover_generator import generate_voiceover
+from src.voiceover_generator import elevenlabs_v5_voice_settings, generate_voiceover
 
 from .base import BaseRenderer
 from .ffmpeg_utils import _mux_audio_into_video, _tts_enabled_for_format, find_ffmpeg
@@ -38,6 +38,20 @@ def _parse_manifest(content: Content) -> dict:
         return {}
 
 
+def _manifest_schema_version(manifest: dict) -> int | None:
+    raw = manifest.get("schema_version")
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        return raw
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 @register_renderer
 class AiVideoFlexRenderer(BaseRenderer):
     """Renders ai_video_flex_15s: multi-scene video from persisted manifest plan."""
@@ -59,7 +73,13 @@ class AiVideoFlexRenderer(BaseRenderer):
             and voiceover_plan.get("voice")
         )
 
-        starting_image_path = generate_starting_image(content, product)
+        is_v5 = _manifest_schema_version(manifest) == 5
+        if is_v5:
+            horoscope = (content.theme or "").strip()
+            name = (content.hook_type or "").strip()
+            starting_image_path = generate_v5_starting_image(content, horoscope, name)
+        else:
+            starting_image_path = generate_starting_image(content, product)
         video_path = generate_video(content, starting_image_path, product)
         if not use_tts:
             return video_path
@@ -71,6 +91,7 @@ class AiVideoFlexRenderer(BaseRenderer):
 
         video_path.replace(silent_path)
         manifest["silent_video_local_path"] = str(silent_path)
+        el_settings = elevenlabs_v5_voice_settings() if is_v5 else None
         generate_voiceover(
             script=voiceover_plan["voiceover_script"],
             voice=voiceover_plan["voice"],
@@ -78,6 +99,12 @@ class AiVideoFlexRenderer(BaseRenderer):
             output_path=audio_path,
             content_id=content.id,
             language=voiceover_plan.get("language"),
+            elevenlabs_voice_settings=el_settings,
+            elevenlabs_request_options=(
+                voiceover_plan.get("provider_options", {}).get("elevenlabs")
+                if isinstance(voiceover_plan.get("provider_options"), dict)
+                else None
+            ),
         )
         manifest["audio_local_path"] = str(audio_path)
         _mux_audio_into_video(ffmpeg, silent_path, audio_path, video_path)

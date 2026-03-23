@@ -399,6 +399,137 @@ def test_render_media_ai_video_flex_with_voiceover_generates_tts_and_muxes(
     assert "render-artifacts" in Path(manifest["silent_video_local_path"]).parts
 
 
+def test_render_media_ai_video_flex_v5_uses_v5_starting_image_and_voice_settings(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+    sample_product: Product,
+) -> None:
+    """schema_version 5 flex renderer calls generate_v5_starting_image and passes V5 ElevenLabs settings."""
+    import json
+
+    from src import db
+    from src.renderers import render_media
+
+    db.upsert_product(sample_product)
+
+    vo_script = " ".join([f"w{i}" for i in range(30)])
+    voiceover_plan = {
+        "script_template_id": "horoscope_v5_single",
+        "voiceover_script": vo_script,
+        "voice": "K7W7zLWeGoxU9YqWoB7A",
+        "voice_instructions": "Warm, playful, premium.",
+        "language": "english",
+        "provider_options": {
+            "elevenlabs": {
+                "language_code": "en",
+                "apply_text_normalization": "auto",
+                "voice_settings": {"speed": 1.03, "use_speaker_boost": True},
+            }
+        },
+    }
+    video_plan = {
+        "strategy_summary": "Horoscope V5 four-beat arc",
+        "total_duration_seconds": 15.0,
+        "style_family": "anamorphic",
+        "style_rationale": "V5 horoscope reel",
+        "scenes": [
+            {"duration_seconds": 3.5, "scene_description": "A", "script": "a"},
+            {"duration_seconds": 4.0, "scene_description": "B", "script": "b"},
+            {"duration_seconds": 4.0, "scene_description": "C", "script": "c"},
+            {"duration_seconds": 3.5, "scene_description": "D", "script": "d"},
+        ],
+    }
+    content = Content(
+        id="test-flex-v5",
+        product_sku=sample_product.sku,
+        theme="aries",
+        hook_type="jessica",
+        creative_format="ai_video_flex_15s",
+        asset_manifest_json=json.dumps({
+            "format": "ai_video_flex_15s",
+            "schema_version": 5,
+            "video_plan": video_plan,
+            "voiceover_plan": voiceover_plan,
+        }),
+    )
+    db.insert_content(content)
+
+    v5_start_calls: list[tuple] = []
+    standard_start_calls: list[tuple] = []
+    tts_calls: list[tuple] = []
+
+    def fake_v5_start(c, horoscope, name):
+        v5_start_calls.append((c.id, horoscope, name))
+        p = tmp_path / "v5start.png"
+        p.write_bytes(b"png")
+        return p
+
+    def fake_standard_start(c, p):
+        standard_start_calls.append((c.id, p.sku))
+        out = tmp_path / "std.png"
+        out.write_bytes(b"x")
+        return out
+
+    def fake_generate_video(c, start_path, p):
+        video_dir = tmp_path / "velura-data" / "videos" / c.product_sku
+        video_dir.mkdir(parents=True, exist_ok=True)
+        video_path = video_dir / f"{c.id}.mp4"
+        video_path.write_bytes(b"silent-mp4")
+        db.update_content_video_path(c.id, str(video_path))
+        return video_path
+
+    def fake_generate_voiceover(script, voice, voice_instructions, output_path, content_id, **kwargs):
+        tts_calls.append(
+            (
+                script,
+                voice,
+                voice_instructions,
+                content_id,
+                kwargs.get("elevenlabs_voice_settings"),
+                kwargs.get("elevenlabs_request_options"),
+            )
+        )
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"wav")
+        return output_path
+
+    def fake_mux(ffmpeg, video_path, audio_path, output_path):
+        Path(output_path).write_bytes(b"muxed")
+
+    fake_v5_settings = {"stability": 0.99, "similarity_boost": 0.88, "style": 0.77}
+
+    monkeypatch.setattr("src.renderers.ffmpeg_utils.find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr("src.renderers.ai_video_flex.find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr("src.renderers.ai_video_flex.generate_v5_starting_image", fake_v5_start)
+    monkeypatch.setattr("src.renderers.ai_video_flex.generate_starting_image", fake_standard_start)
+    monkeypatch.setattr("src.renderers.ai_video_flex.generate_video", fake_generate_video)
+    monkeypatch.setattr("src.renderers.ai_video_flex.generate_voiceover", fake_generate_voiceover)
+    monkeypatch.setattr("src.renderers.ai_video_flex.elevenlabs_v5_voice_settings", lambda: fake_v5_settings)
+    monkeypatch.setattr("src.renderers.ffmpeg_utils._mux_audio_into_video", fake_mux)
+    monkeypatch.setattr("src.renderers.ai_video_flex._mux_audio_into_video", fake_mux)
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "data_root": str(tmp_path / "velura-data"),
+            "openai": {"api_key": "test-key", "tts_enabled_formats": ["ai_video_flex_15s"]},
+        },
+    )
+
+    render_media(content, sample_product, [])
+
+    assert len(v5_start_calls) == 1
+    assert v5_start_calls[0][0] == content.id
+    assert v5_start_calls[0][1] == "aries"
+    assert v5_start_calls[0][2] == "jessica"
+    assert len(standard_start_calls) == 0
+
+    assert len(tts_calls) == 1
+    assert tts_calls[0][4] == fake_v5_settings
+    assert tts_calls[0][5] == voiceover_plan["provider_options"]["elevenlabs"]
+
+
 def test_render_media_image_motion_uses_plan_when_present(
     tmp_db: Path,
     monkeypatch,

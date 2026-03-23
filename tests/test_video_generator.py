@@ -13,6 +13,7 @@ from src.video_generator import (
     XAI_VIDEO_GENERATIONS_ENDPOINT,
     XAI_VIDEO_STATUS_ENDPOINT,
     _build_flex_video_prompt,
+    _build_video_prompt,
     generate_video,
 )
 
@@ -424,3 +425,42 @@ def test_generate_video_surfaces_failed_poll_status(
     message = str(exc_info.value)
     assert "req-failed" in message
     assert "provider rejected video job" in message
+
+
+def test_build_video_prompt_v5_manifest_uses_horoscope_path_and_no_lip_sync() -> None:
+    """schema_version 5 flex manifests get zodiac / necklace cues and no lip-sync instruction."""
+    manifest = {
+        "schema_version": 5,
+        "horoscope_metadata": {"zodiac_sign": "aries", "presenter_name": "jessica"},
+        "video_plan": {
+            "total_duration_seconds": 15,
+            "style_family": "anamorphic",
+            "style_rationale": "Horoscope entertainment pacing",
+            "scenes": [
+                {"duration_seconds": 3.5, "scene_description": "Hook beat with attitude."},
+                {"duration_seconds": 4.0, "scene_description": "Roast beat gesture."},
+                {"duration_seconds": 4.0, "scene_description": "Validation beat warmer light."},
+                {"duration_seconds": 3.5, "scene_description": "Soft CTA to comment sign."},
+            ],
+        },
+    }
+    content = Content(
+        id="v5-content",
+        product_sku="sku-z",
+        theme="aries",
+        hook_type="jessica",
+        creative_format="ai_video_flex_15s",
+        asset_manifest_json=jsonlib.dumps(manifest),
+    )
+    product = Product(sku="sku-z", name="Product Z")
+
+    prompt = _build_video_prompt(content, product)
+
+    lowered = prompt.lower()
+    assert "horoscope" in lowered
+    assert "aries" in lowered
+    assert "jessica" in lowered
+    assert "chibi" in lowered
+    assert "lip sync" in lowered or "lip movements" in lowered
+    assert "necklace" in lowered
+    assert "do not need to follow or sync with the audio script" in lowered

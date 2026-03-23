@@ -45,10 +45,17 @@ elevenlabs:
   # output_format: mp3_44100_128
   # Voice library: https://elevenlabs.io/app/voice-library?voiceId=K7W7zLWeGoxU9YqWoB7A
   voice_id: "K7W7zLWeGoxU9YqWoB7A"
+  # V5 horoscope reels voice tuning (best-friend, slightly dramatic)
+  v5_stability: 0.38
+  v5_similarity_boost: 0.82
+  v5_style: 0.70
 
 gemini:
   api_key: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-  model: "gemini-2.0-flash"
+  # Native image generation (image_motion_15s, starting frames). Must support IMAGE response
+  # modalities (e.g. gemini-2.5-flash-image). Optional gemini.image_model overrides gemini.model for images only.
+  model: "gemini-2.5-flash-image"
+  # image_model: "gemini-2.5-flash-image"
   aspect_ratio: "9:16"
 
 xai:

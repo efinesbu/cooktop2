@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import sys
 import types
 from pathlib import Path
 
 from click.testing import CliRunner
+
+import pytest
 
 sys.modules.setdefault(
     "tweepy",
@@ -545,3 +548,170 @@ def test_generate_single_refreshes_registered_images_from_custom_image_dir(
     assert refreshed_product is not None
     assert refreshed_product.image_dir == str(image_root)
     assert refreshed_product.generation_ready is True
+
+
+def test_run_cli_rejects_multiple_video_flags() -> None:
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        ["run", "--product", "x", "--video-v3", "--video-v5"],
+    )
+    assert result.exit_code == 1
+    assert "Only one of --video-v2" in result.output
+
+
+def test_run_cli_rejects_horoscope_without_video_v5() -> None:
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        ["run", "--product", "x", "--horoscope", "aries"],
+    )
+    assert result.exit_code == 1
+    assert "--horoscope and --name require --video-v5" in result.output
+
+
+def test_run_cli_rejects_video_v5_with_legacy_theme_hook() -> None:
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        [
+            "run",
+            "--product",
+            "x",
+            "--video-v5",
+            "--theme",
+            "benefit_spotlight",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "--video-v5 uses --horoscope and --name" in result.output
+
+
+def test_run_cli_rejects_video_v5_with_image_motion_format() -> None:
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        [
+            "run",
+            "--product",
+            "x",
+            "--video-v5",
+            "--format",
+            "image_motion_15s",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "--video-v5 cannot be combined with --format image_motion_15s" in result.output
+
+
+def test_generate_single_v5_passes_flags_to_generate_content(
+    tmp_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """_generate_single with video_v5=True forwards V5 flags and shows the actual ref-image prompt."""
+    product = Product(sku="v5-sku", name="V5 Product")
+    db.upsert_product(product)
+
+    captured: dict[str, object] = {}
+
+    def fake_generate_content(
+        product_arg,
+        theme,
+        hook_type,
+        images,
+        creative_format=None,
+        video_v2=False,
+        video_v3=False,
+        video_v4=False,
+        video_v5=False,
+        v5_vibe=None,
+        **kwargs,
+    ):
+        captured["video_v5"] = video_v5
+        captured["v5_vibe"] = v5_vibe
+        captured["creative_format"] = creative_format
+        return (
+            Content(
+                id="c-v5",
+                product_sku=product_arg.sku,
+                theme=theme,
+                hook_type=hook_type,
+                creative_format=creative_format or "ai_video_flex_15s",
+                starting_image_prompt="Actual V5 Gemini prompt.",
+                asset_manifest_json='{"schema_version": 5}',
+            ),
+            {"platform_captions": {}, "hashtags": []},
+        )
+
+    monkeypatch.setattr(cli_module, "check_budget", lambda: (0.0, 100.0, True))
+    monkeypatch.setattr(cli_module, "refresh_images_if_changed", lambda sku: ([], False))
+    monkeypatch.setattr(cli_module, "generate_content", fake_generate_content)
+    monkeypatch.setattr(cli_module, "render_media", lambda *a, **k: None)
+
+    cli_module._generate_single(
+        product,
+        theme="aries",
+        hook_type="jessica",
+        generation_index=0,
+        should_post=False,
+        creative_format="ai_video_flex_15s",
+        video_v5=True,
+    )
+
+    assert captured["video_v5"] is True
+    assert captured["v5_vibe"] == "playful_roast"
+    assert captured["creative_format"] == "ai_video_flex_15s"
+    output = capsys.readouterr().out
+    assert "no product images registered; V5 will use the horoscope reference image" in output
+    assert "asset instead" in output
+    assert "Starting image (actual Gemini ref prompt)" in output
+    assert "Actual V5 Gemini prompt." in output
+
+
+def test_print_prompt_shows_v5_speech_and_elevenlabs_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_debug_panel(body: str, title: str) -> None:
+        captured["body"] = body
+        captured["title"] = title
+
+    monkeypatch.setattr(cli_module, "_print_debug_panel", fake_debug_panel)
+
+    content = Content(
+        id="v5-print-001",
+        product_sku="hz-test",
+        theme="aries",
+        hook_type="jessica",
+        creative_format="ai_video_flex_15s",
+        asset_manifest_json=json.dumps({
+            "schema_version": 5,
+            "voiceover_plan": {
+                "voiceover_script": "You want a sign? This is it.",
+                "delivery_profile": {
+                    "tone": "best friend, playful, slightly dramatic, kind",
+                    "diction": "clean, crisp, conversational",
+                },
+                "provider_options": {
+                    "elevenlabs": {
+                        "language_code": "en",
+                        "apply_text_normalization": "auto",
+                        "voice_settings": {
+                            "speed": 1.03,
+                            "use_speaker_boost": True,
+                        },
+                    }
+                },
+            },
+        }),
+    )
+
+    cli_module._print_prompt(content)
+
+    assert captured["title"] == "Generated prompt"
+    assert "[bold]Speech metadata:[/bold]" in captured["body"]
+    assert '"tone": "best friend, playful, slightly dramatic, kind"' in captured["body"]
+    assert "[bold]ElevenLabs metadata:[/bold]" in captured["body"]
+    assert '"language_code": "en"' in captured["body"]

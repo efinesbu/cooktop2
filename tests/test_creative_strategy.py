@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
-import pytest
-
-from src.creative_strategy import resolve_deterministic_fields
-from src.models import CTA_TYPES, HOOK_TYPES, PROOF_TYPES, SCRIPT_STYLES, THEMES
+from src.creative_strategy import resolve_deterministic_fields, resolve_v5_fields
+from src.models import (
+    CTA_TYPES,
+    HOOK_TYPES,
+    PROOF_TYPES,
+    SCRIPT_STYLES,
+    THEMES,
+    V5_NAMES,
+    V5_VIBES,
+    ZODIAC_SIGNS,
+)
 
 
 def test_resolve_deterministic_fields_cli_overrides_all() -> None:
@@ -64,3 +71,37 @@ def test_resolve_deterministic_fields_invalid_cli_falls_to_round_robin() -> None
     assert resolved["theme"] == THEMES[0]
     assert resolved["hook_type"] == HOOK_TYPES[0]
     assert resolved["cta_type"] == CTA_TYPES[0]
+
+
+def test_resolve_v5_fields_cli_overrides_valid_name_and_horoscope() -> None:
+    """Explicit horoscope/name win; vibe follows generation_index round-robin."""
+    resolved = resolve_v5_fields(
+        name="jessica",
+        horoscope="aries",
+        generation_index=3,
+    )
+    assert resolved["theme"] == "aries"
+    assert resolved["hook_type"] == "jessica"
+    assert resolved["vibe"] == V5_VIBES[3 % len(V5_VIBES)]
+    assert resolved["cta_type"] == "soft_cta"
+    assert resolved["proof_type"] == "none"
+    assert resolved["script_style"] == "conversational"
+
+
+def test_resolve_v5_fields_invalid_values_fall_back_to_generation_index() -> None:
+    """Invalid or missing horoscope/name use whitelist slots from generation_index."""
+    idx = 4
+    resolved = resolve_v5_fields(
+        name="not_a_v5_presenter",
+        horoscope="not_a_sign",
+        generation_index=idx,
+    )
+    assert resolved["theme"] == ZODIAC_SIGNS[idx % len(ZODIAC_SIGNS)]
+    assert resolved["hook_type"] == V5_NAMES[idx % len(V5_NAMES)]
+    assert resolved["vibe"] == V5_VIBES[idx % len(V5_VIBES)]
+
+
+def test_resolve_v5_fields_whitespace_and_case_normalized() -> None:
+    resolved = resolve_v5_fields(name="  EMILY  ", horoscope=" Leo ")
+    assert resolved["theme"] == "leo"
+    assert resolved["hook_type"] == "emily"

@@ -12,6 +12,9 @@ from src.models import (
     THEME_DEFINITIONS,
     THEME_MAP,
     THEMES,
+    V5_NAMES,
+    V5_VIBES,
+    ZODIAC_SIGNS,
     HookDefinition,
     ThemeDefinition,
 )
@@ -117,6 +120,42 @@ def resolve_deterministic_fields(
     )
 
     return resolved
+
+
+def resolve_v5_fields(
+    name: str | None,
+    horoscope: str | None,
+    generation_index: int = 0,
+) -> dict[str, str]:
+    """Resolve V5 horoscope reel strategy fields before generation.
+
+    Maps horoscope sign to `theme`, presenter name to `hook_type`, and picks `vibe`
+    from V5_VIBES using the same index-stable round-robin as `resolve_deterministic_fields`.
+    Missing or invalid name/horoscope values fall back to whitelists by `generation_index`.
+    """
+    def _norm(token: str | None) -> str | None:
+        if token is None:
+            return None
+        t = token.strip().lower()
+        return t if t else None
+
+    n = _norm(name)
+    h = _norm(horoscope)
+
+    resolved_name = n if n in V5_NAMES else V5_NAMES[generation_index % len(V5_NAMES)]
+    resolved_sign = (
+        h if h in ZODIAC_SIGNS else ZODIAC_SIGNS[generation_index % len(ZODIAC_SIGNS)]
+    )
+    vibe = V5_VIBES[generation_index % len(V5_VIBES)]
+
+    return {
+        "theme": resolved_sign,
+        "hook_type": resolved_name,
+        "vibe": vibe,
+        "cta_type": "soft_cta",
+        "proof_type": "none",
+        "script_style": "conversational",
+    }
 
 
 def whitelist_prompt_lines(

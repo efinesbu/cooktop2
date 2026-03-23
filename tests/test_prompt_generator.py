@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from src import db
+from src.image_generator import build_v5_starting_image_prompt
 from src.models import Product, ProductImage, ResearchSnapshot, TextInsight
 
 
@@ -3101,3 +3102,185 @@ def test_generate_content_v4_selects_v4_system_prompt(
     assert len(captured_system_prompts) >= 1
     assert "educational" in captured_system_prompts[0].lower()
     assert "product is context and a supporting character, not the hero" in captured_system_prompts[0]
+
+
+def test_validate_v5_response_rejects_word_count_and_scene_count() -> None:
+    """V5 normalization enforces 30-38 words and exactly four scene lines."""
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    base = {
+        "theme": "aries",
+        "hook_type": "jessica",
+        "creative_format": "ai_video_flex_15s",
+        "platform_captions": {
+            "youtube": "y",
+            "instagram": "i",
+            "tiktok": "t",
+            "x": "x",
+        },
+        "hashtags": ["h"],
+    }
+    vo_29 = " ".join([f"w{i}" for i in range(29)])
+    data = {
+        **base,
+        "voiceover_script": vo_29,
+        "scene_descriptions": ["a", "b", "c", "d"],
+    }
+    with pytest.raises(ValueError, match="30-38 words"):
+        prompt_generator._validate_and_normalize_v5_response(data, theme="aries", hook_type="jessica")
+
+    vo_30 = " ".join([f"w{i}" for i in range(30)])
+    data_bad_scenes = {**base, "voiceover_script": vo_30, "scene_descriptions": ["a", "b", "c"]}
+    with pytest.raises(ValueError, match="exactly 4"):
+        prompt_generator._validate_and_normalize_v5_response(
+            data_bad_scenes, theme="aries", hook_type="jessica"
+        )
+
+
+def test_generate_content_v5_selects_v5_system_prompt_and_persists_manifest(
+    tmp_db: Path,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """video_v5 uses Horoscope V5 system prompt and persists schema_version 5 manifest fields."""
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    vo_32 = " ".join([f"w{i}" for i in range(32)])
+    v5_payload = {
+        "theme": "aries",
+        "hook_type": "jessica",
+        "hook_text": "aries energy this week hits different",
+        "creative_format": "ai_video_flex_15s",
+        "voiceover_script": vo_32,
+        "scene_descriptions": [
+            "Hook: direct-to-camera energy, soft smirk.",
+            "Roast beat: playful side-eye and gesture.",
+            "Validation beat: warm nod, softer lighting.",
+            "CTA beat: invite comment with sign and save.",
+        ],
+        "platform_captions": {
+            "youtube": "Aries weekly vibe check",
+            "instagram": "Your sign called, it has thoughts.",
+            "tiktok": "POV: Aries season energy",
+            "x": "Horoscope hot take for Aries.",
+        },
+        "hashtags": ["aries", "horoscope"],
+    }
+
+    captured_system_prompts: list[str] = []
+    captured_user_messages: list[str] = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            msgs = kwargs.get("messages", [])
+            for m in msgs:
+                if m.get("role") == "system":
+                    captured_system_prompts.append(m["content"])
+                if m.get("role") == "user":
+                    captured_user_messages.append(m["content"])
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content=json.dumps(v5_payload))),
+                ],
+                usage=SimpleNamespace(prompt_tokens=100, completion_tokens=90),
+            )
+
+    class FakeOpenAI:
+        def __init__(self, api_key: str):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "openai": {"api_key": "k", "model": "gpt-5.4"},
+            "site_url": "https://example.com",
+            "platforms": {"enabled": ["youtube"]},
+            "youtube": {"client_secrets_file": str(tmp_path / "secrets.json")},
+        },
+    )
+    (tmp_path / "secrets.json").write_text("{}")
+    monkeypatch.setattr("src.config.load_dotenv", lambda: None)
+    monkeypatch.setattr(
+        prompt_generator,
+        "_load_openai_module",
+        lambda: SimpleNamespace(
+            OpenAI=FakeOpenAI,
+            APIConnectionError=Exception,
+            RateLimitError=Exception,
+            APIStatusError=Exception,
+        ),
+    )
+
+    product = Product(sku="hz-test", name="Velura Test", product_url="https://example.com/p")
+    db.upsert_product(product)
+
+    content, extras = prompt_generator.generate_content(
+        product=product,
+        theme="aries",
+        hook_type="jessica",
+        product_images=[],
+        video_v5=True,
+        v5_vibe="playful_roast",
+    )
+
+    assert content.creative_format == "ai_video_flex_15s"
+    assert len(captured_system_prompts) >= 1
+    sp0 = captured_system_prompts[0]
+    assert "Horoscope V5" in sp0
+    assert "expert astrology short-form scriptwriter" in sp0
+    assert "HOROSCOPE CHARACTER — FIRST-FRAME GROUNDING" in sp0
+    assert "FIRST-FRAME ANCHOR" in sp0
+    assert "STABLE IDENTITY & VISUAL CONTINUITY" in sp0
+
+    assert len(captured_user_messages) >= 1
+    v5_user = captured_user_messages[0]
+    assert "STARTING-FIRST-FRAME" in v5_user
+    assert build_v5_starting_image_prompt("aries", "jessica") in v5_user
+    assert "BRANDING KIT" not in v5_user
+    assert "TEXT_LEVEL_INSIGHTS" not in v5_user
+    assert "PERFORMANCE_SUMMARY" not in v5_user
+    assert "SKU:" not in v5_user
+    assert "starting_image_prompt" not in extras["prompt_output"]
+    assert content.starting_image_prompt is not None
+    assert "reference image" in content.starting_image_prompt.lower()
+    assert "aries horoscope creature" in content.starting_image_prompt.lower()
+    assert "'jessica'" in content.starting_image_prompt
+
+    manifest = json.loads(content.asset_manifest_json or "{}")
+    persisted = db.get_content(content.id)
+    assert persisted is not None
+    assert json.loads(persisted.asset_manifest_json or "{}") == manifest
+
+    assert manifest["schema_version"] == 5
+    assert manifest["horoscope_metadata"] == {
+        "zodiac_sign": "aries",
+        "presenter_name": "jessica",
+        "vibe": "playful_roast",
+    }
+    voiceover_plan = manifest["voiceover_plan"]
+    assert voiceover_plan["script_template_id"] == "horoscope_v5_single"
+    assert voiceover_plan["voiceover_script"] == vo_32
+    assert "best friend" in voiceover_plan["voice_instructions"].lower()
+    assert voiceover_plan["delivery_profile"] == {
+        "tone": "best friend, playful, slightly dramatic, kind",
+        "diction": "clean, crisp, conversational",
+        "pace": "brisk but clear",
+        "pause_style": "light conversational pauses only",
+        "emphasis": "hook and CTA words",
+        "target_duration_seconds": 15.0,
+    }
+    assert voiceover_plan["provider_options"] == {
+        "elevenlabs": {
+            "language_code": "en",
+            "apply_text_normalization": "auto",
+            "voice_settings": {
+                "speed": 1.03,
+                "use_speaker_boost": True,
+            },
+        }
+    }
+    plan = manifest["video_plan"]
+    assert len(plan["scenes"]) == 4
+    assert plan["total_duration_seconds"] == 15.0

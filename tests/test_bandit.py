@@ -4,7 +4,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src import bandit, db
-from src.models import HOOK_DEFINITIONS, HOOK_TYPES, Product, THEMES, THEME_DEFINITIONS
+from src.models import (
+    HOOK_DEFINITIONS,
+    HOOK_TYPES,
+    Product,
+    THEMES,
+    THEME_DEFINITIONS,
+    V5_NAMES,
+    ZODIAC_SIGNS,
+)
 
 
 def test_recommend_flat_priors(tmp_db: Path) -> None:
@@ -92,3 +100,43 @@ def test_recommend_enforces_allocation_ceiling(tmp_db: Path) -> None:
 
     assert sum(item.count for item in rec.allocations) == 8
     assert max(item.count for item in rec.allocations) <= 5
+
+
+def test_initialize_v5_arms_seeds_all_zodiac_and_name_pairs(tmp_db: Path) -> None:
+    db.upsert_product(Product(sku="v5-seed", name="V5 Seed"))
+    bandit.initialize_v5_arms("v5-seed")
+
+    arms = db.list_bandit_arms()
+    v5_keys = {
+        a.arm_key for a in arms
+        if a.theme in ZODIAC_SIGNS and a.hook_type in V5_NAMES
+    }
+    expected = len(ZODIAC_SIGNS) * len(V5_NAMES)
+    assert len(v5_keys) == expected
+
+
+def test_recommend_excludes_v5_arms_after_v5_seed(tmp_db: Path) -> None:
+    db.upsert_product(Product(sku="v5-excl", name="V5 Excl"))
+    bandit.initialize_arms()
+    bandit.initialize_v5_arms()
+
+    with patch("numpy.random.beta", return_value=0.5):
+        rec = bandit.recommend(total_slots=4)
+
+    for alloc in rec.allocations:
+        is_v5 = alloc.theme in ZODIAC_SIGNS and alloc.hook_type in V5_NAMES
+        assert not is_v5
+
+
+def test_recommend_v5_only_allocates_v5_arms(tmp_db: Path) -> None:
+    db.upsert_product(Product(sku="v5-only", name="V5 Only"))
+    bandit.initialize_arms()
+    bandit.initialize_v5_arms()
+
+    with patch("numpy.random.beta", return_value=0.5):
+        rec = bandit.recommend_v5(total_slots=6)
+
+    assert sum(a.count for a in rec.allocations) == 6
+    for alloc in rec.allocations:
+        assert alloc.theme in ZODIAC_SIGNS
+        assert alloc.hook_type in V5_NAMES

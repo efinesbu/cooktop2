@@ -13,8 +13,45 @@ from src.models import Content, Cost, Product
 
 logger = logging.getLogger(__name__)
 
+
+def _gemini_image_generation_model() -> str:
+    """Model id for Gemini image output (image_motion_15s, starting frames, etc.)."""
+    return config.gemini_image_model()
+
+
 # MIME types for reference images
 _IMAGE_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
+
+# V5 horoscope refs: first match wins (prefer JPEG when both exist).
+_HOROSCOPE_REF_EXTENSIONS = (".jpeg", ".jpg", ".png", ".webp")
+
+
+def _horoscope_reference_path(horoscope: str) -> Path | None:
+    """Resolve ``horoscopes/{sign}.{ext}`` for the first existing extension."""
+    base = config.horoscopes_dir()
+    sign = horoscope.strip().lower()
+    for ext in _HOROSCOPE_REF_EXTENSIONS:
+        p = base / f"{sign}{ext}"
+        if p.is_file():
+            return p
+    return None
+
+
+def build_v5_starting_image_prompt(horoscope: str, name: str) -> str:
+    """Return the exact Gemini prompt used for V5 horoscope starting frames."""
+    sign_words = (horoscope or "").strip().replace("_", " ")
+    sign_label = sign_words.title() if sign_words else "Zodiac"
+    display_name = (name or "").strip()
+    return (
+        f"You are given a reference image of a cute chibi-style {sign_label} horoscope creature with big eyes "
+        "wearing a nameplate necklace. Reproduce this image exactly -- same character design, pose, "
+        "proportions, expression, lighting, background, and overall composition. "
+        f"The ONLY two changes: update the 'Jessica' text on the necklace pendant so it clearly reads "
+        f"{display_name!r} in metallic gold lettering (legible, engraved or embossed look), and update "
+        f"the 'Jessica' text on the top left so it clearly reads {display_name!r}. "
+        "Do not alter the character species, zodiac identity, art style, colors, or any other detail. "
+        "Output a single high-quality vertical 9:16 frame."
+    )
 
 
 def generate_starting_image(content: Content, product: Product) -> Path:
@@ -26,7 +63,7 @@ def generate_starting_image(content: Content, product: Product) -> Path:
     Returns the path where the generated image was saved.
     """
     api_key = config.get("gemini.api_key")
-    model = config.get("gemini.model", "gemini-2.0-flash")
+    model = _gemini_image_generation_model()
 
     client = genai.Client(api_key=api_key)
 
@@ -43,6 +80,62 @@ def generate_starting_image(content: Content, product: Product) -> Path:
 
     out_path.write_bytes(image_bytes)
     logger.info("Saved starting image to %s", out_path)
+
+    db.insert_cost(Cost(
+        content_id=content.id,
+        step="image_gen",
+        api_provider="gemini",
+        cost_usd=0.0,
+    ))
+
+    return out_path
+
+
+def generate_v5_starting_image(content: Content, horoscope: str, name: str) -> Path:
+    """Generate the V5 horoscope starting frame from a fixed zodiac reference image.
+
+    Loads ``horoscopes/{sign}.jpeg`` / ``.jpg`` / ``.png`` / ``.webp`` (first found; see
+    :func:`config.horoscopes_dir`), sends it to Gemini using :func:`config.gemini_v5_model`
+    (optional ``gemini.v5_model`` override, else :func:`config.gemini_image_model` — must
+    support IMAGE response modalities),
+    and asks to preserve the character while updating both visible `Jessica` labels to *name*.
+
+    Returns:
+        Path to the saved PNG (``{content.id}_start.png`` under the content's video folder).
+
+    Raises:
+        FileNotFoundError: If no reference image exists for the sign.
+        ValueError: If Gemini API key is not configured.
+    """
+    api_key = config.get("gemini.api_key")
+    if not api_key:
+        raise ValueError(
+            "Missing `gemini.api_key` in config.yaml for V5 horoscope starting image generation."
+        )
+    model = config.gemini_v5_model()
+    client = genai.Client(api_key=api_key)
+
+    ref = _horoscope_reference_path(horoscope)
+    if ref is None:
+        sign = horoscope.strip().lower()
+        raise FileNotFoundError(
+            f"V5 horoscope reference image not found for sign {sign!r}. "
+            f"Add horoscopes/{sign}.jpeg, .jpg, .png, or .webp under the project root."
+        )
+
+    prompt = build_v5_starting_image_prompt(horoscope, name)
+    contents = _build_contents(prompt, ref)
+
+    sku = (content.product_sku or "horoscope").strip() or "horoscope"
+    out_dir = config.videos_dir() / sku
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{content.id}_start.png"
+
+    aspect_ratio = config.get("gemini.aspect_ratio", "9:16")
+    image_bytes = _generate_with_retries(client, model, contents, aspect_ratio, max_attempts=3)
+
+    out_path.write_bytes(image_bytes)
+    logger.info("Saved V5 horoscope starting image to %s", out_path)
 
     db.insert_cost(Cost(
         content_id=content.id,
@@ -191,7 +284,7 @@ def generate_frame_images_for_plan(
         raise ValueError(
             "Missing `gemini.api_key` in config.yaml for image_motion_15s generation."
         )
-    model_name = config.get("gemini.model", "gemini-2.0-flash")
+    model_name = _gemini_image_generation_model()
     aspect_ratio = config.get("gemini.aspect_ratio", "9:16")
     client = genai.Client(api_key=api_key)
 

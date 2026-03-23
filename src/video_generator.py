@@ -118,8 +118,68 @@ def _get_request_duration(content: Content) -> int:
 
 def _build_video_prompt(content: Content, product: Product) -> str:
     if content.creative_format == "ai_video_flex_15s" and content.asset_manifest_json:
+        try:
+            manifest = json.loads(content.asset_manifest_json)
+        except json.JSONDecodeError:
+            return _build_flex_video_prompt(content, product)
+        if isinstance(manifest, dict) and manifest.get("schema_version") == 5:
+            meta = manifest.get("horoscope_metadata") or {}
+            horoscope = str(meta.get("zodiac_sign") or content.theme or "").strip()
+            presenter = str(meta.get("presenter_name") or content.hook_type or "").strip()
+            return _build_v5_video_prompt(content, horoscope, presenter)
         return _build_flex_video_prompt(content, product)
     return _build_legacy_video_prompt(content, product)
+
+
+def _build_v5_video_prompt(content: Content, horoscope: str, name: str) -> str:
+    """xAI animation prompt for V5 horoscope reels (manifest schema_version 5)."""
+    manifest = json.loads(content.asset_manifest_json or "{}")
+    plan = manifest.get("video_plan", {})
+    scenes = plan.get("scenes", [])
+    if len(scenes) != 4:
+        raise ValueError(
+            "V5 asset manifest must include video_plan.scenes with exactly 4 entries."
+        )
+    total = plan.get("total_duration_seconds", 15)
+    try:
+        total_int = int(total)
+    except (TypeError, ValueError):
+        total_int = 15
+    style_family = str(plan.get("style_family", "") or "").strip()
+    style_rationale = str(plan.get("style_rationale", "") or "").strip()
+    sign_key = (horoscope or "").strip()
+    sign_words = sign_key.replace("_", " ").strip() or "zodiac"
+    sign_label = sign_words.title()
+
+    parts = [
+        f"Create a {total_int}-second vertical horoscope character animation (short-form reel).",
+        f"The subject is a cute chibi-style {sign_label} zodiac creature with big eyes from the starting frame: "
+        "keep that character identity, proportions, costume, and jewelry. The necklace must stay clearly "
+        f"engraved with the name {name!r} in gold lettering throughout the motion.",
+        "Animate expressive body language, subtle head and hand motion, and premium lighting; "
+        "this is astrology entertainment, not a product advertisement.",
+        "Do not animate mouth movements, jaw sync, or lip movements for speech—the voiceover is "
+        "generated separately and will be stitched in post, so no lip sync.",
+        "The scene animations do not need to follow or sync with the audio script -- "
+        "focus on expressive, engaging character motion that holds the viewer's attention.",
+    ]
+    if style_family:
+        parts.append(f"Visual style: {style_family}. {style_rationale}".strip())
+
+    for i, scene in enumerate(scenes):
+        if not isinstance(scene, dict):
+            continue
+        desc = (scene.get("scene_description") or "").strip()
+        dur = scene.get("duration_seconds", "")
+        if desc:
+            parts.append(f"Scene {i + 1} ({dur}s) — animation direction: {desc}")
+
+    parts.append(
+        "Maintain visual continuity with the supplied starting image (character, necklace name, palette)."
+    )
+    parts.append(ANATOMY_GUARDRAIL)
+    parts.append("Use smooth motion and pacing suitable for TikTok/Reels-style vertical video.")
+    return "\n".join(parts)
 
 
 def _build_flex_video_prompt(content: Content, product: Product) -> str:

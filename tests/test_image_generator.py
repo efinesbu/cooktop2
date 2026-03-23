@@ -11,9 +11,12 @@ from src.image_generator import (
     _build_prompt,
     _extract_image_bytes,
     _first_hero_image_path,
+    build_v5_starting_image_prompt,
     generate_frame_images_for_plan,
     generate_starting_image,
+    generate_v5_starting_image,
 )
+from src import db
 from src.models import Content, Product
 
 # Content-aware hero selector; required for nolabel tests. Implementer adds this.
@@ -142,6 +145,16 @@ def test_extract_image_bytes_reports_blocked_response() -> None:
 
     with pytest.raises(RuntimeError, match="block_reason='SAFETY'"):
         _extract_image_bytes(response)
+
+
+def test_build_v5_starting_image_prompt_updates_both_jessica_labels() -> None:
+    prompt = build_v5_starting_image_prompt("pisces", "ashley")
+
+    assert "The ONLY two changes:" in prompt
+    assert "update the 'Jessica' text on the necklace pendant" in prompt
+    assert "update the 'Jessica' text on the top left" in prompt
+    assert "'ashley'" in prompt
+    assert prompt.count("'ashley'") == 2
 
 
 def test_generate_frame_images_omits_brand_refs_when_branding_disabled(
@@ -515,3 +528,88 @@ def test_generate_frame_images_branded_does_not_add_nolabel_detail_refs(
     refs = captured["reference_paths_per_frame"][0]
     assert str(hero_labeled) in refs
     assert str(detail_nolabel) not in refs
+
+
+def test_generate_v5_starting_image_uses_gemini_model_and_horoscope_reference(
+    tmp_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """V5 path loads horoscopes/{sign}.png (or .jpeg/.jpg/.webp) and uses gemini.model like image_motion."""
+    horo_dir = tmp_path / "horoscopes"
+    horo_dir.mkdir()
+    ref = horo_dir / "aries.png"
+    ref.write_bytes(b"fake-png")
+
+    captured: dict[str, object] = {}
+
+    class FakeModels:
+        def generate_content(self, model: str, contents: object, config: object | None = None):
+            captured["model"] = model
+            captured["contents"] = contents
+            return SimpleNamespace(
+                candidates=[
+                    SimpleNamespace(
+                        content=SimpleNamespace(
+                            parts=[SimpleNamespace(inline_data=SimpleNamespace(data=b"png-bytes"))],
+                        ),
+                    ),
+                ],
+            )
+
+    class FakeClient:
+        def __init__(self, api_key: str) -> None:
+            captured["api_key"] = api_key
+            self.models = FakeModels()
+
+    videos = tmp_path / "velura-data" / "videos"
+    monkeypatch.setattr("src.image_generator.genai.Client", FakeClient)
+    monkeypatch.setattr("src.image_generator.config.horoscopes_dir", lambda: horo_dir)
+
+    def fake_get(key: str, default=None):
+        vals = {
+            "gemini.api_key": "gemini-key",
+            "gemini.model": "gemini-image-model",
+            "gemini.aspect_ratio": "9:16",
+        }
+        return vals.get(key, default)
+
+    monkeypatch.setattr("src.image_generator.config.get", fake_get)
+    monkeypatch.setattr("src.image_generator.config.videos_dir", lambda: videos)
+
+    content = Content(id="v5c1", product_sku="sku-a", theme="aries", hook_type="jessica")
+    db.upsert_product(Product(sku="sku-a", name="Test"))
+    db.insert_content(content)
+    out = generate_v5_starting_image(content, "aries", "jessica")
+
+    assert captured["model"] == "gemini-image-model"
+    assert captured["api_key"] == "gemini-key"
+    # Reference image is passed as first part (bytes) to Gemini
+    assert isinstance(captured["contents"], list)
+    prompt_text = captured["contents"][1]
+    assert isinstance(prompt_text, str)
+    assert "aries horoscope creature" in prompt_text.lower()
+    assert "chibi" in prompt_text.lower()
+    assert "reproduce this image exactly" in prompt_text.lower()
+    assert out == videos / "sku-a" / "v5c1_start.png"
+    assert out.read_bytes() == b"png-bytes"
+
+
+def test_generate_v5_starting_image_missing_reference_raises_clear_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    horo_dir = tmp_path / "horoscopes"
+    horo_dir.mkdir()
+
+    monkeypatch.setattr("src.image_generator.config.horoscopes_dir", lambda: horo_dir)
+    monkeypatch.setattr(
+        "src.image_generator.config.get",
+        lambda key, default=None: {"gemini.api_key": "k", "gemini.model": "gemini-2.0-flash"}.get(
+            key, default
+        ),
+    )
+
+    content = Content(id="x", product_sku="s", theme="aries", hook_type="jessica")
+    with pytest.raises(FileNotFoundError, match="V5 horoscope reference image not found"):
+        generate_v5_starting_image(content, "aries", "jessica")

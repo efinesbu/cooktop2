@@ -152,6 +152,56 @@ def db_path() -> Path:
     return Path("db/velura.db")
 
 
+def horoscopes_dir() -> Path:
+    """Project-root directory for V5 horoscope reel assets (not under data_root)."""
+    return Path("horoscopes")
+
+
+_DEFAULT_GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image"
+
+
+def gemini_image_model() -> str:
+    """Model id for Gemini **native image generation** (starting frames, image_motion frames).
+
+    The API requires an image-capable model when using ``response_modalities`` that include
+    IMAGE (see ``src/image_generator._generate_with_retries``).
+
+    Resolution order:
+
+    1. ``gemini.image_model`` when set to a non-empty string.
+    2. Otherwise ``gemini.model``, defaulting to ``gemini-2.5-flash-image``.
+
+    ``gemini-2.0-flash`` is remapped to ``gemini-2.5-flash-image`` because the former does
+    not support IMAGE output modalities on the current Gemini API.
+    """
+    raw = get("gemini.image_model")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    m = str(get("gemini.model", _DEFAULT_GEMINI_IMAGE_MODEL)).strip()
+    if not m:
+        return _DEFAULT_GEMINI_IMAGE_MODEL
+    if m == "gemini-2.0-flash":
+        return _DEFAULT_GEMINI_IMAGE_MODEL
+    return m
+
+
+def gemini_v5_model() -> str:
+    """Optional ``gemini.v5_model`` override for V5 horoscope **starting image** generation.
+
+    Uses optional ``gemini.v5_model`` when set to a non-empty value (except the legacy
+    placeholder ``nano-banana-2``, which falls through). Otherwise uses :func:`gemini_image_model`
+    (same image stack as ``image_motion_15s``, with ``gemini.image_model`` / ``gemini.model``).
+    """
+    fallback = gemini_image_model()
+    raw = get("gemini.v5_model")
+    if not isinstance(raw, str) or not raw.strip():
+        return fallback
+    v = raw.strip()
+    if v == "nano-banana-2":
+        return fallback
+    return v
+
+
 def enabled_platforms(purpose: str = "posting") -> list[str]:
     requirements = _platform_requirements(purpose)
     return [
@@ -222,6 +272,8 @@ def _is_platform_configured(
 ) -> bool:
     if purpose == "posting" and platform == "instagram":
         return _is_instagram_posting_configured()
+    if purpose == "posting" and platform == "youtube":
+        return _is_youtube_posting_configured()
     return all(_is_configured(key) for key in requirements)
 
 
@@ -251,7 +303,26 @@ def _is_instagram_posting_configured() -> bool:
     )
 
 
+def _is_youtube_posting_configured() -> bool:
+    """Allow cached OAuth tokens to keep YouTube posting enabled."""
+    if _is_configured("youtube.client_secrets_file"):
+        return True
+    token_file = get("youtube.token_file", "youtube_token.json")
+    if isinstance(token_file, str) and token_file.strip():
+        return Path(token_file.strip()).expanduser().exists()
+    return False
+
+
 def _has_non_empty_value(value: Any) -> bool:
     if isinstance(value, str):
-        return bool(value.strip())
+        stripped = value.strip()
+        if not stripped:
+            return False
+        if stripped.startswith("YOUR_"):
+            return False
+        if stripped == "your-webhook-id":
+            return False
+        if "your-webhook-id" in stripped:
+            return False
+        return True
     return bool(value)

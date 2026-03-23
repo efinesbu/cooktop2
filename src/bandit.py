@@ -11,6 +11,8 @@ from src.models import (
     BanditObservation,
     BanditRecommendation,
     ThemeHookAllocation,
+    V5_NAMES,
+    ZODIAC_SIGNS,
 )
 
 ARM_KEY_SEPARATOR = "__"
@@ -65,12 +67,33 @@ def initialize_arms(product_sku: str | None = None) -> None:
         db.seed_bandit_arms(starter_arms)
 
 
-def recommend(total_slots: int = 8) -> BanditRecommendation:
+def initialize_v5_arms(product_sku: str | None = None) -> None:
+    """Seed bandit arms for V5 horoscope reels (zodiac sign × presenter name)."""
+    del product_sku
+    existing = {arm.arm_key for arm in db.list_bandit_arms()}
+    starter_arms: list[BanditArm] = []
+    for horoscope in ZODIAC_SIGNS:
+        for name in V5_NAMES:
+            key = arm_key(horoscope, name)
+            if key in existing:
+                continue
+            starter_arms.append(
+                BanditArm(
+                    arm_key=key,
+                    theme=horoscope,
+                    hook_type=name,
+                    alpha=1.0,
+                    beta=1.0,
+                )
+            )
+    if starter_arms:
+        db.seed_bandit_arms(starter_arms)
+
+
+def _recommend_from_arms(arms: list[BanditArm], total_slots: int) -> BanditRecommendation:
+    """Thompson sampling allocation over the given arm set (shared by recommend / recommend_v5)."""
     if total_slots <= 0:
         raise ValueError("total_slots must be positive")
-
-    initialize_arms()
-    arms = db.list_bandit_arms()
     if not arms:
         raise ValueError("No bandit arms are available for recommendation.")
 
@@ -113,6 +136,29 @@ def recommend(total_slots: int = 8) -> BanditRecommendation:
         if allocation_map[arm.arm_key] > 0
     ]
     return BanditRecommendation(allocations=allocations)
+
+
+def _is_v5_arm(arm: BanditArm) -> bool:
+    """True if this arm is a V5 horoscope × name pair (see :func:`initialize_v5_arms`)."""
+    return arm.theme in ZODIAC_SIGNS and arm.hook_type in V5_NAMES
+
+
+def recommend(total_slots: int = 8) -> BanditRecommendation:
+    initialize_arms()
+    # Exclude V5-only arms so standard runs are not diluted after V5 has been seeded.
+    arms = [arm for arm in db.list_bandit_arms() if not _is_v5_arm(arm)]
+    return _recommend_from_arms(arms, total_slots)
+
+
+def recommend_v5(total_slots: int = 8) -> BanditRecommendation:
+    """Recommend allocations over V5 horoscope × name arms only."""
+    initialize_v5_arms()
+    arms = [
+        arm
+        for arm in db.list_bandit_arms()
+        if arm.theme in ZODIAC_SIGNS and arm.hook_type in V5_NAMES
+    ]
+    return _recommend_from_arms(arms, total_slots)
 
 
 def ranked_arm_summaries() -> list[tuple[BanditArm, float]]:

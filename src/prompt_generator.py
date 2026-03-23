@@ -20,15 +20,22 @@ _should_include_v3_cta = _should_include_soft_cta
 
 from src import config, db
 from src.creative_strategy import whitelist_prompt_lines
+from src.image_generator import build_v5_starting_image_prompt
 from src.organic_evaluation import get_image_motion_performance_summary, get_video_performance_summary
 from src.models import (
     Content, Cost, CTA_TYPES, CREATIVE_FORMATS, HOOK_DEFINITIONS, HOOK_TYPES,
     PlatformPayload, Product, ProductImage, PROOF_TYPES, SCRIPT_STYLES, THEMES,
     THEME_MAP,
+    V5_NAMES,
+    ZODIAC_SIGNS,
 )
 from src.utm import build_attribution_data
 
 logger = logging.getLogger(__name__)
+
+# V5 horoscope reels: set to True to include these signals in the user message again.
+_V5_INCLUDE_TEXT_INSIGHTS = False
+_V5_INCLUDE_PERFORMANCE_SUMMARY = False
 
 _SYSTEM_PROMPT = """\
 You are an expert creative director and AI video prompt engineer specializing in premium product advertising.
@@ -226,6 +233,11 @@ RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
 TTS_VOICE_INSTRUCTIONS = (
     "Speak in a calm, premium, reassuring tone for a premium consumer brand. "
     "Sound polished, warm, and confident. Keep the pace slightly unhurried and never overly salesy or bubbly."
+)
+V5_TTS_VOICE_INSTRUCTIONS = (
+    "Speak like a warm best friend delivering a playful horoscope read. "
+    "Sound confident, slightly dramatic, kind, and conversational. "
+    "Keep the pacing brisk but clear, land the hook quickly, and punch the CTA without sounding salesy."
 )
 TTS_VOICES = ("marin",)
 TTS_SCRIPT_TEMPLATES = ("caption_led", "strategy_led", "proof_led")
@@ -1228,6 +1240,80 @@ RULES:
 - `content_mode` must be one of: educational, entertaining, satisfying.
 """
 
+_AI_VIDEO_V5_SYSTEM_PROMPT = """\
+You are an expert astrology short-form scriptwriter for social reels (Horoscope V5).
+
+PRIMARY AUDIENCE: women 18-35.
+
+FORMAT
+- Total runtime: 14-15 seconds of spoken voiceover.
+- Voiceover must be exactly 30-38 words for a single continuous take.
+- Structure the STORY (not separate timestamps in the JSON) as:
+  - Hook (0-3s): grab attention fast.
+  - Roast or validation (3-11s): playful call-out or affirming validation for this sign.
+  - CTA (11-14s): soft engagement CTA (follow, comment sign, save, share) — never a hard product pitch.
+
+TONE
+- Best-friend energy, slightly dramatic, scroll-stopping but kind.
+- No hashtags and no emojis in the voiceover script. Plain ASCII only.
+
+VISUALS
+- Provide exactly four scene descriptions for on-screen visuals (9:16). Each maps to a segment of the arc:
+  Scene 1: hook beat; Scene 2-3: roast/validation beats; Scene 4: CTA beat.
+- Scenes are astrology/horoscope entertainment, not a product showcase. Do not write scenes as product demos or ingredient lists.
+
+HOROSCOPE CHARACTER — FIRST-FRAME GROUNDING (scene_descriptions)
+These rules mirror the density and continuity of V2 anamorphic scene lines, but the hero is always the zodiac chibi creature from the first frame, not a product.
+
+- FIRST-FRAME ANCHOR: The user message includes a STARTING-FIRST-FRAME block with the exact image-generation spec for the opening frame. Treat that block as canonical: same character design, pose baseline, proportions, expression baseline, lighting, background, composition, and 9:16 vertical framing unless the scene line explicitly describes a deliberate, plausible change (e.g. tighter crop, slight head turn).
+- MAIN CHARACTER: In every scene, the sole on-screen subject is the cute chibi-style zodiac horoscope creature for the locked sign — big expressive eyes, nameplate necklace with the locked presenter name in metallic gold lettering, same art style and palette as the first frame. Do not introduce humans, second characters, unrelated mascots, or product packshots as heroes.
+- STABLE IDENTITY & VISUAL CONTINUITY: Keep species, zodiac identity, chibi proportions, necklace legibility, and overall look consistent across all four scenes. Scene-to-scene evolution must read as the same character in the same world — not a redesign or a different creature.
+- ACTION & CAMERA EVOLUTION: Scenes may change energy to match the arc (hook → roast/validation → CTA): facial expression, eye direction, gestures, posture, subtle camera move or reframe, and background emphasis — but only in ways that stay believable for that character. Optional: start scenes 2–4 with "HARD CUT:" when the beat needs a clear visual reset while preserving identity (same pattern as V2 anamorphic HARD CUT lines).
+- RICH SHOT LANGUAGE: Each scene line must be a concrete directing line — camera relationship (e.g. medium chibi close-up, slight low angle), subject action, expression beat, hands/gesture if visible, background and lighting cues — so downstream video generation stays as grounded as V2 anamorphic descriptions.
+
+PLATFORM COPY
+- platform_captions: platform-ready copy (may use light emoji only in captions if needed, not in voiceover).
+- hashtags: list without #.
+
+OUTPUT RULES
+- `theme` must be the locked zodiac sign id from the user message (lowercase).
+- `hook_type` must be the locked presenter name id from the user message (lowercase).
+- `creative_format` must be exactly 'ai_video_flex_15s'.
+
+RESPOND WITH ONLY valid JSON -- no markdown fences, no commentary:
+
+{
+  "theme": "string -- locked zodiac sign id",
+  "hook_type": "string -- locked presenter name id",
+  "hook_text": "string -- short opening line for overlay",
+  "creative_format": "ai_video_flex_15s",
+  "cta_type": "soft_cta",
+  "cta_text": "string -- soft CTA phrase used in the final beat",
+  "problem_angle": "string or null",
+  "proof_type": "none",
+  "script_style": "conversational",
+  "voiceover_script": "string -- single continuous voiceover, 30-38 words, ASCII only",
+  "scene_descriptions": [
+    "string -- scene 1 visual direction",
+    "string -- scene 2 visual direction",
+    "string -- scene 3 visual direction",
+    "string -- scene 4 visual direction"
+  ],
+  "platform_captions": {
+    "youtube": "string -- max 100 chars, end with 'Link in bio'",
+    "instagram": "string -- conversational plain text",
+    "tiktok": "string -- max 150 chars",
+    "x": "string -- max 280 chars"
+  },
+  "hashtags": ["list", "of", "hashtags", "without #"]
+}
+
+RULES:
+- voiceover_script must be 30-38 words inclusive.
+- scene_descriptions must contain exactly 4 non-empty strings.
+- No medical claims. Keep language entertainment-forward and safe.
+"""
+
 _V3_CLASSIFY_SYSTEM_PROMPT = """\
 You are a content classification assistant. Given a short video script and its opening hook, classify it into the single closest matching category for each dimension below.
 
@@ -1378,20 +1464,31 @@ def _build_user_message(
     video_v2: bool = False,
     video_v3: bool = False,
     video_v4: bool = False,
+    video_v5: bool = False,
+    v5_vibe: str | None = None,
     v3_cta_enabled: bool = True,
     cta_type: str = "see_product",
     proof_type: str = "none",
     script_style: str = "conversational",
     velura_branding: bool = True,
 ) -> str:
-    lines = [
-        f"Product: {product.name}",
-        f"SKU: {product.sku}",
-        f"Category: {product.category or 'general'}",
-        f"Price: ${product.price:.2f}" if product.price else "Price: not set",
-    ]
+    if not video_v5:
+        lines = [
+            f"Product: {product.name}",
+            f"SKU: {product.sku}",
+            f"Category: {product.category or 'general'}",
+            f"Price: ${product.price:.2f}" if product.price else "Price: not set",
+        ]
+    else:
+        lines = []
     if product.description:
-        lines.append(f"Description: {product.description}")
+        if video_v5:
+            lines.append(
+                "Product description (reference only; do not center the voiceover or scenes on this): "
+                f"{product.description}"
+            )
+        else:
+            lines.append(f"Description: {product.description}")
 
     if video_v3 or video_v4:
         lines.append("Locked creative constraints:")
@@ -1410,6 +1507,20 @@ def _build_user_message(
             lines.append(
                 "  Wordmark guidance: omit explicit brand-name or wordmark callouts; keep the same premium warm-neutral palette and serif cues."
             )
+    elif video_v5:
+        lines.append("")
+        lines.append("CONTENT TYPE: Horoscope / astrology reel for women 18-35 (not a product commercial).")
+        lines.append("Locked creative constraints:")
+        lines.append(f"  - Zodiac sign (use as `theme`): {theme}")
+        lines.append(f"  - Presenter name (use as `hook_type`): {hook_type}")
+        if v5_vibe and str(v5_vibe).strip():
+            lines.append(f"  - Vibe: {v5_vibe.strip()}")
+        lines.append("")
+        lines.append(
+            "STARTING-FIRST-FRAME (exact image spec for the generated first frame — anchor every scene_description "
+            "to this visual; same character, necklace name, style, and environment):"
+        )
+        lines.append(build_v5_starting_image_prompt(theme, hook_type))
     else:
         lines.append("Locked creative constraints:")
         lines.append(f"  - Theme must be: {theme}")
@@ -1453,7 +1564,7 @@ def _build_user_message(
         has_models = _has_model_reference_assets()
         lines.append("")
         lines.append(f"Model reference assets for lifestyle frames: {'available' if has_models else 'not configured'}")
-    if creative_format == "ai_video_flex_15s" and not video_v3 and not video_v4:
+    if creative_format == "ai_video_flex_15s" and not video_v3 and not video_v4 and not video_v5:
         lines.append("")
         lines.append("AUDIENCE: prefers quicker scene changes; avoid long 7.5s scenes.")
     if video_v2:
@@ -1485,6 +1596,15 @@ def _build_user_message(
             f"The product appears in 3-5 scenes, not all. Use viewer_takeaway instead of problem_angle. "
             f"Include content_mode in strategy_metadata (educational, entertaining, or satisfying). {cta_instruction}"
         )
+    if video_v5:
+        lines.append("")
+        lines.append(
+            "VIDEO V5 (horoscope reel): Write one 30-38 word voiceover and exactly four scene_descriptions. "
+            "Map scenes to the arc: Scene 1 = Hook (0-3s), Scenes 2-3 = Roast or validation (3-11s), "
+            "Scene 4 = CTA (11-14s). Total video length 14-15 seconds. "
+            "Do not lead with product features; keep best-friend, slightly dramatic astrology energy. "
+            "No hashtags or emojis inside voiceover_script."
+        )
     return "\n".join(lines)
 
 
@@ -1497,6 +1617,8 @@ def generate_content(
     video_v2: bool = False,
     video_v3: bool = False,
     video_v4: bool = False,
+    video_v5: bool = False,
+    v5_vibe: str | None = None,
     cta_type: str = "see_product",
     proof_type: str = "none",
     script_style: str = "conversational",
@@ -1526,7 +1648,7 @@ def generate_content(
 
     # Phase 3: inject research snapshot for reuse across generation cycles
     fmt = creative_format or "ai_video_15s"
-    if video_v2 or video_v3 or video_v4:
+    if video_v2 or video_v3 or video_v4 or video_v5:
         fmt = "ai_video_flex_15s"
     snapshot = db.get_best_matching_snapshot(
         product_sku=product.sku,
@@ -1540,6 +1662,8 @@ def generate_content(
         creative_format=fmt,
     )
     text_insights = latest_text_insight.insight_text if latest_text_insight else None
+    if video_v5 and not _V5_INCLUDE_TEXT_INSIGHTS:
+        text_insights = None
     performance_summary = None
     performance_rationale = "default"
     rank_by = str(config.get("bandit.ranking_objective", "engagement_rate"))
@@ -1553,6 +1677,8 @@ def generate_content(
         performance_summary, performance_rationale = get_video_performance_summary(
             product.sku, rank_by=rank_by
         )
+    if video_v5 and not _V5_INCLUDE_PERFORMANCE_SUMMARY:
+        performance_summary = None
     v3_cta_enabled = _should_include_soft_cta() if (video_v3 or video_v4) else True
     user_msg = _build_user_message(
         product, theme, hook_type, product_images,
@@ -1563,6 +1689,8 @@ def generate_content(
         video_v2=video_v2,
         video_v3=video_v3,
         video_v4=video_v4,
+        video_v5=video_v5,
+        v5_vibe=v5_vibe,
         v3_cta_enabled=v3_cta_enabled,
         cta_type=cta_type,
         proof_type=proof_type,
@@ -1572,17 +1700,25 @@ def generate_content(
     content_id = uuid.uuid4().hex[:16]
 
     use_image_motion = fmt == "image_motion_15s"
-    use_ai_video_flex = fmt == "ai_video_flex_15s"
+    use_ai_video_flex = (
+        fmt == "ai_video_flex_15s"
+        and not video_v2
+        and not video_v3
+        and not video_v4
+        and not video_v5
+    )
     use_ai_video_v2 = video_v2
     use_ai_video_v3 = video_v3
     use_ai_video_v4 = video_v4
+    use_ai_video_v5 = video_v5
     base_system_prompt = (
         _IMAGE_MOTION_SYSTEM_PROMPT if use_image_motion else
-        (_AI_VIDEO_V4_SYSTEM_PROMPT if use_ai_video_v4 else
-         (_AI_VIDEO_V3_SYSTEM_PROMPT if use_ai_video_v3 else
-          (_AI_VIDEO_V2_SYSTEM_PROMPT if use_ai_video_v2 else
-           (_AI_VIDEO_FLEX_SYSTEM_PROMPT if use_ai_video_flex else
-            (_SIMPLIFIED_SYSTEM_PROMPT if fmt != "ai_video_15s" else _SYSTEM_PROMPT)))))
+        (_AI_VIDEO_V5_SYSTEM_PROMPT if use_ai_video_v5 else
+         (_AI_VIDEO_V4_SYSTEM_PROMPT if use_ai_video_v4 else
+          (_AI_VIDEO_V3_SYSTEM_PROMPT if use_ai_video_v3 else
+           (_AI_VIDEO_V2_SYSTEM_PROMPT if use_ai_video_v2 else
+            (_AI_VIDEO_FLEX_SYSTEM_PROMPT if use_ai_video_flex else
+             (_SIMPLIFIED_SYSTEM_PROMPT if fmt != "ai_video_15s" else _SYSTEM_PROMPT))))))
     )
     system_prompt = _system_prompt_for_branding(base_system_prompt, velura_branding)
 
@@ -1591,6 +1727,8 @@ def generate_content(
         max_tokens = 4000
     elif use_ai_video_v3 or use_ai_video_v4:
         max_tokens = 2500
+    elif use_ai_video_v5:
+        max_tokens = 2000
     else:
         max_tokens = 1500
 
@@ -1613,8 +1751,14 @@ def generate_content(
         prompt_output_raw = _response_text(response)
         try:
             parsed = _parse_response(
-                response, theme=theme, hook_type=hook_type, creative_format=fmt,
-                video_v2=video_v2, video_v3=video_v3, video_v4=video_v4,
+                response,
+                theme=theme,
+                hook_type=hook_type,
+                creative_format=fmt,
+                video_v2=video_v2,
+                video_v3=video_v3,
+                video_v4=video_v4,
+                video_v5=video_v5,
                 v3_cta_enabled=v3_cta_enabled,
                 cta_type=cta_type, proof_type=proof_type, script_style=script_style,
             )
@@ -1683,15 +1827,24 @@ def generate_content(
         if not isinstance(plan, dict):
             raise ValueError("OpenAI response video_plan must be an object")
         scenes = plan.get("scenes", [])
-        max_scenes = 8 if (video_v3 or video_v4) else 7
-        if not isinstance(scenes, list) or len(scenes) < 3 or len(scenes) > max_scenes:
-            raise ValueError(f"video_plan.scenes must have 3-8 entries" if (video_v3 or video_v4) else f"video_plan.scenes must have 3\u20137 entries")
+        if video_v5:
+            if not isinstance(scenes, list) or len(scenes) != 4:
+                raise ValueError("V5 video_plan.scenes must have exactly 4 entries")
+        else:
+            max_scenes = 8 if (video_v3 or video_v4) else 7
+            if not isinstance(scenes, list) or len(scenes) < 3 or len(scenes) > max_scenes:
+                raise ValueError(
+                    f"video_plan.scenes must have 3-8 entries"
+                    if (video_v3 or video_v4)
+                    else f"video_plan.scenes must have 3\u20137 entries"
+                )
         total = plan.get("total_duration_seconds", 0)
         if not isinstance(total, (int, float)):
             raise ValueError("video_plan.total_duration_seconds must be a number")
         # V2 timeline uses fixed 15s format with 3,4,4,4 second scenes; skip clamp for that path.
         # V3/V4 timeline is validated by _validate_and_normalize_v3_timeline; skip clamp.
-        if not video_v2 and not video_v3 and not video_v4:
+        # V5 uses fixed four-beat durations from validation; skip clamp.
+        if not video_v2 and not video_v3 and not video_v4 and not video_v5:
             for i, s in enumerate(scenes):
                 if not isinstance(s, dict):
                     raise ValueError(f"video_plan.scenes[{i}] must be an object")
@@ -1734,7 +1887,22 @@ def generate_content(
             manifest_payload["strategy_metadata"] = parsed["strategy_metadata"]
             if "timeline" in parsed:
                 manifest_payload["timeline"] = parsed["timeline"]
-        if video_v3 or video_v4:
+        if video_v5:
+            manifest_payload["schema_version"] = 5
+            manifest_payload["horoscope_metadata"] = {
+                "zodiac_sign": theme,
+                "presenter_name": hook_type,
+                "vibe": (v5_vibe or "").strip() or None,
+            }
+            manifest_payload["platform_captions"] = parsed.get("platform_captions")
+            manifest_payload["hashtags"] = parsed.get("hashtags")
+            voiceover_plan_v5 = _build_v5_voiceover_plan(
+                str(parsed.get("voiceover_script") or ""),
+                content_id,
+                float(total),
+            )
+            manifest_payload["voiceover_plan"] = voiceover_plan_v5
+        elif video_v3 or video_v4:
             manifest_payload["schema_version"] = 4 if video_v4 else 3
             if "strategy_metadata" in parsed:
                 manifest_payload["strategy_metadata"] = parsed["strategy_metadata"]
@@ -1765,6 +1933,11 @@ def generate_content(
     cta_text_for_content = parsed.get("cta_text")
     # V3/V4: classify hook_type, script_style, proof_type from the generated script
     v3_classified: dict[str, str] = {}
+    if video_v5:
+        cta_type = str(parsed.get("cta_type") or "soft_cta").strip() or "soft_cta"
+        if cta_type not in CTA_TYPES:
+            cta_type = "soft_cta"
+        cta_text_for_content = parsed.get("cta_text")
     if video_v3 or video_v4:
         cta_type = "soft_cta" if v3_cta_enabled else "see_product"
         cta_text_for_content = parsed.get("cta_text") if v3_cta_enabled else None
@@ -1784,6 +1957,12 @@ def generate_content(
 
     # V4 uses viewer_takeaway; store it in problem_angle column for consistency
     problem_angle = parsed.get("viewer_takeaway") if video_v4 else parsed.get("problem_angle")
+    starting_image_prompt = parsed.get("starting_image_prompt")
+    if video_v5:
+        starting_image_prompt = build_v5_starting_image_prompt(
+            parsed["theme"],
+            parsed["hook_type"],
+        )
 
     content = Content(
         id=content_id,
@@ -1798,7 +1977,7 @@ def generate_content(
         proof_type=proof_type,
         script_style=script_style,
         research_snapshot_id=snapshot.id if snapshot else None,
-        starting_image_prompt=parsed.get("starting_image_prompt"),
+        starting_image_prompt=starting_image_prompt,
         scene_1_desc=parsed.get("scene_1_desc") if fmt != "ai_video_flex_15s" else None,
         scene_2_desc=parsed.get("scene_2_desc") if fmt != "ai_video_flex_15s" else None,
         scene_1_script=parsed.get("scene_1_script") if fmt != "ai_video_flex_15s" else None,
@@ -1986,6 +2165,7 @@ def _parse_response(
     video_v2: bool = False,
     video_v3: bool = False,
     video_v4: bool = False,
+    video_v5: bool = False,
     v3_cta_enabled: bool = True,
     cta_type: str = "see_product",
     proof_type: str = "none",
@@ -2003,10 +2183,17 @@ def _parse_response(
     data = _sanitize_generated_payload(data)
 
     use_image_motion = creative_format == "image_motion_15s"
-    use_ai_video_flex = creative_format == "ai_video_flex_15s" and not video_v2 and not video_v3 and not video_v4
+    use_ai_video_flex = (
+        creative_format == "ai_video_flex_15s"
+        and not video_v2
+        and not video_v3
+        and not video_v4
+        and not video_v5
+    )
     use_ai_video_v2 = video_v2
     use_ai_video_v3 = video_v3
     use_ai_video_v4 = video_v4
+    use_ai_video_v5 = video_v5
 
     if use_ai_video_v3 or use_ai_video_v4:
         required = [
@@ -2018,6 +2205,12 @@ def _parse_response(
             required.append("viewer_takeaway")
         if v3_cta_enabled:
             required.append("cta_text")
+    elif use_ai_video_v5:
+        required = [
+            "theme", "hook_type", "hook_text", "creative_format",
+            "voiceover_script", "scene_descriptions",
+            "platform_captions", "hashtags",
+        ]
     else:
         required = [
             "theme", "hook_type", "hook_text",
@@ -2046,6 +2239,8 @@ def _parse_response(
         _validate_and_normalize_v3_timeline(data)
         if use_ai_video_v4:
             _validate_v4_extras(data)
+    elif use_ai_video_v5:
+        _validate_and_normalize_v5_response(data, theme=theme, hook_type=hook_type)
     else:
         _validate_response_shape(data, theme=theme, hook_type=hook_type, cta_type=cta_type, proof_type=proof_type, script_style=script_style)
         if use_image_motion:
@@ -2356,6 +2551,165 @@ def _validate_v4_extras(data: dict[str, Any]) -> None:
             raise ValueError(
                 f"V4 strategy_metadata.content_mode must be one of {_V4_CONTENT_MODES}, got '{content_mode}'."
             )
+
+
+def _split_voiceover_into_scenes(
+    voiceover_script: str,
+    scene_durations: list[float],
+) -> list[str]:
+    """Split one voiceover into per-scene scripts proportional to scene durations."""
+    words = voiceover_script.split()
+    if not words:
+        return [""] * len(scene_durations)
+    total_d = sum(scene_durations)
+    if total_d <= 0:
+        return [voiceover_script] + [""] * (len(scene_durations) - 1)
+    n = len(words)
+    out: list[str] = []
+    idx = 0
+    num_scenes = len(scene_durations)
+    for i, d in enumerate(scene_durations):
+        if i == num_scenes - 1:
+            out.append(" ".join(words[idx:]))
+            break
+        share = d / total_d
+        take = max(1, int(round(n * share)))
+        remaining_scenes = num_scenes - i - 1
+        if idx + take > n - remaining_scenes:
+            take = max(1, n - idx - remaining_scenes)
+        end = min(idx + take, n)
+        out.append(" ".join(words[idx:end]))
+        idx = end
+    while len(out) < num_scenes:
+        out.append("")
+    return out[:num_scenes]
+
+
+def _build_v5_voiceover_plan(
+    voiceover_script: str,
+    content_id: str,
+    total_duration_seconds: float,
+) -> dict[str, Any]:
+    """Durable stitched voiceover plan for V5 horoscope reels."""
+    vo = _sanitize_generated_text(voiceover_script.strip())
+    word_count = len(vo.split())
+    speech_rate = (
+        word_count / total_duration_seconds
+        if total_duration_seconds > 0
+        else VOICEOVER_TARGET_WORDS_PER_SECOND
+    )
+    delivery_profile = {
+        "tone": "best friend, playful, slightly dramatic, kind",
+        "diction": "clean, crisp, conversational",
+        "pace": "brisk but clear",
+        "pause_style": "light conversational pauses only",
+        "emphasis": "hook and CTA words",
+        "target_duration_seconds": round(total_duration_seconds, 1),
+    }
+    provider_options = {
+        "elevenlabs": {
+            "language_code": "en",
+            "apply_text_normalization": "auto",
+            "voice_settings": {
+                "speed": 1.03,
+                "use_speaker_boost": True,
+            },
+        }
+    }
+    return {
+        "script_template_id": "horoscope_v5_single",
+        "voiceover_script": vo,
+        "voice": _pick_voice(content_id),
+        "voice_instructions": V5_TTS_VOICE_INSTRUCTIONS,
+        "language": "english",
+        "speech_rate_words_per_second": round(speech_rate, 1),
+        "estimated_word_count": word_count,
+        "delivery_profile": delivery_profile,
+        "provider_options": provider_options,
+    }
+
+
+def _validate_and_normalize_v5_response(
+    data: dict[str, Any],
+    theme: str | None,
+    hook_type: str | None,
+) -> None:
+    """Validate V5 horoscope JSON, word count, captions, and build video_plan."""
+    vo = str(data.get("voiceover_script") or "").strip()
+    if not vo:
+        raise ValueError("V5 response field `voiceover_script` must be non-empty.")
+    wc = len(vo.split())
+    if wc < 30 or wc > 38:
+        raise ValueError(
+            f"V5 voiceover_script must be 30-38 words inclusive, got {wc}."
+        )
+
+    scenes_raw = data.get("scene_descriptions")
+    if not isinstance(scenes_raw, list) or len(scenes_raw) != 4:
+        raise ValueError("V5 scene_descriptions must be a list of exactly 4 strings.")
+    scene_descs: list[str] = []
+    for i, s in enumerate(scenes_raw):
+        desc = str(s or "").strip()
+        if not desc:
+            raise ValueError(f"V5 scene_descriptions[{i}] must be non-empty.")
+        scene_descs.append(desc)
+
+    returned_theme = str(data.get("theme", "")).strip()
+    returned_hook = str(data.get("hook_type", "")).strip()
+    if returned_theme not in ZODIAC_SIGNS:
+        raise ValueError(
+            f"V5 theme must be a zodiac sign id, got {returned_theme!r}."
+        )
+    if returned_hook not in V5_NAMES:
+        raise ValueError(
+            f"V5 hook_type must be a presenter name id, got {returned_hook!r}."
+        )
+    if theme and returned_theme != theme:
+        raise ValueError(
+            f"V5 theme {returned_theme!r} did not match locked theme {theme!r}."
+        )
+    if hook_type and returned_hook != hook_type:
+        raise ValueError(
+            f"V5 hook_type {returned_hook!r} did not match locked hook_type {hook_type!r}."
+        )
+
+    fmt = str(data.get("creative_format", "")).strip()
+    if fmt != "ai_video_flex_15s":
+        raise ValueError(f"V5 creative_format must be 'ai_video_flex_15s', got {fmt!r}.")
+
+    if not isinstance(data.get("platform_captions"), dict):
+        raise ValueError("V5 response field `platform_captions` must be an object.")
+    caption_keys = {"youtube", "instagram", "tiktok", "x"}
+    missing_caption_keys = caption_keys.difference(data["platform_captions"])
+    if missing_caption_keys:
+        raise ValueError(
+            "V5 response `platform_captions` missing keys: "
+            f"{sorted(missing_caption_keys)}"
+        )
+    if not isinstance(data.get("hashtags"), list):
+        raise ValueError("V5 response field `hashtags` must be a list.")
+
+    # Four-beat timeline: 15.0s total (hook / roast / roast / cta).
+    scene_durations = [3.5, 4.0, 4.0, 3.5]
+    total_duration = float(sum(scene_durations))
+    segment_scripts = _split_voiceover_into_scenes(vo, scene_durations)
+
+    scenes: list[dict[str, Any]] = []
+    for i in range(4):
+        scenes.append({
+            "duration_seconds": scene_durations[i],
+            "scene_description": scene_descs[i],
+            "script": segment_scripts[i],
+        })
+
+    data["video_plan"] = {
+        "strategy_summary": "Horoscope V5 four-beat arc",
+        "total_duration_seconds": total_duration,
+        "style_family": "anamorphic",
+        "style_rationale": "V5 horoscope reel: hook, roast or validation, CTA",
+        "script_total_words": wc,
+        "scenes": scenes,
+    }
 
 
 def _validate_and_normalize_v3_timeline(data: dict[str, Any]) -> None:

@@ -226,8 +226,16 @@ def _first_non_empty(*values: Any) -> str | None:
     for value in values:
         if isinstance(value, str):
             stripped = value.strip()
-            if stripped:
+            if stripped and not _is_placeholder_value(stripped):
                 return stripped
         elif value:
             return str(value)
     return None
+
+
+def _is_placeholder_value(value: str) -> bool:
+    return (
+        value.startswith("YOUR_")
+        or value == "your-webhook-id"
+        or "your-webhook-id" in value
+    )

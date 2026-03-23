@@ -37,6 +37,14 @@ INITIAL_BACKOFF = 2.0
 TTS_COST_OPENAI_PER_1K_CHARS_USD = 0.015
 TTS_COST_ELEVENLABS_PER_1K_CHARS_USD = 0.18
 
+_ELEVENLABS_VOICE_SETTING_FLOAT_KEYS = (
+    "stability",
+    "similarity_boost",
+    "style",
+    "speed",
+)
+_ELEVENLABS_VOICE_SETTING_BOOL_KEYS = ("use_speaker_boost",)
+
 # Unicode punctuation -> ASCII-safe (aligned with prompt_generator._UNICODE_TEXT_REPLACEMENTS)
 _UNICODE_TTS_REPLACEMENTS = {
     "\u00a0": " ",
@@ -140,6 +148,79 @@ def _get_elevenlabs_tts_config() -> dict[str, Any]:
         "api_key": api_key,
         "model": model,
     }
+
+
+def elevenlabs_v5_voice_settings() -> dict[str, float]:
+    """ElevenLabs ``voice_settings`` for V5 horoscope reels (config-backed).
+
+    Keys: ``elevenlabs.v5_stability`` (default 0.38), ``elevenlabs.v5_similarity_boost``
+    (default 0.82), ``elevenlabs.v5_style`` (default 0.70).
+    """
+    def _f(key: str, default: float) -> float:
+        raw = config.get(key, default)
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return default
+
+    return {
+        "stability": _f("elevenlabs.v5_stability", 0.38),
+        "similarity_boost": _f("elevenlabs.v5_similarity_boost", 0.82),
+        "style": _f("elevenlabs.v5_style", 0.70),
+    }
+
+
+def _sanitize_elevenlabs_request_options(options: dict[str, Any] | None) -> dict[str, Any]:
+    """Keep only ElevenLabs request fields this adapter knows how to send safely."""
+    if not isinstance(options, dict):
+        return {}
+
+    sanitized: dict[str, Any] = {}
+    raw_voice_settings = options.get("voice_settings")
+    if isinstance(raw_voice_settings, dict):
+        voice_settings: dict[str, Any] = {}
+        for key in _ELEVENLABS_VOICE_SETTING_FLOAT_KEYS:
+            raw_value = raw_voice_settings.get(key)
+            if raw_value is None:
+                continue
+            try:
+                voice_settings[key] = float(raw_value)
+            except (TypeError, ValueError):
+                continue
+        for key in _ELEVENLABS_VOICE_SETTING_BOOL_KEYS:
+            raw_value = raw_voice_settings.get(key)
+            if isinstance(raw_value, bool):
+                voice_settings[key] = raw_value
+        if voice_settings:
+            sanitized["voice_settings"] = voice_settings
+
+    for key in ("language_code", "apply_text_normalization", "previous_text", "next_text"):
+        raw_value = options.get(key)
+        if isinstance(raw_value, str) and raw_value.strip():
+            sanitized[key] = raw_value.strip()
+
+    raw_seed = options.get("seed")
+    if isinstance(raw_seed, int) and 0 <= raw_seed <= 4294967295:
+        sanitized["seed"] = raw_seed
+
+    raw_locators = options.get("pronunciation_dictionary_locators")
+    if isinstance(raw_locators, list):
+        locators: list[dict[str, str]] = []
+        for locator in raw_locators:
+            if not isinstance(locator, dict):
+                continue
+            pronunciation_dictionary_id = locator.get("pronunciation_dictionary_id")
+            if not isinstance(pronunciation_dictionary_id, str) or not pronunciation_dictionary_id.strip():
+                continue
+            item = {"pronunciation_dictionary_id": pronunciation_dictionary_id.strip()}
+            version_id = locator.get("version_id")
+            if isinstance(version_id, str) and version_id.strip():
+                item["version_id"] = version_id.strip()
+            locators.append(item)
+        if locators:
+            sanitized["pronunciation_dictionary_locators"] = locators
+
+    return sanitized
 
 
 def _build_tts_instructions(voice_instructions: str, language: str | None) -> str:
@@ -257,17 +338,24 @@ def _generate_elevenlabs_speech(
     *,
     model_id: str,
     api_key: str,
+    voice_settings: dict[str, Any] | None = None,
+    request_options: dict[str, Any] | None = None,
 ) -> None:
     """Call ElevenLabs text-to-speech; write mono 44.1kHz WAV for muxing."""
     output_format = _elevenlabs_output_format()
     q = f"output_format={output_format}"
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?{q}"
-    payload = json.dumps(
-        {
-            "text": text,
-            "model_id": model_id,
-        }
-    ).encode("utf-8")
+    body: dict[str, Any] = {
+        "text": text,
+        "model_id": model_id,
+    }
+    if voice_settings:
+        body["voice_settings"] = voice_settings
+    if request_options:
+        for key, value in request_options.items():
+            if key != "voice_settings":
+                body[key] = value
+    payload = json.dumps(body).encode("utf-8")
     accept = _elevenlabs_accept_header(output_format)
     last_exc: Exception | None = None
     delay = INITIAL_BACKOFF
@@ -402,6 +490,8 @@ def generate_voiceover(
     content_id: str,
     *,
     language: str | None = None,
+    elevenlabs_voice_settings: dict[str, Any] | None = None,
+    elevenlabs_request_options: dict[str, Any] | None = None,
 ) -> Path:
     """Generate TTS audio from script and save to output_path (WAV).
 
@@ -414,6 +504,12 @@ def generate_voiceover(
         output_path: Path to save WAV file.
         content_id: Content id for cost tracking.
         language: Override language (default from config for OpenAI).
+        elevenlabs_voice_settings: Optional ElevenLabs ``voice_settings`` object (e.g. from
+            :func:`elevenlabs_v5_voice_settings` for V5 horoscope reels). Ignored when provider is
+            OpenAI.
+        elevenlabs_request_options: Optional request metadata for ElevenLabs fields such as
+            ``language_code``, ``apply_text_normalization``, pronunciation dictionaries, or extra
+            ``voice_settings`` like ``speed`` and ``use_speaker_boost``.
 
     When ``tts.provider`` is ``elevenlabs``, any failure from the ElevenLabs API falls back to
     OpenAI TTS if ``openai.api_key`` is set (voice from ``tts.fallback_openai_voice``,
@@ -434,6 +530,11 @@ def generate_voiceover(
             )
         el = _get_elevenlabs_tts_config()
         text = _elevenlabs_text_for_request(script)
+        request_options = _sanitize_elevenlabs_request_options(elevenlabs_request_options)
+        merged_voice_settings = dict(elevenlabs_voice_settings or {})
+        extra_voice_settings = request_options.pop("voice_settings", None)
+        if isinstance(extra_voice_settings, dict):
+            merged_voice_settings.update(extra_voice_settings)
         try:
             _generate_elevenlabs_speech(
                 text,
@@ -441,6 +542,8 @@ def generate_voiceover(
                 output_path,
                 model_id=el["model"],
                 api_key=el["api_key"],
+                voice_settings=merged_voice_settings or None,
+                request_options=request_options or None,
             )
         except Exception as exc:
             if not _openai_api_key_configured():

@@ -12,6 +12,8 @@ import pytest
 
 from src import db
 from src.models import Content, Product
+from urllib.request import Request
+
 from src.voiceover_generator import generate_voiceover
 
 
@@ -276,7 +278,7 @@ def test_elevenlabs_request_text_is_script_only_not_tone_instructions(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    """ElevenLabs speaks the full `text` field; do not prepend voice_instructions."""
+    """ElevenLabs should keep spoken text clean while sending supported request metadata separately."""
     product = Product(sku="serum-x", name="Serum X")
     content = Content(
         id="test-tts-el-body-001",
@@ -329,12 +331,34 @@ def test_elevenlabs_request_text_is_script_only_not_tone_instructions(
         voice_instructions="Speak in a calm, premium, reassuring tone for a premium consumer brand.",
         output_path=output_path,
         content_id=content.id,
+        elevenlabs_voice_settings={
+            "stability": 0.38,
+            "similarity_boost": 0.82,
+            "style": 0.70,
+        },
+        elevenlabs_request_options={
+            "language_code": "en",
+            "apply_text_normalization": "auto",
+            "voice_settings": {
+                "speed": 1.03,
+                "use_speaker_boost": True,
+            },
+        },
     )
 
     payload = json.loads(captured["body"])
     assert payload["text"] == "Only this line should be spoken."
     assert "calm" not in payload["text"].lower()
     assert "premium" not in payload["text"].lower()
+    assert payload["language_code"] == "en"
+    assert payload["apply_text_normalization"] == "auto"
+    assert payload["voice_settings"] == {
+        "stability": 0.38,
+        "similarity_boost": 0.82,
+        "style": 0.7,
+        "speed": 1.03,
+        "use_speaker_boost": True,
+    }
 
 
 def test_elevenlabs_failure_falls_back_to_openai(
@@ -515,3 +539,66 @@ def test_generate_voiceover_normalizes_unicode_punctuation_before_tts(
     )
 
     assert captured.get("input") == "Want fresher skin-try me today."
+
+
+def test_generate_voiceover_passes_v5_elevenlabs_voice_settings_in_json_body(
+    tmp_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When elevenlabs_voice_settings is set, ElevenLabs request JSON includes voice_settings."""
+    product = Product(sku="serum-x", name="Serum X")
+    content = Content(
+        id="test-tts-v5",
+        product_sku=product.sku,
+        theme="aries",
+        hook_type="jessica",
+    )
+    db.upsert_product(product)
+    db.insert_content(content)
+
+    captured_body: list[dict] = []
+
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self):
+            return b"\x00\x00" * 8000
+
+    def capture_urlopen(req, timeout=120):
+        assert isinstance(req, Request)
+        captured_body.append(json.loads(req.data.decode("utf-8")))
+        return FakeResp()
+
+    monkeypatch.setattr(
+        "src.config._config",
+        {
+            "tts": {"provider": "elevenlabs"},
+            "elevenlabs": {
+                "api_key": "xi-test",
+                "model": "eleven_multilingual_v2",
+                "output_format": "pcm_44100",
+            },
+        },
+    )
+    monkeypatch.setattr("src.config.load_dotenv", lambda: None)
+    monkeypatch.setattr("src.voiceover_generator.urlopen", capture_urlopen)
+
+    v5_settings = {"stability": 0.41, "similarity_boost": 0.82, "style": 0.66}
+    output_path = tmp_path / "out.wav"
+    generate_voiceover(
+        script="Hello world.",
+        voice="voice-id-from-plan",
+        voice_instructions="Warm tone.",
+        output_path=output_path,
+        content_id=content.id,
+        elevenlabs_voice_settings=v5_settings,
+    )
+
+    assert len(captured_body) == 1
+    assert captured_body[0]["voice_settings"] == v5_settings
+    assert captured_body[0]["text"] == "Hello world."

@@ -129,6 +129,38 @@ HOOK_TYPE_MAP = {hook.id: hook for hook in HOOK_DEFINITIONS}
 
 PLATFORMS = ["youtube", "instagram", "tiktok", "x"]
 
+ZODIAC_SIGNS = [
+    "aries",
+    "taurus",
+    "gemini",
+    "cancer",
+    "leo",
+    "virgo",
+    "libra",
+    "scorpio",
+    "sagittarius",
+    "capricorn",
+    "aquarius",
+    "pisces",
+]
+
+V5_NAMES = [
+    "jessica",
+    "ashley",
+    "emily",
+    "sarah",
+    "hannah",
+    "taylor",
+    "madison",
+    "rachel",
+    "emma",
+    "olivia",
+    "chloe",
+    "samantha",
+]
+
+V5_VIBES = ["playful_roast", "lucky_era"]
+
 GENERATION_STEPS = [
     "prompt_gen",
     "voiceover_plan_gen",
