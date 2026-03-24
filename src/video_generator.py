@@ -186,7 +186,9 @@ def _build_flex_video_prompt(content: Content, product: Product) -> str:
     """Build prompt from persisted video_plan in asset_manifest_json."""
     manifest = json.loads(content.asset_manifest_json or "{}")
     plan = manifest.get("video_plan", {})
-    is_v3_manifest = manifest.get("schema_version") == 3
+    schema_version = manifest.get("schema_version")
+    # V3/V4: TTS voiceover is muxed in post; do not pass per-scene lines to the video model.
+    voiceover_stitched_separately = schema_version in (3, 4)
     if not plan:
         raise ValueError(
             "ai_video_flex_15s content missing video_plan in asset_manifest_json. "
@@ -210,12 +212,16 @@ def _build_flex_video_prompt(content: Content, product: Product) -> str:
         script = scene.get("script", "")
         if desc:
             parts.append(f"Scene {i + 1} visual direction: {desc}")
-        if script and not is_v3_manifest:
+        if script and not voiceover_stitched_separately:
             parts.append(f"Scene {i + 1} voiceover: {script}")
-    if is_v3_manifest:
+    if voiceover_stitched_separately:
         parts.append(
             "Do not animate mouth movements or attempt lip sync; keep expression and motion readable "
             "without spoken-mouth performance because narration will be stitched separately."
+        )
+        parts.append(
+            "The video clip must not show on-screen captions, subtitles, lower-thirds, or readable text "
+            "overlays; narration is off-screen voiceover only. Do not depict diegetic speech audio from the scene."
         )
     parts.append("Keep the product appearance, colors, and branding consistent with the provided image.")
     parts.append(ANATOMY_GUARDRAIL)

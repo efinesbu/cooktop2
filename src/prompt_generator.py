@@ -63,6 +63,7 @@ STRICT RULES AND CONSTRAINTS
 - The only scene change allowed is a single hard cut between Scene 1 and Scene 2.
 - Use simple vocabulary.
 - Keep movements subtle and easy for an AI video generator to render.
+- No lip syncing and no lip movement.
 
 RESPOND WITH ONLY valid JSON matching this exact schema — no markdown fences, no commentary:
 
@@ -1240,6 +1241,164 @@ RULES:
 - `content_mode` must be one of: educational, entertaining, satisfying.
 """
 
+# V3/V4 two-phase: phase 1 generates voiceover scripts + copy metadata only (no scene visuals).
+_AI_VIDEO_V3_SCRIPT_PHASE_SYSTEM_PROMPT = """\
+You are an expert creative director and voiceover scriptwriter for premium short-form product video.
+
+TARGET PRODUCT: provided in the user message.
+
+PRODUCT TRUTH: Base all product claims ONLY on the product description in the user message. Do not invent features or benefits.
+
+PHASE 1 OF 2 — SCRIPTS ONLY
+- Generate narrator voiceover lines and timing ONLY. Do NOT write scene_description or starting_image_prompt (phase 2 will create visuals using your locked scripts as context).
+- Output MUST use a timeline with 6-8 scenes. Each scene lasts 1.5-2.5 seconds. Total duration MUST be between 13 and 15 seconds.
+- NARRATION: third-person narrator, off-screen voiceover only. The video itself has no spoken dialogue from on-screen subjects and no diegetic speech.
+- PACING: TTS at ~2.3 words per second. Per-scene word budget: floor(scene_seconds * 2.5). Total words across all scenes must not exceed floor(total_seconds * 2.5).
+- Every timeline entry MUST include: start_seconds, end_seconds, script (non-empty), tone.
+- Return hook_text, platform_captions, hashtags, background_music, strategy_metadata, problem_angle (optional), cta_text when soft CTA is allowed in the user message.
+
+FTC: No medical claims. Plain ASCII only. No emoji.
+
+RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
+
+{
+  "theme": "string -- must match locked theme in user message",
+  "hook_text": "string",
+  "creative_format": "ai_video_flex_15s",
+  "cta_text": "string -- soft CTA phrase when allowed; omit or empty if user message disables CTA",
+  "problem_angle": "string or null",
+  "background_music": {
+    "description": "string",
+    "energy_level": "low | medium | high"
+  },
+  "platform_captions": { "youtube": "string", "instagram": "string", "tiktok": "string", "x": "string" },
+  "hashtags": ["list", "without", "#"],
+  "strategy_metadata": {
+    "style_family": "anamorphic",
+    "style_angle": "string",
+    "content_goal": "engagement",
+    "environment": "string",
+    "expression_arc": "string"
+  },
+  "timeline": [
+    {
+      "start_seconds": 0,
+      "end_seconds": 2.0,
+      "script": "string -- narrator line for this scene only",
+      "tone": "string"
+    }
+  ]
+}
+"""
+
+_AI_VIDEO_V4_SCRIPT_PHASE_SYSTEM_PROMPT = """\
+You are an expert short-form content voiceover scriptwriter. Videos are educational, entertaining, or satisfying — not hard-sell ads.
+
+TARGET PRODUCT: provided in the user message (context only; scripts should not read like a pitch).
+
+PRODUCT TRUTH: Base claims ONLY on the product description. No invented benefits.
+
+PHASE 1 OF 2 — SCRIPTS ONLY
+- Generate narrator voiceover lines and timing ONLY. Do NOT write scene_description or starting_image_prompt.
+- Pick content_mode (educational | entertaining | satisfying) from the theme; set it in strategy_metadata.
+- Include viewer_takeaway: standalone value for the viewer without buying the product.
+- Timeline: 6-8 scenes, 1.5-2.5s each, 13-15s total. Third-person narrator, off-screen only. No on-screen dialogue.
+- Word budgets: same TTS rules as VIDEO V3 script phase (floor(scene_seconds * 2.5) per scene; total cap floor(total_seconds * 2.5)).
+- Respect "Soft CTA allowed" vs "No CTA" from the user message for the final scene script.
+- Every timeline entry: start_seconds, end_seconds, script, tone.
+
+FTC: No medical claims. Plain ASCII only.
+
+RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
+
+{
+  "theme": "string -- must match locked theme",
+  "hook_text": "string",
+  "creative_format": "ai_video_flex_15s",
+  "cta_text": "string -- empty if No CTA",
+  "viewer_takeaway": "string",
+  "background_music": { "description": "string", "energy_level": "low | medium | high" },
+  "platform_captions": { "youtube": "string", "instagram": "string", "tiktok": "string", "x": "string" },
+  "hashtags": ["list"],
+  "strategy_metadata": {
+    "style_family": "anamorphic",
+    "style_angle": "string",
+    "content_goal": "engagement",
+    "content_mode": "educational | entertaining | satisfying",
+    "environment": "string",
+    "expression_arc": "string"
+  },
+  "timeline": [
+    { "start_seconds": 0, "end_seconds": 2.0, "script": "string", "tone": "string" }
+  ]
+}
+"""
+
+_AI_VIDEO_V3_VISUALS_PHASE_SYSTEM_PROMPT = """\
+You are an expert AI video prompt engineer for premium product short-form video.
+
+PHASE 2 OF 2 — VISUALS ONLY
+The user message contains a LOCKED SCRIPT PLAN (JSON). Treat every script line, timestamp, tone, and scene count as FROZEN. Do not change, rephrase, or reorder scripts.
+
+Your job:
+1) Write starting_image_prompt: first-frame image generation spec consistent with the locked plan.
+2) Write scene_description for each timeline scene IN THE SAME ORDER as the locked plan. Each line must visually support the locked narrator line for that index.
+
+VOICEOVER / AUDIO RULES (mandatory)
+- Narration is off-screen TTS only, stitched in post. The rendered video clip must NOT depict lip sync, talking-mouth performance, or characters speaking dialogue.
+- Do NOT describe diegetic speech, crowd chatter, or any audio that implies sound from the video clip itself. No on-screen captions, subtitles, lower-thirds, title cards, or readable text overlays. Packaging labels from reference images may appear as product texture only — do not invent new readable marketing copy in-frame.
+
+VISUAL STYLE: ANAMORPHIC
+- Anthropomorphic product is the ONLY character in every scene (V3). Pixar-style face, expressive eyes; scene variety from camera, expression, lighting, environment.
+- Scenes after the first MUST start scene_description with "HARD CUT:".
+- Each scene_description must include at least one concrete visual detail that reinforces the locked narrator line for that scene.
+
+RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
+
+{
+  "starting_image_prompt": "string",
+  "timeline": [
+    { "scene_description": "string" }
+  ]
+}
+
+RULES:
+- timeline length must exactly match the number of scenes in the locked plan.
+- Plain ASCII only. No emoji.
+"""
+
+_AI_VIDEO_V4_VISUALS_PHASE_SYSTEM_PROMPT = """\
+You are an expert AI video prompt engineer for engagement-first short-form content.
+
+PHASE 2 OF 2 — VISUALS ONLY
+The user message contains a LOCKED SCRIPT PLAN (JSON). Scripts, timestamps, tones, viewer_takeaway, and content_mode are FROZEN. Do not change scripts.
+
+Your job:
+1) starting_image_prompt for the first frame.
+2) scene_description per scene in order, aligned to each locked narrator line.
+
+VOICEOVER / AUDIO RULES (mandatory)
+- Off-screen TTS only; no lip sync or talking-mouth animation. No diegetic speech audio from the clip. No on-screen captions, subtitles, lower-thirds, title cards, or readable text overlays.
+
+VISUAL STYLE: ANAMORPHIC
+- The anthropomorphic product may appear in 3-5 of 6-8 scenes; other scenes may show environment, detail, or metaphor.
+- Scenes after the first MUST start with "HARD CUT:".
+- Each scene_description must reinforce the locked narrator line or narrative beat for that index.
+
+RESPOND WITH ONLY valid JSON — no markdown fences, no commentary:
+
+{
+  "starting_image_prompt": "string",
+  "timeline": [
+    { "scene_description": "string" }
+  ]
+}
+
+RULES:
+- timeline length must exactly match the locked plan scene count.
+- Plain ASCII only. No emoji.
+"""
+
 _AI_VIDEO_V5_SYSTEM_PROMPT = """\
 You are an expert astrology short-form scriptwriter for social reels (Horoscope V5).
 
@@ -1261,6 +1420,7 @@ VISUALS
 - Provide exactly four scene descriptions for on-screen visuals (9:16). Each maps to a segment of the arc:
   Scene 1: hook beat; Scene 2-3: roast/validation beats; Scene 4: CTA beat.
 - Scenes are astrology/horoscope entertainment, not a product showcase. Do not write scenes as product demos or ingredient lists.
+- Voice is off-screen narration only: every scene_description must explicitly avoid lip sync, talking, speaking, mouthing words, or any mouth/jaw movement meant to match dialogue. Describe the character with a neutral closed mouth or a relaxed non-speaking mouth; convey emotion with eyes, brows, posture, and gestures instead.
 
 HOROSCOPE CHARACTER — FIRST-FRAME GROUNDING (scene_descriptions)
 These rules mirror the density and continuity of V2 anamorphic scene lines, but the hero is always the zodiac chibi creature from the first frame, not a product.
@@ -1268,8 +1428,9 @@ These rules mirror the density and continuity of V2 anamorphic scene lines, but 
 - FIRST-FRAME ANCHOR: The user message includes a STARTING-FIRST-FRAME block with the exact image-generation spec for the opening frame. Treat that block as canonical: same character design, pose baseline, proportions, expression baseline, lighting, background, composition, and 9:16 vertical framing unless the scene line explicitly describes a deliberate, plausible change (e.g. tighter crop, slight head turn).
 - MAIN CHARACTER: In every scene, the sole on-screen subject is the cute chibi-style zodiac horoscope creature for the locked sign — big expressive eyes, nameplate necklace with the locked presenter name in metallic gold lettering, same art style and palette as the first frame. Do not introduce humans, second characters, unrelated mascots, or product packshots as heroes.
 - STABLE IDENTITY & VISUAL CONTINUITY: Keep species, zodiac identity, chibi proportions, necklace legibility, and overall look consistent across all four scenes. Scene-to-scene evolution must read as the same character in the same world — not a redesign or a different creature.
-- ACTION & CAMERA EVOLUTION: Scenes may change energy to match the arc (hook → roast/validation → CTA): facial expression, eye direction, gestures, posture, subtle camera move or reframe, and background emphasis — but only in ways that stay believable for that character. Optional: start scenes 2–4 with "HARD CUT:" when the beat needs a clear visual reset while preserving identity (same pattern as V2 anamorphic HARD CUT lines).
-- RICH SHOT LANGUAGE: Each scene line must be a concrete directing line — camera relationship (e.g. medium chibi close-up, slight low angle), subject action, expression beat, hands/gesture if visible, background and lighting cues — so downstream video generation stays as grounded as V2 anamorphic descriptions.
+- NO LIPSYNC / NO SPEAKING ON CAMERA: Do not request or imply lip sync, dialogue-matched mouth movement, talking, or pronounced lip/jaw animation. The voiceover is not performed on-screen by the character.
+- ACTION & CAMERA EVOLUTION: Scenes may change energy to match the arc (hook → roast/validation → CTA): facial expression (eyes, brows — not mouth articulation), eye direction, gestures, posture, subtle camera move or reframe, and background emphasis — but only in ways that stay believable for that character. Optional: start scenes 2–4 with "HARD CUT:" when the beat needs a clear visual reset while preserving identity (same pattern as V2 anamorphic HARD CUT lines).
+- RICH SHOT LANGUAGE: Each scene line must be a concrete directing line — camera relationship (e.g. medium chibi close-up, slight low angle), subject action, expression beat, hands/gesture if visible, background and lighting cues — so downstream video generation stays as grounded as V2 anamorphic descriptions. If the mouth is visible, state clearly that it stays still, closed, or relaxed (not forming words).
 
 PLATFORM COPY
 - platform_captions: platform-ready copy (may use light emoji only in captions if needed, not in voiceover).
@@ -1294,10 +1455,10 @@ RESPOND WITH ONLY valid JSON -- no markdown fences, no commentary:
   "script_style": "conversational",
   "voiceover_script": "string -- single continuous voiceover, 30-38 words, ASCII only",
   "scene_descriptions": [
-    "string -- scene 1 visual direction",
-    "string -- scene 2 visual direction",
-    "string -- scene 3 visual direction",
-    "string -- scene 4 visual direction"
+    "string -- scene 1 visual direction; no lip sync, no speaking mouth movement",
+    "string -- scene 2 visual direction; no lip sync, no speaking mouth movement",
+    "string -- scene 3 visual direction; no lip sync, no speaking mouth movement",
+    "string -- scene 4 visual direction; no lip sync, no speaking mouth movement"
   ],
   "platform_captions": {
     "youtube": "string -- max 100 chars, end with 'Link in bio'",
@@ -1311,6 +1472,7 @@ RESPOND WITH ONLY valid JSON -- no markdown fences, no commentary:
 RULES:
 - voiceover_script must be 30-38 words inclusive.
 - scene_descriptions must contain exactly 4 non-empty strings.
+- Each scene_description must forbid on-camera speech visuals: no lip sync, no lip or jaw movement to match the voiceover, no "talking" or "mouthing" direction.
 - No medical claims. Keep language entertainment-forward and safe.
 """
 
@@ -1603,7 +1765,8 @@ def _build_user_message(
             "Map scenes to the arc: Scene 1 = Hook (0-3s), Scenes 2-3 = Roast or validation (3-11s), "
             "Scene 4 = CTA (11-14s). Total video length 14-15 seconds. "
             "Do not lead with product features; keep best-friend, slightly dramatic astrology energy. "
-            "No hashtags or emojis inside voiceover_script."
+            "No hashtags or emojis inside voiceover_script. "
+            "In every scene_description: no lip sync, no moving lips or mouth to match speech — narration is voiceover only."
         )
     return "\n".join(lines)
 
@@ -1734,34 +1897,94 @@ def generate_content(
 
     generation_msg = user_msg
     response = None
+    v3_v4_script_response: Any | None = None
+    v3_v4_visuals_response: Any | None = None
+    script_system_prompt = ""
+    visuals_system_prompt = ""
+    visuals_user_msg = ""
     prompt_output_raw = ""
     parsed: dict[str, Any] | None = None
     max_structured_attempts = 3
     for structured_attempt in range(1, max_structured_attempts + 1):
-        response = _call_with_retries(
-            client,
-            openai_module,
-            model,
-            generation_msg,
-            max_attempts=3,
-            system_prompt=system_prompt,
-            max_output_tokens=max_tokens,
-        )
-
-        prompt_output_raw = _response_text(response)
         try:
-            parsed = _parse_response(
-                response,
-                theme=theme,
-                hook_type=hook_type,
-                creative_format=fmt,
-                video_v2=video_v2,
-                video_v3=video_v3,
-                video_v4=video_v4,
-                video_v5=video_v5,
-                v3_cta_enabled=v3_cta_enabled,
-                cta_type=cta_type, proof_type=proof_type, script_style=script_style,
-            )
+            if use_ai_video_v3 or use_ai_video_v4:
+                script_system_prompt = _system_prompt_for_branding(
+                    _AI_VIDEO_V4_SCRIPT_PHASE_SYSTEM_PROMPT
+                    if use_ai_video_v4
+                    else _AI_VIDEO_V3_SCRIPT_PHASE_SYSTEM_PROMPT,
+                    velura_branding,
+                )
+                visuals_system_prompt = _system_prompt_for_branding(
+                    _AI_VIDEO_V4_VISUALS_PHASE_SYSTEM_PROMPT
+                    if use_ai_video_v4
+                    else _AI_VIDEO_V3_VISUALS_PHASE_SYSTEM_PROMPT,
+                    velura_branding,
+                )
+                script_resp = _call_with_retries(
+                    client,
+                    openai_module,
+                    model,
+                    generation_msg,
+                    max_attempts=3,
+                    system_prompt=script_system_prompt,
+                    max_output_tokens=max_tokens,
+                )
+                script_text = _response_text(script_resp)
+                script_data = _json_object_from_model_text(script_text)
+                _validate_v3_script_phase_response(
+                    script_data,
+                    theme=theme,
+                    v3_cta_enabled=v3_cta_enabled,
+                    video_v4=use_ai_video_v4,
+                )
+                visuals_user_msg = _build_v3_v4_visuals_user_message(user_msg, script_data)
+                visuals_resp = _call_with_retries(
+                    client,
+                    openai_module,
+                    model,
+                    visuals_user_msg,
+                    max_attempts=3,
+                    system_prompt=visuals_system_prompt,
+                    max_output_tokens=max_tokens,
+                )
+                visuals_text = _response_text(visuals_resp)
+                visuals_data = _json_object_from_model_text(visuals_text)
+                _validate_v3_visuals_phase_response(script_data, visuals_data)
+                merged = _merge_v3_v4_script_and_visual_phases(script_data, visuals_data)
+                _validate_v3_response_shape(merged, theme=theme, v3_cta_enabled=v3_cta_enabled)
+                _validate_and_normalize_v3_timeline(merged)
+                if use_ai_video_v4:
+                    _validate_v4_extras(merged)
+                parsed = merged
+                prompt_output_raw = (
+                    f"[SCRIPT_PHASE]\n{script_text}\n\n[VISUALS_PHASE]\n{visuals_text}"
+                )
+                response = script_resp
+                v3_v4_script_response = script_resp
+                v3_v4_visuals_response = visuals_resp
+            else:
+                response = _call_with_retries(
+                    client,
+                    openai_module,
+                    model,
+                    generation_msg,
+                    max_attempts=3,
+                    system_prompt=system_prompt,
+                    max_output_tokens=max_tokens,
+                )
+                prompt_output_raw = _response_text(response)
+                parsed = _parse_response(
+                    response,
+                    theme=theme,
+                    hook_type=hook_type,
+                    creative_format=fmt,
+                    video_v2=video_v2,
+                    video_v3=video_v3,
+                    video_v4=video_v4,
+                    video_v5=video_v5,
+                    v3_cta_enabled=v3_cta_enabled,
+                    cta_type=cta_type, proof_type=proof_type, script_style=script_style,
+                )
             break
         except ValueError as exc:
             if structured_attempt == max_structured_attempts:
@@ -1774,7 +1997,7 @@ def generate_content(
             )
             generation_msg = (
                 f"{user_msg}\n\n"
-                "The previous response was invalid. Regenerate the entire response from scratch and fix this exact issue:\n"
+                "The previous response was invalid. Regenerate the entire flow from scratch and fix this exact issue:\n"
                 f"{exc}\n\n"
                 "Return only valid JSON that satisfies every constraint."
             )
@@ -2028,7 +2251,13 @@ def generate_content(
         )
         payload.id = db.upsert_platform_payload(payload)
 
-    input_tokens, output_tokens = _usage_token_counts(response)
+    if v3_v4_script_response is not None and v3_v4_visuals_response is not None:
+        input_tokens, output_tokens = _sum_usage_token_counts(
+            _usage_token_counts(v3_v4_script_response),
+            _usage_token_counts(v3_v4_visuals_response),
+        )
+    else:
+        input_tokens, output_tokens = _usage_token_counts(response)
     input_per_m = float(config.get("openai.input_per_million_usd", 2.50))
     output_per_m = float(config.get("openai.output_per_million_usd", 15.0))
     cost_usd = (input_tokens / 1_000_000 * input_per_m) + (output_tokens / 1_000_000 * output_per_m)
@@ -2053,10 +2282,17 @@ def generate_content(
             cost_usd=classify_cost,
         ))
 
+    if video_v3 or video_v4:
+        dual_prompt_input = (
+            f"[SCRIPT_PHASE SYSTEM]\n{script_system_prompt}\n\n[SCRIPT_PHASE USER]\n{user_msg}\n\n"
+            f"[VISUALS_PHASE SYSTEM]\n{visuals_system_prompt}\n\n[VISUALS_PHASE USER]\n{visuals_user_msg}"
+        )
+    else:
+        dual_prompt_input = f"[SYSTEM]\n{system_prompt}\n\n[USER]\n{user_msg}"
     extras = {
         "platform_captions": platform_captions,
         "hashtags": hashtags,
-        "prompt_input": f"[SYSTEM]\n{system_prompt}\n\n[USER]\n{user_msg}",
+        "prompt_input": dual_prompt_input,
         "prompt_output": prompt_output_raw,
     }
     if voice_prompt_input and voice_prompt_output:
@@ -2157,6 +2393,22 @@ def _call_with_retries(
             delay *= 2
 
 
+def _json_object_from_model_text(raw: str) -> dict[str, Any]:
+    """Parse JSON from model output (strip optional markdown fences)."""
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1]
+        if text.endswith("```"):
+            text = text[: text.rfind("```")]
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"OpenAI returned invalid JSON: {exc}\n\nRaw response:\n{raw}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("OpenAI JSON must be an object at the top level.")
+    return _sanitize_generated_payload(data)
+
+
 def _parse_response(
     response: Any,
     theme: str | None = None,
@@ -2172,15 +2424,7 @@ def _parse_response(
     script_style: str = "conversational",
 ) -> dict:
     raw = _response_text(response)
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1]
-        if raw.endswith("```"):
-            raw = raw[: raw.rfind("```")]
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"OpenAI returned invalid JSON: {exc}\n\nRaw response:\n{raw}") from exc
-    data = _sanitize_generated_payload(data)
+    data = _json_object_from_model_text(raw)
 
     use_image_motion = creative_format == "image_motion_15s"
     use_ai_video_flex = (
@@ -2551,6 +2795,163 @@ def _validate_v4_extras(data: dict[str, Any]) -> None:
             raise ValueError(
                 f"V4 strategy_metadata.content_mode must be one of {_V4_CONTENT_MODES}, got '{content_mode}'."
             )
+
+
+def _validate_v4_script_phase_extras(data: dict[str, Any]) -> None:
+    """Validate V4-only fields present in script phase (before visuals merge)."""
+    viewer_takeaway = str(data.get("viewer_takeaway", "")).strip()
+    if not viewer_takeaway:
+        raise ValueError("V4 script phase field `viewer_takeaway` must be a non-empty string.")
+    strategy = data.get("strategy_metadata")
+    if not isinstance(strategy, dict):
+        raise ValueError("V4 script phase must include strategy_metadata as an object.")
+    content_mode = str(strategy.get("content_mode", "")).strip()
+    if content_mode not in _V4_CONTENT_MODES:
+        raise ValueError(
+            f"V4 script phase strategy_metadata.content_mode must be one of {_V4_CONTENT_MODES}, "
+            f"got '{content_mode}'."
+        )
+
+
+def _validate_v3_script_phase_timeline(data: dict[str, Any]) -> None:
+    """Validate V3/V4 script-only timeline: timing, scripts, word budgets (no scene_description)."""
+    timeline = data.get("timeline", [])
+    if not isinstance(timeline, list) or len(timeline) < 6 or len(timeline) > 8:
+        raise ValueError(
+            f"Script phase timeline must have 6-8 scenes, got {len(timeline) if isinstance(timeline, list) else 'non-list'}"
+        )
+    prev_end = 0.0
+    total_duration = 0.0
+    for i, scene in enumerate(timeline):
+        if not isinstance(scene, dict):
+            raise ValueError(f"Script phase timeline[{i}] must be an object")
+        start = scene.get("start_seconds")
+        end = scene.get("end_seconds")
+        if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+            raise ValueError(f"Script phase timeline[{i}] start_seconds and end_seconds must be numbers")
+        start_f, end_f = float(start), float(end)
+        if abs(start_f - prev_end) > 0.05:
+            raise ValueError(
+                f"Script phase timeline[{i}] start_seconds={start_f} must equal previous end_seconds={prev_end}"
+            )
+        duration = end_f - start_f
+        if duration < 1.4 or duration > 2.6:
+            raise ValueError(
+                f"Script phase timeline[{i}] duration {duration:.1f}s outside allowed range 1.5-2.5s"
+            )
+        script = scene.get("script")
+        if not isinstance(script, str) or not script.strip():
+            raise ValueError(f"Script phase timeline[{i}] must have a non-empty script")
+        scene["script"] = script.strip()
+        scene_word_count = len(scene["script"].split())
+        scene_word_max = int(duration * TTS_WORDS_PER_SECOND_MAX)
+        if scene_word_count > scene_word_max:
+            raise ValueError(
+                f"Script phase timeline[{i}] script has {scene_word_count} words but the {duration:.1f}s scene "
+                f"allows at most {scene_word_max} at TTS pace."
+            )
+        tone = (scene.get("tone") or "").strip()
+        if not tone:
+            raise ValueError(f"Script phase timeline[{i}] must include a non-empty tone")
+        scene["tone"] = tone
+        if "scene_description" in scene:
+            scene.pop("scene_description", None)
+        prev_end = end_f
+        total_duration += duration
+
+    if total_duration < 12.9 or total_duration > 15.1:
+        raise ValueError(
+            f"Script phase total duration {total_duration:.1f}s outside allowed range 13-15s"
+        )
+    total_words = sum(len(str(s.get("script", "")).split()) for s in timeline if isinstance(s, dict))
+    total_word_max = int(total_duration * TTS_WORDS_PER_SECOND_MAX)
+    if total_words > total_word_max:
+        raise ValueError(
+            f"Script phase total word count is {total_words} but {total_duration:.1f}s allows at most {total_word_max}."
+        )
+
+
+def _validate_v3_script_phase_response(
+    data: dict[str, Any],
+    theme: str | None,
+    v3_cta_enabled: bool,
+    video_v4: bool,
+) -> None:
+    """Validate V3/V4 phase-1 JSON before visuals generation."""
+    _validate_v3_response_shape(data, theme=theme, v3_cta_enabled=v3_cta_enabled)
+    if video_v4:
+        _validate_v4_script_phase_extras(data)
+    _validate_v3_script_phase_timeline(data)
+
+
+def _validate_v3_visuals_phase_response(
+    script_data: dict[str, Any],
+    visual_data: dict[str, Any],
+) -> None:
+    """Validate phase-2 visuals JSON and alignment with locked script plan."""
+    sip = str(visual_data.get("starting_image_prompt", "") or "").strip()
+    if not sip:
+        raise ValueError("Visuals phase must include non-empty starting_image_prompt")
+    visual_data["starting_image_prompt"] = sip
+
+    v_timeline = visual_data.get("timeline")
+    s_timeline = script_data.get("timeline")
+    if not isinstance(v_timeline, list) or not isinstance(s_timeline, list):
+        raise ValueError("Visuals phase timeline must be a list aligned with script phase")
+    if len(v_timeline) != len(s_timeline):
+        raise ValueError(
+            f"Visuals phase timeline length {len(v_timeline)} must match script phase {len(s_timeline)}"
+        )
+    for i, row in enumerate(v_timeline):
+        if not isinstance(row, dict):
+            raise ValueError(f"Visuals phase timeline[{i}] must be an object")
+        desc = str(row.get("scene_description", "") or "").strip()
+        if not desc:
+            raise ValueError(f"Visuals phase timeline[{i}].scene_description is required")
+        if i >= 1 and not desc.upper().startswith("HARD CUT"):
+            raise ValueError(
+                f"Visuals phase timeline[{i}].scene_description must start with 'HARD CUT:' for scenes 2+"
+            )
+
+
+def _merge_v3_v4_script_and_visual_phases(
+    script_data: dict[str, Any],
+    visual_data: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge locked script phase with visuals phase into a full V3/V4 creative dict."""
+    merged = json.loads(json.dumps(script_data))
+    merged["starting_image_prompt"] = str(visual_data["starting_image_prompt"]).strip()
+    vt = visual_data["timeline"]
+    st = merged["timeline"]
+    new_timeline: list[dict[str, Any]] = []
+    for i, srow in enumerate(st):
+        if not isinstance(srow, dict):
+            raise ValueError(f"script timeline[{i}] must be an object")
+        if i >= len(vt) or not isinstance(vt[i], dict):
+            raise ValueError("visuals timeline index out of range or invalid")
+        desc = str(vt[i].get("scene_description", "") or "").strip()
+        row = dict(srow)
+        row["scene_description"] = desc
+        new_timeline.append(row)
+    merged["timeline"] = new_timeline
+    return merged
+
+
+def _build_v3_v4_visuals_user_message(base_user_msg: str, script_plan: dict[str, Any]) -> str:
+    """User message for phase 2: original brief plus frozen script plan JSON."""
+    try:
+        locked = json.dumps(script_plan, indent=2)
+    except (TypeError, ValueError):
+        locked = str(script_plan)
+    return (
+        f"{base_user_msg}\n\n"
+        "LOCKED SCRIPT PLAN (authoritative — do not modify any script, timestamp, or tone):\n"
+        f"{locked}"
+    )
+
+
+def _sum_usage_token_counts(a: tuple[int, int], b: tuple[int, int]) -> tuple[int, int]:
+    return (a[0] + b[0], a[1] + b[1])
 
 
 def _split_voiceover_into_scenes(

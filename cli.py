@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 import click
 from rich.console import Console
+from rich.markup import escape as rich_escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -1520,6 +1521,34 @@ def _media_type_from_format(creative_format: str | None) -> str:
     return "—"
 
 
+def _preview_print_caption_details(items: list[Content]) -> None:
+    """After the preview table, print per-platform caption and hashtags for each row."""
+    plat_order = {p: i for i, p in enumerate(PLATFORMS)}
+
+    def _sort_key(p: PlatformPayload) -> tuple[int, str]:
+        return (plat_order.get(p.platform, 999), p.platform)
+
+    for row, c in enumerate(items, start=1):
+        payloads = sorted(db.list_platform_payloads(c.id), key=_sort_key)
+        header = f"Row {row} · {c.id[:12]} · {c.product_sku}"
+        console.print()
+        console.print(f"[bold]{header}[/bold]")
+        if not payloads:
+            console.print("  [dim]No platform payloads yet.[/dim]")
+            continue
+        for p in payloads:
+            cap = (p.caption or "").strip()
+            tags = (p.hashtags or "").strip()
+            console.print(f"  [cyan]{p.platform}[/cyan]")
+            if cap:
+                for line in _console_safe_text(cap).splitlines():
+                    console.print(f"    {rich_escape(line)}")
+            else:
+                console.print("    [dim](no caption)[/dim]")
+            if tags:
+                console.print(f"    [dim]hashtags[/dim] {rich_escape(_console_safe_text(tags))}")
+
+
 def _review_display_status(content: Content, payloads: list[PlatformPayload]) -> str:
     """Derive Review column status from content and payloads."""
     if content.review_status == "rejected":
@@ -1567,7 +1596,14 @@ def _resolve_content_for_scope(content_id: str, row_scope: str):
 @click.option("--today", is_flag=True, help="Show today's content (00:00–23:59 local)")
 @click.option("--last-24h", "last_24h", is_flag=True, help="Show content from the last 24 hours")
 @click.option("--all", "show_all", is_flag=True, help="Show all saved content")
-def preview(today: bool, last_24h: bool, show_all: bool):
+@click.option(
+    "--captions",
+    "--caption",
+    "show_captions",
+    is_flag=True,
+    help="After the table, show each platform's caption and hashtags for every row",
+)
+def preview(today: bool, last_24h: bool, show_all: bool, show_captions: bool):
     """Preview generated content."""
     selected_scopes = sum([today, last_24h, show_all])
     if selected_scopes == 0:
@@ -1630,6 +1666,8 @@ def preview(today: bool, last_24h: bool, show_all: bool):
             str(len(payloads)),
         )
     console.print(table)
+    if show_captions:
+        _preview_print_caption_details(items)
 
 
 # ---------------------------------------------------------------------------

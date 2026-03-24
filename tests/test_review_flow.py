@@ -212,6 +212,54 @@ def test_preview_all_shows_every_saved_row(tmp_db: Path) -> None:
     assert "proble" not in last_24h_result.output
 
 
+def test_preview_today_captions_shows_platform_text(tmp_db: Path) -> None:
+    product = Product(sku="cap-sku", name="Cap Product")
+    db.upsert_product(product)
+    content = Content(
+        id="content-captions-1",
+        product_sku=product.sku,
+        theme="benefit_spotlight",
+        hook_type="question",
+    )
+    db.insert_content(content)
+    db.upsert_platform_payload(
+        PlatformPayload(
+            content_id=content.id,
+            platform="instagram",
+            caption="IG line one\nIG line two",
+            hashtags="#a #b",
+            status="submitted",
+        )
+    )
+    db.upsert_platform_payload(
+        PlatformPayload(
+            content_id=content.id,
+            platform="tiktok",
+            caption="",
+            hashtags="#tiktokonly",
+            status="submitted",
+        )
+    )
+
+    runner = CliRunner()
+    r = runner.invoke(cli_module.cli, ["preview", "--today", "--captions"])
+    assert r.exit_code == 0
+    assert "Today's Content" in r.output
+    assert "Row 1" in r.output
+    assert "instagram" in r.output
+    assert "IG line one" in r.output
+    assert "IG line two" in r.output
+    assert "hashtags" in r.output
+    assert "#a #b" in r.output
+    assert "tiktok" in r.output
+    assert "(no caption)" in r.output
+    assert "#tiktokonly" in r.output
+
+    alias = runner.invoke(cli_module.cli, ["preview", "--today", "--caption"])
+    assert alias.exit_code == 0
+    assert "IG line one" in alias.output
+
+
 def _seed_recent_content_rows(product: Product, total: int = 23) -> list[str]:
     content_ids: list[str] = []
     for index in range(1, total + 1):

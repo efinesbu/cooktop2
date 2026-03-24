@@ -247,6 +247,52 @@ def test_build_flex_video_prompt_omits_voiceover_lines_for_v3_manifest() -> None
     assert "Scene 2 voiceover:" not in prompt
     assert "Scene 3 voiceover:" not in prompt
     assert "Do not animate mouth movements or attempt lip sync; keep expression and motion readable without spoken-mouth performance because narration will be stitched separately." in prompt
+    assert "on-screen captions" in prompt
+
+
+def test_build_flex_video_prompt_omits_voiceover_lines_for_v4_manifest() -> None:
+    """schema_version 4 matches V3: stitched TTS, no per-scene voiceover in the video prompt."""
+    product = Product(sku="lipstick", name="Lux Lipstick")
+    content = Content(
+        id="content-flex-v4",
+        product_sku=product.sku,
+        theme="hidden_knowledge",
+        hook_type="question",
+        creative_format="ai_video_flex_15s",
+        asset_manifest_json=jsonlib.dumps(
+            {
+                "format": "ai_video_flex_15s",
+                "schema_version": 4,
+                "video_plan": {
+                    "total_duration_seconds": 14,
+                    "style_family": "anamorphic",
+                    "style_rationale": "Educational reel.",
+                    "scenes": [
+                        {
+                            "duration_seconds": 2.0,
+                            "scene_description": "Macro lipstick hero shot.",
+                            "script": "Why does this lipstick look expensive instantly?",
+                        },
+                        {
+                            "duration_seconds": 2.0,
+                            "scene_description": "HARD CUT to a close swipe across lips and an arm swatch.",
+                            "script": "It is the smooth glide and rich color.",
+                        },
+                        {
+                            "duration_seconds": 2.0,
+                            "scene_description": "HARD CUT to finished lip look in mirror.",
+                            "script": "The creamy formula helps lips look polished fast.",
+                        },
+                    ],
+                },
+            }
+        ),
+    )
+
+    prompt = _build_flex_video_prompt(content, product)
+
+    assert "Scene 1 voiceover:" not in prompt
+    assert "diegetic speech audio" in prompt
 
 
 def test_generate_video_surfaces_413_for_original_image(

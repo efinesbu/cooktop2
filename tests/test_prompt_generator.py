@@ -2149,15 +2149,17 @@ def test_generate_content_ai_video_flex_15s_persists_v3_voiceover_plan(
     sys.modules.pop("src.prompt_generator", None)
     prompt_generator = importlib.import_module("src.prompt_generator")
 
-    response_payload = {
+    script_phase_payload = {
         "theme": "benefit_spotlight",
         "hook_text": "Want fresher skin?",
         "creative_format": "ai_video_flex_15s",
         "cta_text": "try me",
-        "starting_image_prompt": "Cinematic 3D closeup of Serum X on luxury bathroom counter.",
         "strategy_metadata": {
             "style_family": "anamorphic",
             "style_angle": "Premium skincare positioning",
+            "content_goal": "engagement",
+            "environment": "bathroom counter",
+            "expression_arc": "curious to inviting",
         },
         "background_music": {
             "description": "Warm premium synth bed with soft percussion.",
@@ -2167,38 +2169,38 @@ def test_generate_content_ai_video_flex_15s_persists_v3_voiceover_plan(
             {
                 "start_seconds": 0.0,
                 "end_seconds": 2.3,
-                "scene_description": "Hook closeup with a confident product reveal.",
                 "script": "First line.",
+                "tone": "curious",
             },
             {
                 "start_seconds": 2.3,
                 "end_seconds": 4.6,
-                "scene_description": "HARD CUT: side angle with texture detail.",
                 "script": "Second line.",
+                "tone": "warm",
             },
             {
                 "start_seconds": 4.6,
                 "end_seconds": 6.9,
-                "scene_description": "HARD CUT: slower macro shift for proof.",
                 "script": "Third line.",
+                "tone": "confident",
             },
             {
                 "start_seconds": 6.9,
                 "end_seconds": 9.2,
-                "scene_description": "HARD CUT: polished glow reveal.",
                 "script": "Fourth line.",
+                "tone": "playful",
             },
             {
                 "start_seconds": 9.2,
                 "end_seconds": 11.5,
-                "scene_description": "HARD CUT: final product hold.",
                 "script": "Fifth line.",
+                "tone": "inviting",
             },
             {
                 "start_seconds": 11.5,
                 "end_seconds": 13.8,
-                "scene_description": "HARD CUT: end frame CTA.",
                 "script": "Sixth line.",
+                "tone": "soft",
             },
         ],
         "platform_captions": {
@@ -2209,12 +2211,30 @@ def test_generate_content_ai_video_flex_15s_persists_v3_voiceover_plan(
         },
         "hashtags": ["skincare", "glow"],
     }
+    visuals_phase_payload = {
+        "starting_image_prompt": "Cinematic 3D closeup of Serum X on luxury bathroom counter.",
+        "timeline": [
+            {"scene_description": "Hook closeup with a confident product reveal."},
+            {"scene_description": "HARD CUT: side angle with texture detail."},
+            {"scene_description": "HARD CUT: slower macro shift for proof."},
+            {"scene_description": "HARD CUT: polished glow reveal."},
+            {"scene_description": "HARD CUT: final product hold."},
+            {"scene_description": "HARD CUT: end frame CTA."},
+        ],
+    }
 
     class FakeCompletions:
+        gpt54_calls = 0
+
         def create(self, **kwargs):
             model = kwargs["model"]
             if model == "gpt-5.4":
-                payload = response_payload
+                FakeCompletions.gpt54_calls += 1
+                payload = (
+                    script_phase_payload
+                    if FakeCompletions.gpt54_calls == 1
+                    else visuals_phase_payload
+                )
             else:
                 payload = {
                     "hook_type": "bold_claim",
@@ -3014,17 +3034,16 @@ def test_generate_content_v4_selects_v4_system_prompt(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    """generate_content with video_v4=True selects _AI_VIDEO_V4_SYSTEM_PROMPT and persists schema_version=4."""
+    """generate_content with video_v4=True runs script-then-visuals phases and persists schema_version=4."""
     sys.modules.pop("src.prompt_generator", None)
     prompt_generator = importlib.import_module("src.prompt_generator")
 
-    v4_payload = {
+    v4_script_phase = {
         "theme": "hidden_knowledge",
         "hook_text": "Did you know your moisturizer does this?",
         "creative_format": "ai_video_flex_15s",
         "cta_text": "",
         "viewer_takeaway": "Viewers learn why hydration timing matters more than product quantity",
-        "starting_image_prompt": "Cinematic 3D closeup of anthropomorphic serum on sunlit shelf.",
         "strategy_metadata": {
             "style_family": "anamorphic",
             "style_angle": "Educational reveal",
@@ -3035,29 +3054,43 @@ def test_generate_content_v4_selects_v4_system_prompt(
         },
         "background_music": {"description": "gentle lo-fi piano, 85 bpm", "energy_level": "low"},
         "timeline": [
-            {"start_seconds": 0, "end_seconds": 2.2, "scene_description": "Close on a water droplet.", "script": "Most people miss this.", "tone": "curious"},
-            {"start_seconds": 2.2, "end_seconds": 4.4, "scene_description": "HARD CUT: the product on a shelf.", "script": "Timing beats quantity.", "tone": "knowing"},
-            {"start_seconds": 4.4, "end_seconds": 6.6, "scene_description": "HARD CUT: product winks.", "script": "Apply right after washing.", "tone": "playful"},
-            {"start_seconds": 6.6, "end_seconds": 8.8, "scene_description": "HARD CUT: close on texture.", "script": "Skin absorbs most then.", "tone": "warm"},
-            {"start_seconds": 8.8, "end_seconds": 11, "scene_description": "HARD CUT: product nods.", "script": "One thin layer works.", "tone": "confident"},
-            {"start_seconds": 11, "end_seconds": 13.2, "scene_description": "HARD CUT: golden light on shelf.", "script": "The two-minute rule.", "tone": "satisfied"},
+            {"start_seconds": 0, "end_seconds": 2.2, "script": "Most people miss this.", "tone": "curious"},
+            {"start_seconds": 2.2, "end_seconds": 4.4, "script": "Timing beats quantity.", "tone": "knowing"},
+            {"start_seconds": 4.4, "end_seconds": 6.6, "script": "Apply right after washing.", "tone": "playful"},
+            {"start_seconds": 6.6, "end_seconds": 8.8, "script": "Skin absorbs most then.", "tone": "warm"},
+            {"start_seconds": 8.8, "end_seconds": 11, "script": "One thin layer works.", "tone": "confident"},
+            {"start_seconds": 11, "end_seconds": 13.2, "script": "The two-minute rule.", "tone": "satisfied"},
         ],
         "platform_captions": {"youtube": "Link in bio", "instagram": "Did you know this?", "tiktok": "Two minute rule", "x": "Hydration timing matters"},
         "hashtags": ["skincare", "hydration"],
+    }
+    v4_visuals_phase = {
+        "starting_image_prompt": "Cinematic 3D closeup of anthropomorphic serum on sunlit shelf.",
+        "timeline": [
+            {"scene_description": "Close on a water droplet."},
+            {"scene_description": "HARD CUT: the product on a shelf."},
+            {"scene_description": "HARD CUT: product winks."},
+            {"scene_description": "HARD CUT: close on texture."},
+            {"scene_description": "HARD CUT: product nods."},
+            {"scene_description": "HARD CUT: golden light on shelf."},
+        ],
     }
     classify_payload = {"hook_type": "quick_tip", "script_style": "tip_based", "proof_type": "none"}
 
     captured_system_prompts: list[str] = []
 
     class FakeCompletions:
+        gpt54_calls = 0
+
         def create(self, **kwargs):
             model = kwargs.get("model", "")
             if "gpt-5" in model:
+                FakeCompletions.gpt54_calls += 1
                 msgs = kwargs.get("messages", [])
                 for m in msgs:
                     if m.get("role") == "system":
                         captured_system_prompts.append(m["content"])
-                payload = v4_payload
+                payload = v4_script_phase if FakeCompletions.gpt54_calls == 1 else v4_visuals_phase
             else:
                 payload = classify_payload
             return SimpleNamespace(
@@ -3096,12 +3129,12 @@ def test_generate_content_v4_selects_v4_system_prompt(
 
     manifest = json.loads(content.asset_manifest_json)
     assert manifest["schema_version"] == 4
-    assert manifest["viewer_takeaway"] == v4_payload["viewer_takeaway"]
+    assert manifest["viewer_takeaway"] == v4_script_phase["viewer_takeaway"]
     assert manifest["strategy_metadata"]["content_mode"] == "educational"
 
-    assert len(captured_system_prompts) >= 1
-    assert "educational" in captured_system_prompts[0].lower()
-    assert "product is context and a supporting character, not the hero" in captured_system_prompts[0]
+    assert len(captured_system_prompts) >= 2
+    assert "PHASE 1 OF 2" in captured_system_prompts[0]
+    assert "PHASE 2 OF 2" in captured_system_prompts[1]
 
 
 def test_validate_v5_response_rejects_word_count_and_scene_count() -> None:

@@ -145,18 +145,18 @@ ZODIAC_SIGNS = [
 ]
 
 V5_NAMES = [
-    "jessica",
-    "ashley",
-    "emily",
-    "sarah",
-    "hannah",
-    "taylor",
-    "madison",
-    "rachel",
-    "emma",
-    "olivia",
-    "chloe",
-    "samantha",
+    "Jessica",
+    "Ashley",
+    "Emily",
+    "Sarah",
+    "Hannah",
+    "Taylor",
+    "Liz",
+    "Rachel",
+    "Emma",
+    "Olivia",
+    "Chloe",
+    "Samantha",
 ]
 
 V5_VIBES = ["playful_roast", "lucky_era"]
