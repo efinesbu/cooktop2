@@ -51,6 +51,13 @@ class InstagramAnalyticsPuller(BaseAnalyticsPuller):
                 post.post_id,
             )
             return None
+        if post.post_id.startswith("ig_phone:"):
+            logger.warning(
+                "Skipping Instagram analytics for handoff id %s. Persist the final Instagram media id "
+                "from the phone queue back into posts.post_id to enable metrics pulls.",
+                post.post_id,
+            )
+            return None
 
         insights_resp = httpx.get(
             f"{GRAPH_API_BASE}/{post.post_id}/insights",

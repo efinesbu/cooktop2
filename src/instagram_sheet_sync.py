@@ -1,16 +1,23 @@
 from __future__ import annotations
 
 import csv
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from io import StringIO
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import requests
 
+from ig_poster import get_queue_row_for_sync
 from src import config, db
+
+logger = logging.getLogger(__name__)
+
+_GRAPH_API_BASE = "https://graph.facebook.com/v21.0"
 
 _SHEETS_SCOPE = ("https://www.googleapis.com/auth/spreadsheets.readonly",)
 
@@ -43,6 +50,13 @@ class InstagramSheetSyncDiagnostic:
     rows_updated: int
     rows_skipped: int
     row_results: list[InstagramSheetSyncRowResult]
+
+
+@dataclass(frozen=True)
+class InstagramPhoneQueueSyncResult:
+    posts_considered: int = 0
+    posts_updated: int = 0
+    posts_skipped: int = 0
 
 
 def sync_instagram_post_ids_from_sheet() -> InstagramSheetSyncResult:
@@ -173,32 +187,36 @@ def _inspect_row(
             local_post_id_before=exact_match.post_id or "",
         )
 
-    make_rows = [post for post in instagram_posts if (post.post_id or "").startswith("make:")]
-    if len(make_rows) == 1:
+    handoff_rows = [
+        post for post in instagram_posts
+        if _is_instagram_handoff_post_id(post.post_id)
+    ]
+    if len(handoff_rows) == 1:
+        resolved_handoff = (handoff_id or None) or (handoff_rows[0].post_id or None)
         if apply_updates:
             db.sync_instagram_post_id(
                 instagram_post_id,
-                handoff_id=handoff_id or None,
+                handoff_id=resolved_handoff,
                 content_id=content_id or None,
             )
         return InstagramSheetSyncRowResult(
             row_number=row_number,
             status="updated" if apply_updates else "matched",
             matched_by="content_id",
-            detail="matched single instagram make handoff row for content_id",
+            detail="matched single instagram handoff row (make or ig_phone) for content_id",
             handoff_id=handoff_id,
             content_id=content_id,
             instagram_post_id=instagram_post_id,
-            local_post_row_id=make_rows[0].id,
-            local_post_id_before=make_rows[0].post_id or "",
+            local_post_row_id=handoff_rows[0].id,
+            local_post_id_before=handoff_rows[0].post_id or "",
         )
 
-    if len(make_rows) > 1:
+    if len(handoff_rows) > 1:
         return InstagramSheetSyncRowResult(
             row_number=row_number,
             status="ambiguous",
             matched_by="content_id",
-            detail="multiple instagram make handoff rows found for content_id",
+            detail="multiple instagram handoff rows (make or ig_phone) found for content_id",
             handoff_id=handoff_id,
             content_id=content_id,
             instagram_post_id=instagram_post_id,
@@ -280,3 +298,131 @@ def _norm(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _is_instagram_handoff_post_id(post_id: str | None) -> bool:
+    pid = (post_id or "").strip()
+    return pid.startswith("make:") or pid.startswith("ig_phone:")
+
+
+def sync_instagram_post_ids_from_phone_queue() -> InstagramPhoneQueueSyncResult:
+    """Resolve ig_phone:<queue_id> post_id values to final Graph media ids via permalink match."""
+    token = str(config.get("instagram.access_token", "")).strip()
+    ig_account_id = str(config.get("instagram.instagram_account_id", "")).strip()
+    if not token or not ig_account_id:
+        return InstagramPhoneQueueSyncResult()
+
+    try:
+        media_pairs = _fetch_instagram_media_permalinks(token, ig_account_id)
+    except Exception as exc:
+        logger.warning("Instagram phone queue sync: failed to list media: %s", exc)
+        return InstagramPhoneQueueSyncResult()
+
+    norm_to_id: dict[str, str] = {}
+    for media_id, permalink in media_pairs:
+        norm = _normalize_instagram_permalink(permalink)
+        if norm and norm not in norm_to_id:
+            norm_to_id[norm] = media_id
+
+    considered = 0
+    updated = 0
+    skipped = 0
+
+    for post in db.list_recent_posts():
+        if post.platform != "instagram":
+            continue
+        pid = (post.post_id or "").strip()
+        if not pid.startswith("ig_phone:"):
+            continue
+
+        queue_id = pid.split(":", 1)[1].strip()
+        if not queue_id:
+            skipped += 1
+            continue
+
+        qrow = get_queue_row_for_sync(queue_id)
+        if qrow is None:
+            skipped += 1
+            continue
+
+        posted_url = (qrow.posted_url or "").strip()
+        if not posted_url:
+            skipped += 1
+            continue
+
+        considered += 1
+        norm_queue = _normalize_instagram_permalink(posted_url)
+        if not norm_queue:
+            skipped += 1
+            continue
+
+        final_id = norm_to_id.get(norm_queue)
+        if not final_id:
+            skipped += 1
+            continue
+
+        n = db.sync_instagram_post_id(
+            final_id,
+            handoff_id=post.post_id,
+            content_id=post.content_id,
+        )
+        if n:
+            updated += 1
+        else:
+            skipped += 1
+
+    return InstagramPhoneQueueSyncResult(
+        posts_considered=considered,
+        posts_updated=updated,
+        posts_skipped=skipped,
+    )
+
+
+def _normalize_instagram_permalink(url: str) -> str:
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    parsed = urlparse(raw)
+    netloc = (parsed.netloc or "").lower()
+    path = (parsed.path or "").rstrip("/")
+    if path and not path.startswith("/"):
+        path = "/" + path
+    scheme = "https"
+    return urlunparse((scheme, netloc, path, "", "", ""))
+
+
+def _fetch_instagram_media_permalinks(
+    access_token: str,
+    ig_account_id: str,
+    *,
+    page_limit: int = 50,
+    max_pages: int = 20,
+) -> list[tuple[str, str]]:
+    """Return (media_id, permalink) from the IG user media edge."""
+    out: list[tuple[str, str]] = []
+    url = f"{_GRAPH_API_BASE}/{ig_account_id}/media"
+    params = {
+        "fields": "id,permalink",
+        "limit": str(page_limit),
+        "access_token": access_token,
+    }
+    pages = 0
+    first = True
+    while url and pages < max_pages:
+        if first:
+            resp = requests.get(url, params=params, timeout=30)
+            first = False
+        else:
+            resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+        payload = resp.json()
+        for item in payload.get("data", []):
+            mid = item.get("id")
+            pl = item.get("permalink")
+            if mid and pl:
+                out.append((str(mid), str(pl)))
+        url = (payload.get("paging") or {}).get("next") or ""
+        if not url:
+            break
+        pages += 1
+    return out

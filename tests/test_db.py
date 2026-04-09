@@ -281,6 +281,37 @@ def test_approve_and_reject_content(
     assert rejected.rejected_at is not None
 
 
+def test_approve_all_pending_content_today(
+    db_with_product: Path, sample_product: Product
+) -> None:
+    today_row = Content(
+        id="today-pending",
+        product_sku=sample_product.sku,
+        theme="benefit_spotlight",
+        hook_type="bold_claim",
+        hook_text="x",
+    )
+    yesterday_row = Content(
+        id="yesterday-pending",
+        product_sku=sample_product.sku,
+        theme="benefit_spotlight",
+        hook_type="bold_claim",
+        hook_text="y",
+    )
+    db.insert_content(today_row)
+    db.insert_content(yesterday_row)
+    with db._connect() as conn:
+        conn.execute(
+            """UPDATE content SET created_at = datetime('now', 'localtime', '-1 day')
+               WHERE id=?""",
+            (yesterday_row.id,),
+        )
+
+    assert db.approve_all_pending_content_today() == 1
+    assert db.get_content(today_row.id).review_status == "approved"
+    assert db.get_content(yesterday_row.id).review_status == "pending"
+
+
 def test_bandit_state_roundtrip(
     db_with_product: Path, sample_product: Product
 ) -> None:
@@ -837,3 +868,26 @@ def test_clone_content_for_repost_pending_review(
     r = db.clone_content_for_repost(orig_id, auto_approve=False)
     assert r.review_status == "pending"
     assert not r.approved
+
+
+def test_mark_platform_payload_delivery_submitted_for_ig_phone_remote_id(
+    db_with_product: Path, sample_content: Content
+) -> None:
+    db.insert_content(sample_content)
+    payload = PlatformPayload(
+        content_id=sample_content.id,
+        platform="instagram",
+        caption="c",
+        hashtags="h",
+        status="scheduled",
+    )
+    payload.id = db.upsert_platform_payload(payload)
+    assert payload.id is not None
+
+    status = db.mark_platform_payload_delivery(payload.id, "ig_phone:a1b2c3d4")
+
+    assert status == "submitted"
+    updated = db.get_platform_payload(sample_content.id, "instagram")
+    assert updated is not None
+    assert updated.status == "submitted"
+    assert updated.last_error is None

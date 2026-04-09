@@ -278,6 +278,10 @@ def _is_platform_configured(
 
 
 def _is_instagram_posting_configured() -> bool:
+    method = get("instagram.posting_method", "api")
+    if isinstance(method, str) and method.strip().lower() == "phone":
+        return True
+
     direct_instagram_keys = (
         "instagram.access_token",
         "instagram.instagram_account_id",

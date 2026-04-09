@@ -3163,11 +3163,49 @@ def test_validate_v5_response_rejects_word_count_and_scene_count() -> None:
     with pytest.raises(ValueError, match="30-38 words"):
         prompt_generator._validate_and_normalize_v5_response(data, theme="aries", hook_type="jessica")
 
-    vo_30 = " ".join([f"w{i}" for i in range(30)])
+    vo_30 = " ".join(["Jessica", "Aries"] + [f"w{i}" for i in range(28)])
     data_bad_scenes = {**base, "voiceover_script": vo_30, "scene_descriptions": ["a", "b", "c"]}
     with pytest.raises(ValueError, match="exactly 4"):
         prompt_generator._validate_and_normalize_v5_response(
             data_bad_scenes, theme="aries", hook_type="jessica"
+        )
+
+
+def test_validate_v5_response_requires_name_and_sign_in_voiceover() -> None:
+    """V5 normalization rejects generic horoscope scripts that omit the locked name or sign."""
+    sys.modules.pop("src.prompt_generator", None)
+    prompt_generator = importlib.import_module("src.prompt_generator")
+
+    base = {
+        "theme": "aries",
+        "hook_type": "jessica",
+        "creative_format": "ai_video_flex_15s",
+        "scene_descriptions": ["a", "b", "c", "d"],
+        "platform_captions": {
+            "youtube": "y",
+            "instagram": "i",
+            "tiktok": "t",
+            "x": "x",
+        },
+        "hashtags": ["h"],
+    }
+
+    missing_name = {
+        **base,
+        "voiceover_script": " ".join(["Aries"] + [f"w{i}" for i in range(29)]),
+    }
+    with pytest.raises(ValueError, match="presenter name"):
+        prompt_generator._validate_and_normalize_v5_response(
+            missing_name, theme="aries", hook_type="jessica"
+        )
+
+    missing_sign = {
+        **base,
+        "voiceover_script": " ".join(["Jessica"] + [f"w{i}" for i in range(29)]),
+    }
+    with pytest.raises(ValueError, match="zodiac sign"):
+        prompt_generator._validate_and_normalize_v5_response(
+            missing_sign, theme="aries", hook_type="jessica"
         )
 
 
@@ -3180,7 +3218,7 @@ def test_generate_content_v5_selects_v5_system_prompt_and_persists_manifest(
     sys.modules.pop("src.prompt_generator", None)
     prompt_generator = importlib.import_module("src.prompt_generator")
 
-    vo_32 = " ".join([f"w{i}" for i in range(32)])
+    vo_32 = " ".join(["Jessica", "Aries"] + [f"w{i}" for i in range(30)])
     v5_payload = {
         "theme": "aries",
         "hook_type": "jessica",
@@ -3266,11 +3304,14 @@ def test_generate_content_v5_selects_v5_system_prompt_and_persists_manifest(
     assert "HOROSCOPE CHARACTER — FIRST-FRAME GROUNDING" in sp0
     assert "FIRST-FRAME ANCHOR" in sp0
     assert "STABLE IDENTITY & VISUAL CONTINUITY" in sp0
+    assert "must explicitly mention the locked presenter name" in sp0
+    assert "Do not write a generic sign-only roast" in sp0
 
     assert len(captured_user_messages) >= 1
     v5_user = captured_user_messages[0]
     assert "STARTING-FIRST-FRAME" in v5_user
     assert build_v5_starting_image_prompt("aries", "jessica") in v5_user
+    assert "Voiceover must naturally mention both the zodiac sign and presenter name" in v5_user
     assert "BRANDING KIT" not in v5_user
     assert "TEXT_LEVEL_INSIGHTS" not in v5_user
     assert "PERFORMANCE_SUMMARY" not in v5_user

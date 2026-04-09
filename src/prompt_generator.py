@@ -33,10 +33,6 @@ from src.utm import build_attribution_data
 
 logger = logging.getLogger(__name__)
 
-# V5 horoscope reels: set to True to include these signals in the user message again.
-_V5_INCLUDE_TEXT_INSIGHTS = False
-_V5_INCLUDE_PERFORMANCE_SUMMARY = False
-
 _SYSTEM_PROMPT = """\
 You are an expert creative director and AI video prompt engineer specializing in premium product advertising.
 
@@ -1409,12 +1405,14 @@ FORMAT
 - Voiceover must be exactly 30-38 words for a single continuous take.
 - Structure the STORY (not separate timestamps in the JSON) as:
   - Hook (0-3s): grab attention fast.
-  - Roast or validation (3-11s): playful call-out or affirming validation for this sign.
+  - Roast or validation (3-11s): playful call-out or affirming validation that links the locked presenter name to this sign.
   - CTA (11-14s): soft engagement CTA (follow, comment sign, save, share) — never a hard product pitch.
 
 TONE
 - Best-friend energy, slightly dramatic, scroll-stopping but kind.
 - No hashtags and no emojis in the voiceover script. Plain ASCII only.
+- The voiceover must explicitly mention the locked presenter name and the locked zodiac sign at least once each.
+- Tie the name to the horoscope reading in a natural spoken phrase, such as "<Name>, your Aries side..." or "<Name> is in her Aries honesty era." Do not write a generic sign-only roast, validation, or lucky-era line.
 
 VISUALS
 - Provide exactly four scene descriptions for on-screen visuals (9:16). Each maps to a segment of the arc:
@@ -1471,6 +1469,7 @@ RESPOND WITH ONLY valid JSON -- no markdown fences, no commentary:
 
 RULES:
 - voiceover_script must be 30-38 words inclusive.
+- voiceover_script must explicitly mention the locked presenter name and the locked zodiac sign.
 - scene_descriptions must contain exactly 4 non-empty strings.
 - Each scene_description must forbid on-camera speech visuals: no lip sync, no lip or jaw movement to match the voiceover, no "talking" or "mouthing" direction.
 - No medical claims. Keep language entertainment-forward and safe.
@@ -1675,6 +1674,9 @@ def _build_user_message(
         lines.append("Locked creative constraints:")
         lines.append(f"  - Zodiac sign (use as `theme`): {theme}")
         lines.append(f"  - Presenter name (use as `hook_type`): {hook_type}")
+        lines.append(
+            "  - Voiceover must naturally mention both the zodiac sign and presenter name, and connect the name to the horoscope reading."
+        )
         if v5_vibe and str(v5_vibe).strip():
             lines.append(f"  - Vibe: {v5_vibe.strip()}")
         lines.append("")
@@ -1786,8 +1788,14 @@ def generate_content(
     proof_type: str = "none",
     script_style: str = "conversational",
     velura_branding: bool = True,
+    v5_include_text_insights: bool = False,
+    v5_include_performance_summary: bool = False,
 ) -> tuple[Content, dict]:
     """Call OpenAI to generate a structured content script for a 15-second video.
+
+    For V5 only: ``v5_include_text_insights`` / ``v5_include_performance_summary``
+    opt in to the same text-insight and organic performance blocks used for other
+    ai_video_flex formats (default off).
 
     Returns (Content persisted to DB, dict with platform_captions and hashtags).
     """
@@ -1825,7 +1833,7 @@ def generate_content(
         creative_format=fmt,
     )
     text_insights = latest_text_insight.insight_text if latest_text_insight else None
-    if video_v5 and not _V5_INCLUDE_TEXT_INSIGHTS:
+    if video_v5 and not v5_include_text_insights:
         text_insights = None
     performance_summary = None
     performance_rationale = "default"
@@ -1840,7 +1848,7 @@ def generate_content(
         performance_summary, performance_rationale = get_video_performance_summary(
             product.sku, rank_by=rank_by
         )
-    if video_v5 and not _V5_INCLUDE_PERFORMANCE_SUMMARY:
+    if video_v5 and not v5_include_performance_summary:
         performance_summary = None
     v3_cta_enabled = _should_include_soft_cta() if (video_v3 or video_v4) else True
     user_msg = _build_user_message(
@@ -3044,6 +3052,14 @@ def _validate_and_normalize_v5_response(
         raise ValueError(
             f"V5 voiceover_script must be 30-38 words inclusive, got {wc}."
         )
+    if hook_type and not re.search(rf"\b{re.escape(hook_type)}\b", vo, flags=re.IGNORECASE):
+        raise ValueError(
+            "V5 voiceover_script must mention the locked presenter name at least once."
+        )
+    if theme and not re.search(rf"\b{re.escape(theme)}\b", vo, flags=re.IGNORECASE):
+        raise ValueError(
+            "V5 voiceover_script must mention the locked zodiac sign at least once."
+        )
 
     scenes_raw = data.get("scene_descriptions")
     if not isinstance(scenes_raw, list) or len(scenes_raw) != 4:
@@ -3061,7 +3077,9 @@ def _validate_and_normalize_v5_response(
         raise ValueError(
             f"V5 theme must be a zodiac sign id, got {returned_theme!r}."
         )
-    if returned_hook not in V5_NAMES:
+    valid_v5_hook_ids = {str(name).strip().lower() for name in V5_NAMES}
+    normalized_returned_hook = returned_hook.lower()
+    if normalized_returned_hook not in valid_v5_hook_ids:
         raise ValueError(
             f"V5 hook_type must be a presenter name id, got {returned_hook!r}."
         )
@@ -3069,10 +3087,11 @@ def _validate_and_normalize_v5_response(
         raise ValueError(
             f"V5 theme {returned_theme!r} did not match locked theme {theme!r}."
         )
-    if hook_type and returned_hook != hook_type:
+    if hook_type and normalized_returned_hook != hook_type.lower():
         raise ValueError(
             f"V5 hook_type {returned_hook!r} did not match locked hook_type {hook_type!r}."
         )
+    data["hook_type"] = normalized_returned_hook
 
     fmt = str(data.get("creative_format", "")).strip()
     if fmt != "ai_video_flex_15s":

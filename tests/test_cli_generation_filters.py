@@ -570,6 +570,16 @@ def test_run_cli_rejects_horoscope_without_video_v5() -> None:
     assert "--horoscope and --name require --video-v5" in result.output
 
 
+def test_run_cli_rejects_v5_insight_flags_without_video_v5() -> None:
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_module.cli,
+        ["run", "--product", "x", "--v5-include-text-insights"],
+    )
+    assert result.exit_code == 1
+    assert "--v5-include-text-insights and --v5-include-performance require --video-v5" in result.output
+
+
 def test_run_cli_rejects_video_v5_with_legacy_theme_hook() -> None:
     runner = CliRunner()
     result = runner.invoke(
@@ -626,11 +636,15 @@ def test_generate_single_v5_passes_flags_to_generate_content(
         video_v4=False,
         video_v5=False,
         v5_vibe=None,
+        v5_include_text_insights=False,
+        v5_include_performance_summary=False,
         **kwargs,
     ):
         captured["video_v5"] = video_v5
         captured["v5_vibe"] = v5_vibe
         captured["creative_format"] = creative_format
+        captured["v5_include_text_insights"] = v5_include_text_insights
+        captured["v5_include_performance_summary"] = v5_include_performance_summary
         return (
             Content(
                 id="c-v5",
@@ -662,11 +676,69 @@ def test_generate_single_v5_passes_flags_to_generate_content(
     assert captured["video_v5"] is True
     assert captured["v5_vibe"] == "playful_roast"
     assert captured["creative_format"] == "ai_video_flex_15s"
+    assert captured["v5_include_text_insights"] is False
+    assert captured["v5_include_performance_summary"] is False
     output = capsys.readouterr().out
     assert "no product images registered; V5 will use the horoscope reference image" in output
     assert "asset instead" in output
     assert "Starting image (actual Gemini ref prompt)" in output
     assert "Actual V5 Gemini prompt." in output
+
+
+def test_generate_single_v5_passes_insight_flags_to_generate_content(
+    tmp_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    product = Product(sku="v5-sku-2", name="V5 Product 2")
+    db.upsert_product(product)
+
+    captured: dict[str, object] = {}
+
+    def fake_generate_content(
+        product_arg,
+        theme,
+        hook_type,
+        images,
+        creative_format=None,
+        video_v5=False,
+        v5_include_text_insights=False,
+        v5_include_performance_summary=False,
+        **kwargs,
+    ):
+        captured["v5_include_text_insights"] = v5_include_text_insights
+        captured["v5_include_performance_summary"] = v5_include_performance_summary
+        return (
+            Content(
+                id="c-v5-2",
+                product_sku=product_arg.sku,
+                theme=theme,
+                hook_type=hook_type,
+                creative_format=creative_format or "ai_video_flex_15s",
+                starting_image_prompt="p",
+                asset_manifest_json='{"schema_version": 5}',
+            ),
+            {"platform_captions": {}, "hashtags": []},
+        )
+
+    monkeypatch.setattr(cli_module, "check_budget", lambda: (0.0, 100.0, True))
+    monkeypatch.setattr(cli_module, "refresh_images_if_changed", lambda sku: ([], False))
+    monkeypatch.setattr(cli_module, "generate_content", fake_generate_content)
+    monkeypatch.setattr(cli_module, "render_media", lambda *a, **k: None)
+
+    cli_module._generate_single(
+        product,
+        theme="aries",
+        hook_type="jessica",
+        generation_index=0,
+        should_post=False,
+        creative_format="ai_video_flex_15s",
+        video_v5=True,
+        v5_include_text_insights=True,
+        v5_include_performance_summary=True,
+    )
+
+    assert captured["v5_include_text_insights"] is True
+    assert captured["v5_include_performance_summary"] is True
 
 
 def test_print_prompt_shows_v5_speech_and_elevenlabs_metadata(

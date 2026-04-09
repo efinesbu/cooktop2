@@ -8,6 +8,7 @@ youtube_token.json
 db/velura.db
 db/velura.db-journal
 db/velura.db-wal
+ig_poster/queue.db
 
 # Python
 __pycache__/

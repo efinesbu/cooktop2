@@ -11,6 +11,7 @@ from src.analytics.instagram import (
     InstagramAnalyticsPuller,
 )
 from src.instagram_sheet_sync import (
+    InstagramPhoneQueueSyncResult,
     InstagramSheetSyncDiagnostic,
     InstagramSheetSyncResult,
     InstagramSheetSyncRowResult,
@@ -70,6 +71,22 @@ def test_instagram_analytics_skips_make_handoff_ids(monkeypatch) -> None:
     puller = InstagramAnalyticsPuller()
     metric = puller.fetch_metrics(
         Post(id=1, platform="instagram", post_id="make:videos/clip-123.mp4")
+    )
+
+    assert metric is None
+
+
+def test_instagram_analytics_skips_ig_phone_placeholders(monkeypatch) -> None:
+    monkeypatch.setattr("src.config.get", lambda key, default=None: "token" if key == "instagram.access_token" else default)
+
+    def fail_get(*args, **kwargs):
+        raise AssertionError("Instagram API should not be called for unresolved ig_phone handoff ids")
+
+    monkeypatch.setattr("src.analytics.instagram.httpx.get", fail_get)
+
+    puller = InstagramAnalyticsPuller()
+    metric = puller.fetch_metrics(
+        Post(id=1, platform="instagram", post_id="ig_phone:abc12345")
     )
 
     assert metric is None
@@ -222,6 +239,43 @@ def test_pull_analytics_syncs_sheet_before_platform_pulls(monkeypatch) -> None:
     assert result.exit_code == 0
     assert "Instagram ID sync: 1/1 eligible rows updated from 1 sheet rows." in result.output
     assert "instagram (1 metrics)" in result.output
+
+
+def test_pull_analytics_prints_phone_queue_sync_when_posts_considered(monkeypatch) -> None:
+    class ZeroPuller:
+        def pull(self) -> int:
+            return 0
+
+    monkeypatch.setattr(cli_module, "_init", lambda: None)
+    monkeypatch.setattr(
+        cli_module,
+        "sync_instagram_post_ids_from_sheet",
+        lambda: InstagramSheetSyncResult(
+            rows_read=0,
+            rows_considered=0,
+            rows_updated=0,
+            rows_skipped=0,
+        ),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "sync_instagram_post_ids_from_phone_queue",
+        lambda: InstagramPhoneQueueSyncResult(
+            posts_considered=2,
+            posts_updated=1,
+            posts_skipped=1,
+        ),
+    )
+    monkeypatch.setattr(cli_module.config, "enabled_platforms", lambda purpose="posting": ["instagram"])
+    monkeypatch.setattr(cli_module, "PULLERS", {"instagram": ZeroPuller})
+    monkeypatch.setattr(cli_module.bandit, "update_from_metrics", lambda: 0)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_module.cli, ["pull-analytics"])
+
+    assert result.exit_code == 0
+    assert "Instagram phone queue sync:" in result.output
+    assert "1/2 posts updated." in result.output
 
 
 def test_diagnose_instagram_sync_prints_row_statuses(monkeypatch) -> None:

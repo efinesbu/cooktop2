@@ -22,6 +22,7 @@ from src.analytics import PULLERS
 from src.cost_tracker import check_budget, content_cost_summary
 from src.instagram_sheet_sync import (
     inspect_instagram_post_ids_from_sheet,
+    sync_instagram_post_ids_from_phone_queue,
     sync_instagram_post_ids_from_sheet,
 )
 from src.models import (
@@ -50,6 +51,10 @@ POSTERS = {
     "x": XPoster,
 }
 POST_DELAY_PATTERN = re.compile(r"^--delay-(\d{1,3})$")
+
+
+def _resolve_ig_poster_flag(flag: bool) -> bool:
+    return bool(flag) or config.get("instagram.posting_method") == "phone"
 
 
 def _console_safe_text(text: str) -> str:
@@ -390,17 +395,27 @@ def _schedule_payloads_for_content(content: Content) -> int:
     return scheduled
 
 
-def _post_platform_payload(payload: PlatformPayload, content: Content, product: Product) -> Post:
-    if payload.platform not in POSTERS:
-        raise ValueError(f"No poster configured for platform '{payload.platform}'")
+def _post_platform_payload(
+    payload: PlatformPayload,
+    content: Content,
+    product: Product,
+    *,
+    use_ig_poster: bool = False,
+) -> Post:
+    if payload.platform == "instagram" and use_ig_poster:
+        from src.posters.ig_phone import IgPhonePoster
+
+        poster = IgPhonePoster()
+    else:
+        if payload.platform not in POSTERS:
+            raise ValueError(f"No poster configured for platform '{payload.platform}'")
+        poster = POSTERS[payload.platform]()
     if not content.video_local_path:
         raise FileNotFoundError("Content has no video_local_path set")
 
     video_path = Path(content.video_local_path)
     if not video_path.exists():
         raise FileNotFoundError(f"Video not found: {video_path}")
-
-    poster = POSTERS[payload.platform]()
     hashtags = _hashtags_to_list(payload.hashtags)
     post_id = poster.upload(video_path, payload.caption or "", hashtags)
 
@@ -443,6 +458,8 @@ def _run_generation_job(
     proof_type: str | None = None,
     script_style: str | None = None,
     velura_branding: bool = True,
+    v5_include_text_insights: bool = False,
+    v5_include_performance_summary: bool = False,
 ) -> Optional[Content]:
     product, theme, hook_type, generation_index = job
     kwargs = {
@@ -458,6 +475,9 @@ def _run_generation_job(
         kwargs["video_v5"] = True
     if not velura_branding:
         kwargs["velura_branding"] = velura_branding
+    if video_v5:
+        kwargs["v5_include_text_insights"] = v5_include_text_insights
+        kwargs["v5_include_performance_summary"] = v5_include_performance_summary
     return _generate_single(
         product,
         theme,
@@ -481,6 +501,8 @@ def _generate_batch(
     proof_type: str | None = None,
     script_style: str | None = None,
     velura_branding: bool = True,
+    v5_include_text_insights: bool = False,
+    v5_include_performance_summary: bool = False,
 ) -> int:
     if not jobs:
         return 0
@@ -498,6 +520,8 @@ def _generate_batch(
             proof_type,
             script_style,
             velura_branding,
+            v5_include_text_insights,
+            v5_include_performance_summary,
         )
 
     if requested_count < PARALLEL_GENERATION_THRESHOLD and len(jobs) > 1:
@@ -524,6 +548,14 @@ def _generate_batch(
             proof_type=proof_type,
             script_style=script_style,
             **({"velura_branding": velura_branding} if not velura_branding else {}),
+            **(
+                {
+                    "v5_include_text_insights": v5_include_text_insights,
+                    "v5_include_performance_summary": v5_include_performance_summary,
+                }
+                if video_v5
+                else {}
+            ),
         )
     )
 
@@ -532,7 +564,9 @@ def _generate_single(product: Product, theme: str | None, hook_type: str | None,
                      should_post: bool, creative_format: str | None = None, video_v2: bool = False,
                      video_v3: bool = False, video_v4: bool = False, video_v5: bool = False,
                      cta_type: str | None = None, proof_type: str | None = None,
-                     script_style: str | None = None, velura_branding: bool = True) -> Optional[Content]:
+                     script_style: str | None = None, velura_branding: bool = True,
+                     v5_include_text_insights: bool = False,
+                     v5_include_performance_summary: bool = False) -> Optional[Content]:
     spent, budget, within = check_budget()
     if not within:
         console.print(
@@ -578,6 +612,8 @@ def _generate_single(product: Product, theme: str | None, hook_type: str | None,
         v5_vibe=resolved.get("vibe") if video_v5 else None,
         cta_type=resolved["cta_type"], proof_type=resolved["proof_type"], script_style=resolved["script_style"],
         velura_branding=velura_branding,
+        v5_include_text_insights=v5_include_text_insights,
+        v5_include_performance_summary=v5_include_performance_summary,
     )
     if "prompt_input" in extras:
         _print_debug_panel(extras["prompt_input"], "Prompt")
@@ -1142,6 +1178,20 @@ def briefing_diagnose_cmd():
     type=click.Choice(V5_NAMES),
     help="V5 presenter name (repeatable). Requires --video-v5.",
 )
+@click.option(
+    "--v5-include-text-insights",
+    "v5_include_text_insights",
+    is_flag=True,
+    default=False,
+    help="Include latest text insights in the V5 user message (requires --video-v5).",
+)
+@click.option(
+    "--v5-include-performance",
+    "v5_include_performance_summary",
+    is_flag=True,
+    default=False,
+    help="Include organic video performance summary in the V5 user message (requires --video-v5).",
+)
 @click.option("--count", default=8, show_default=True, help="Total clips across all products in --auto mode")
 @click.option(
     "--rotate-theme-hook",
@@ -1163,6 +1213,7 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
         hooks: tuple[str, ...], creative_format: str | None, video_v2: bool,
         video_v3: bool, video_v4: bool, video_v5: bool,
         v5_horoscopes: tuple[str, ...], v5_names: tuple[str, ...],
+        v5_include_text_insights: bool, v5_include_performance_summary: bool,
         count: int, rotate_theme_hook: bool, cta_type: str | None, proof_type: str | None,
         script_style: str | None, velura_branding: bool, should_post: bool):
     """Generate content — manually or via bandit recommendations."""
@@ -1220,6 +1271,12 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
     if video_v5:
         creative_format = "ai_video_flex_15s"
 
+    if (v5_include_text_insights or v5_include_performance_summary) and not video_v5:
+        console.print(
+            "[red]--v5-include-text-insights and --v5-include-performance require --video-v5.[/red]"
+        )
+        sys.exit(1)
+
     if should_post:
         console.print(
             "[red]--post is deprecated for the approval-first workflow.[/red] "
@@ -1249,6 +1306,8 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
             proof_type,
             script_style,
             velura_branding,
+            v5_include_text_insights,
+            v5_include_performance_summary,
         )
     else:
         _run_manual(
@@ -1269,13 +1328,17 @@ def run(auto_mode: bool, slugs: tuple[str, ...], themes: tuple[str, ...],
             proof_type,
             script_style,
             velura_branding,
+            v5_include_text_insights,
+            v5_include_performance_summary,
         )
 
 
 def _run_auto(count: int, should_post: bool, creative_format: str | None = None, video_v2: bool = False,
               video_v3: bool = False, video_v4: bool = False, video_v5: bool = False,
               cta_type: str | None = None, proof_type: str | None = None,
-              script_style: str | None = None, velura_branding: bool = True):
+              script_style: str | None = None, velura_branding: bool = True,
+              v5_include_text_insights: bool = False,
+              v5_include_performance_summary: bool = False):
     products = db.list_products(
         active_only=True,
         exclude_excluded=True,
@@ -1345,6 +1408,8 @@ def _run_auto(count: int, should_post: bool, creative_format: str | None = None,
         proof_type=proof_type,
         script_style=script_style,
         velura_branding=velura_branding,
+        v5_include_text_insights=v5_include_text_insights,
+        v5_include_performance_summary=v5_include_performance_summary,
     )
 
     piece = "piece" if total == 1 else "pieces"
@@ -1358,7 +1423,9 @@ def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
                 v5_horoscopes: tuple[str, ...] = (),
                 v5_names: tuple[str, ...] = (),
                 cta_type: str | None = None, proof_type: str | None = None,
-                script_style: str | None = None, velura_branding: bool = True):
+                script_style: str | None = None, velura_branding: bool = True,
+                v5_include_text_insights: bool = False,
+                v5_include_performance_summary: bool = False):
     if not slugs:
         if video_v5:
             slugs = ("nk",)
@@ -1406,6 +1473,8 @@ def _run_manual(slugs: tuple[str, ...], themes: tuple[str, ...],
         proof_type=proof_type,
         script_style=script_style,
         velura_branding=velura_branding,
+        v5_include_text_insights=v5_include_text_insights,
+        v5_include_performance_summary=v5_include_performance_summary,
     )
 
     console.print(f"\n[green]{total}[/green] pieces of content generated.")
@@ -1745,12 +1814,24 @@ def approve(content_ids: tuple[str, ...], row_scope: str | None):
 
 
 @cli.command("approve-all")
-def approve_all_cmd():
-    """Set all pending content to approved status."""
+@click.option(
+    "--today",
+    is_flag=True,
+    help="Only approve pending content created today (same window as preview --today).",
+)
+def approve_all_cmd(today: bool):
+    """Set pending content to approved status (all pending, or only today's with --today)."""
     _init()
-    count = db.approve_all_pending_content()
+    count = (
+        db.approve_all_pending_content_today()
+        if today
+        else db.approve_all_pending_content()
+    )
     if count == 0:
-        console.print("[yellow]No pending content to approve.[/yellow]")
+        if today:
+            console.print("[yellow]No pending content from today to approve.[/yellow]")
+        else:
+            console.print("[yellow]No pending content to approve.[/yellow]")
         return
     piece = "item" if count == 1 else "items"
     console.print(
@@ -1846,11 +1927,17 @@ def schedule(today: bool, content_ids: tuple[str, ...], row_scope: str | None):
     is_flag=True,
     help="Allow posting between 10pm and 8am EST (bypass quiet hours)",
 )
-def post_due_cmd(allow_quiet_hours: bool):
+@click.option(
+    "--ig-poster",
+    "ig_poster",
+    is_flag=True,
+    help="Use the phone-based Instagram poster instead of the Graph API for Instagram payloads.",
+)
+def post_due_cmd(allow_quiet_hours: bool, ig_poster: bool):
     """Post all payloads that are due based on publish_at."""
     _init()
     _wait_until_post_window_start(allow_quiet_hours=allow_quiet_hours)
-    _post_due()
+    _post_due(use_ig_poster=_resolve_ig_poster_flag(ig_poster))
 
 @cli.command("post", context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
 @click.option("--today", is_flag=True, help="Post all approved content from the last 24 hours immediately")
@@ -1871,6 +1958,12 @@ def post_due_cmd(allow_quiet_hours: bool):
     default=None,
     help="Preview scope to use when --content-id is a numeric row number.",
 )
+@click.option(
+    "--ig-poster",
+    "ig_poster",
+    is_flag=True,
+    help="Use the phone-based Instagram poster instead of the Graph API for Instagram payloads.",
+)
 @click.pass_context
 def post_cmd(
     ctx: click.Context,
@@ -1878,6 +1971,7 @@ def post_cmd(
     content_ids: tuple[str, ...],
     allow_quiet_hours: bool,
     row_scope: str | None,
+    ig_poster: bool,
 ):
     """Post content to all platforms. Supports `--delay-XXX` and `--nodelay`."""
     _init()
@@ -1890,10 +1984,16 @@ def post_cmd(
 
     _wait_until_post_window_start(allow_quiet_hours=allow_quiet_hours)
 
+    use_ig_poster = _resolve_ig_poster_flag(ig_poster)
     if content_ids:
         any_failed = False
         for cid in content_ids:
-            if not _post_single(cid, delay_state=delay_state, row_scope=row_scope):
+            if not _post_single(
+                cid,
+                delay_state=delay_state,
+                row_scope=row_scope,
+                use_ig_poster=use_ig_poster,
+            ):
                 any_failed = True
         if any_failed:
             sys.exit(1)
@@ -1904,7 +2004,11 @@ def post_cmd(
             return
         any_failed = False
         for content in items:
-            if not _post_single(content.id, delay_state=delay_state):
+            if not _post_single(
+                content.id,
+                delay_state=delay_state,
+                use_ig_poster=use_ig_poster,
+            ):
                 any_failed = True
         if any_failed:
             sys.exit(1)
@@ -1955,6 +2059,8 @@ def _post_single(
     content_id: str,
     delay_state: dict[str, object] | None = None,
     row_scope: str | None = None,
+    *,
+    use_ig_poster: bool = False,
 ) -> bool:
     content = _resolve_content_for_scope(content_id, row_scope) if row_scope else _resolve_content(content_id)
     if not content:
@@ -1990,11 +2096,18 @@ def _post_single(
                 continue
             _wait_for_next_platform_post(payload.platform, delay_state)
             try:
-                post = _post_platform_payload(payload, content, product)
+                post = _post_platform_payload(
+                    payload, content, product, use_ig_poster=use_ig_poster
+                )
                 if payload.id is not None:
                     payload_status = db.mark_platform_payload_delivery(payload.id, post.post_id or "")
                 else:
-                    payload_status = "submitted" if (post.post_id or "").startswith("make:") else "posted"
+                    pid = post.post_id or ""
+                    payload_status = (
+                        "submitted"
+                        if pid.startswith("make:") or pid.startswith("ig_phone:")
+                        else "posted"
+                    )
                 if payload_status == "submitted":
                     console.print(
                         f"  [green]OK[/green] Submitted {payload.platform} handoff "
@@ -2030,7 +2143,7 @@ def _post_single(
     return True
 
 
-def _post_due():
+def _post_due(*, use_ig_poster: bool = False):
     # Use UTC now so due check matches publish_at (stored in UTC from scheduling)
     now_iso = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     payloads = db.list_due_platform_payloads(now_iso=now_iso)
@@ -2073,11 +2186,18 @@ def _post_due():
                     style="blue",
                 )
             )
-            post = _post_platform_payload(payload, content, product)
+            post = _post_platform_payload(
+                payload, content, product, use_ig_poster=use_ig_poster
+            )
             if payload.id is not None:
                 payload_status = db.mark_platform_payload_delivery(payload.id, post.post_id or "")
             else:
-                payload_status = "submitted" if (post.post_id or "").startswith("make:") else "posted"
+                pid = post.post_id or ""
+                payload_status = (
+                    "submitted"
+                    if pid.startswith("make:") or pid.startswith("ig_phone:")
+                    else "posted"
+                )
             if payload_status == "submitted":
                 console.print(
                     f"  [green]OK[/green] Submitted {payload.platform} handoff "
@@ -2220,6 +2340,16 @@ def pull_analytics_cmd():
             )
     except Exception as exc:
         console.print(f"[yellow]Instagram ID sync skipped:[/yellow] {exc}")
+
+    try:
+        phone_sync = sync_instagram_post_ids_from_phone_queue()
+        if phone_sync.posts_considered:
+            console.print(
+                "[green]Instagram phone queue sync:[/green] "
+                f"{phone_sync.posts_updated}/{phone_sync.posts_considered} posts updated."
+            )
+    except Exception as exc:
+        console.print(f"[yellow]Instagram phone queue sync skipped:[/yellow] {exc}")
 
     enabled = config.enabled_platforms("analytics")
     if not enabled:

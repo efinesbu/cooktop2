@@ -774,6 +774,21 @@ def approve_all_pending_content() -> int:
         return cur.rowcount
 
 
+def approve_all_pending_content_today() -> int:
+    """Approve pending content created today (local calendar day). Returns row count."""
+    with _connect() as conn:
+        cur = conn.execute(
+            """UPDATE content
+               SET approved=1,
+                   review_status='approved',
+                   approved_at=datetime('now'),
+                   rejected_at=NULL
+               WHERE review_status='pending'
+                 AND date(created_at, 'localtime') = date('now', 'localtime')"""
+        )
+        return cur.rowcount
+
+
 def reject_content(content_id: str, notes: str | None = None) -> None:
     with _connect() as conn:
         conn.execute(
@@ -1060,7 +1075,11 @@ def mark_platform_payload_delivery(payload_id: int, remote_post_id: str) -> str:
     if not remote_post_id:
         raise ValueError("remote_post_id must not be empty")
 
-    status = "submitted" if remote_post_id.startswith("make:") else "posted"
+    status = (
+        "submitted"
+        if remote_post_id.startswith(("make:", "ig_phone:"))
+        else "posted"
+    )
     update_platform_payload_status(payload_id, status, None)
     return status
 

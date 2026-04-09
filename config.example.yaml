@@ -76,6 +76,8 @@ instagram:
   access_token: "IGQVJXXXXXXXXXXXXXXXXXXXXXXXXX"
   instagram_account_id: "17841400000000000"
   gcs_bucket: "velura-instagram-uploads"
+  # Posting method: "api" (Graph API / Make bridge, default) or "phone" (ig_poster queue)
+  # posting_method: phone
 
 tiktok:
   client_key: "XXXXXXXXXXXXXXXXXXXXXXXXXXXX"
