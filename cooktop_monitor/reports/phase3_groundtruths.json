@@ -1,0 +1,3059 @@
+[
+  {
+    "file": "A0.jpeg",
+    "official_pipeline_json": {
+      "image_path": "/Users/valerifine/Code/cooktop2/groundtruths/A0.jpeg",
+      "timestamp": "2026-05-09T18:57:22Z",
+      "cooktop_on": false,
+      "control_lock": false,
+      "timer": {
+        "running": false,
+        "minutes_remaining": null
+      },
+      "elements": {
+        "A": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "B": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "C": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "E": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "F": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        }
+      },
+      "confidence": {
+        "A": 0.0,
+        "B": 0.0,
+        "C": 0.0,
+        "E": 0.0,
+        "F": 0.9
+      },
+      "warnings": [
+        "control lock not detected (Phase 4)",
+        "timer not detected (Phase 4)",
+        "element A not detected (Phase 3 only wires F)",
+        "element B not detected (Phase 3 only wires F)",
+        "element C not detected (Phase 3 only wires F)",
+        "element E not detected (Phase 3 only wires F)"
+      ]
+    },
+    "detect_reconcile_all_elements": {
+      "panel_bbox_xyxy": [
+        239,
+        0,
+        1535,
+        2400
+      ],
+      "elements": {
+        "A": {
+          "signals": {
+            "cluster_lit_fraction": 0.001993312757201646,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "B": {
+          "signals": {
+            "cluster_lit_fraction": 0.02080761316872428,
+            "on_indicator_lit_fraction": 0.07998366013071895,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "C": {
+          "signals": {
+            "cluster_lit_fraction": 0.029812885802469137,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        },
+        "E": {
+          "signals": {
+            "cluster_lit_fraction": 0.019721109998887775,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "F": {
+          "signals": {
+            "cluster_lit_fraction": 0.00014945501056612168,
+            "on_indicator_lit_fraction": 0.002461080586080586,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.9,
+          "warnings": []
+        }
+      }
+    }
+  },
+  {
+    "file": "A10boil.jpeg",
+    "official_pipeline_json": {
+      "image_path": "/Users/valerifine/Code/cooktop2/groundtruths/A10boil.jpeg",
+      "timestamp": "2026-05-09T18:57:22Z",
+      "cooktop_on": true,
+      "control_lock": false,
+      "timer": {
+        "running": false,
+        "minutes_remaining": null
+      },
+      "elements": {
+        "A": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "B": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "C": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "E": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "F": {
+          "state": "active",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        }
+      },
+      "confidence": {
+        "A": 0.0,
+        "B": 0.0,
+        "C": 0.0,
+        "E": 0.0,
+        "F": 0.4
+      },
+      "warnings": [
+        "control lock not detected (Phase 4)",
+        "timer not detected (Phase 4)",
+        "element A not detected (Phase 3 only wires F)",
+        "element B not detected (Phase 3 only wires F)",
+        "element C not detected (Phase 3 only wires F)",
+        "element E not detected (Phase 3 only wires F)",
+        "active element has zero bar segments lit",
+        "zone size dots out of range"
+      ]
+    },
+    "detect_reconcile_all_elements": {
+      "panel_bbox_xyxy": [
+        647,
+        218,
+        1441,
+        2307
+      ],
+      "elements": {
+        "A": {
+          "signals": {
+            "cluster_lit_fraction": 0.0,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "B": {
+          "signals": {
+            "cluster_lit_fraction": 3.0054579115674063e-05,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "C": {
+          "signals": {
+            "cluster_lit_fraction": 0.034310307518453514,
+            "on_indicator_lit_fraction": 0.008821770334928229,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        },
+        "E": {
+          "signals": {
+            "cluster_lit_fraction": 0.045474146379709125,
+            "on_indicator_lit_fraction": 0.14308647260273974,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "F": {
+          "signals": {
+            "cluster_lit_fraction": 0.28998262051302154,
+            "on_indicator_lit_fraction": 0.765687140963323,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "file": "A1melt.jpeg",
+    "official_pipeline_json": {
+      "image_path": "/Users/valerifine/Code/cooktop2/groundtruths/A1melt.jpeg",
+      "timestamp": "2026-05-09T18:57:22Z",
+      "cooktop_on": true,
+      "control_lock": false,
+      "timer": {
+        "running": false,
+        "minutes_remaining": null
+      },
+      "elements": {
+        "A": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "B": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "C": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "E": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "F": {
+          "state": "active",
+          "level": null,
+          "label": null,
+          "hot": true,
+          "zone_size": null
+        }
+      },
+      "confidence": {
+        "A": 0.0,
+        "B": 0.0,
+        "C": 0.0,
+        "E": 0.0,
+        "F": 0.4
+      },
+      "warnings": [
+        "control lock not detected (Phase 4)",
+        "timer not detected (Phase 4)",
+        "element A not detected (Phase 3 only wires F)",
+        "element B not detected (Phase 3 only wires F)",
+        "element C not detected (Phase 3 only wires F)",
+        "element E not detected (Phase 3 only wires F)",
+        "active element has zero bar segments lit",
+        "zone size dots out of range"
+      ]
+    },
+    "detect_reconcile_all_elements": {
+      "panel_bbox_xyxy": [
+        720,
+        294,
+        1396,
+        2400
+      ],
+      "elements": {
+        "A": {
+          "signals": {
+            "cluster_lit_fraction": 0.0,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "B": {
+          "signals": {
+            "cluster_lit_fraction": 0.0003860543143324419,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "C": {
+          "signals": {
+            "cluster_lit_fraction": 0.07990622389746398,
+            "on_indicator_lit_fraction": 0.7189748990696858,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        },
+        "E": {
+          "signals": {
+            "cluster_lit_fraction": 0.06376877560309513,
+            "on_indicator_lit_fraction": 0.10056497175141244,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "F": {
+          "signals": {
+            "cluster_lit_fraction": 0.02943407677135488,
+            "on_indicator_lit_fraction": 0.0007532956685499058,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "file": "A2warm.jpeg",
+    "official_pipeline_json": {
+      "image_path": "/Users/valerifine/Code/cooktop2/groundtruths/A2warm.jpeg",
+      "timestamp": "2026-05-09T18:57:22Z",
+      "cooktop_on": true,
+      "control_lock": false,
+      "timer": {
+        "running": false,
+        "minutes_remaining": null
+      },
+      "elements": {
+        "A": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "B": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "C": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "E": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "F": {
+          "state": "active",
+          "level": null,
+          "label": null,
+          "hot": true,
+          "zone_size": null
+        }
+      },
+      "confidence": {
+        "A": 0.0,
+        "B": 0.0,
+        "C": 0.0,
+        "E": 0.0,
+        "F": 0.4
+      },
+      "warnings": [
+        "control lock not detected (Phase 4)",
+        "timer not detected (Phase 4)",
+        "element A not detected (Phase 3 only wires F)",
+        "element B not detected (Phase 3 only wires F)",
+        "element C not detected (Phase 3 only wires F)",
+        "element E not detected (Phase 3 only wires F)",
+        "active element has zero bar segments lit",
+        "zone size dots out of range"
+      ]
+    },
+    "detect_reconcile_all_elements": {
+      "panel_bbox_xyxy": [
+        526,
+        263,
+        1434,
+        2400
+      ],
+      "elements": {
+        "A": {
+          "signals": {
+            "cluster_lit_fraction": 0.0001494190689646289,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "B": {
+          "signals": {
+            "cluster_lit_fraction": 0.02988381379292578,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "C": {
+          "signals": {
+            "cluster_lit_fraction": 0.012283277945230183,
+            "on_indicator_lit_fraction": 0.03063343717549325,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        },
+        "E": {
+          "signals": {
+            "cluster_lit_fraction": 0.03162227036539929,
+            "on_indicator_lit_fraction": 0.28396396396396395,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "F": {
+          "signals": {
+            "cluster_lit_fraction": 0.0629159542652194,
+            "on_indicator_lit_fraction": 0.004537037037037037,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "file": "A3simmer.jpeg",
+    "official_pipeline_json": {
+      "image_path": "/Users/valerifine/Code/cooktop2/groundtruths/A3simmer.jpeg",
+      "timestamp": "2026-05-09T18:57:22Z",
+      "cooktop_on": true,
+      "control_lock": false,
+      "timer": {
+        "running": false,
+        "minutes_remaining": null
+      },
+      "elements": {
+        "A": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "B": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "C": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "E": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "F": {
+          "state": "active",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        }
+      },
+      "confidence": {
+        "A": 0.0,
+        "B": 0.0,
+        "C": 0.0,
+        "E": 0.0,
+        "F": 0.4
+      },
+      "warnings": [
+        "control lock not detected (Phase 4)",
+        "timer not detected (Phase 4)",
+        "element A not detected (Phase 3 only wires F)",
+        "element B not detected (Phase 3 only wires F)",
+        "element C not detected (Phase 3 only wires F)",
+        "element E not detected (Phase 3 only wires F)",
+        "active element has zero bar segments lit",
+        "zone size dots out of range"
+      ]
+    },
+    "detect_reconcile_all_elements": {
+      "panel_bbox_xyxy": [
+        520,
+        143,
+        1621,
+        2400
+      ],
+      "elements": {
+        "A": {
+          "signals": {
+            "cluster_lit_fraction": 0.0,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "B": {
+          "signals": {
+            "cluster_lit_fraction": 0.03092750413276197,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "C": {
+          "signals": {
+            "cluster_lit_fraction": 0.016434108527131782,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        },
+        "E": {
+          "signals": {
+            "cluster_lit_fraction": 0.011607220341924846,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.9,
+          "warnings": []
+        },
+        "F": {
+          "signals": {
+            "cluster_lit_fraction": 0.13771148611867176,
+            "on_indicator_lit_fraction": 0.32091484464902187,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "file": "A3warm.jpeg",
+    "official_pipeline_json": {
+      "image_path": "/Users/valerifine/Code/cooktop2/groundtruths/A3warm.jpeg",
+      "timestamp": "2026-05-09T18:57:22Z",
+      "cooktop_on": true,
+      "control_lock": false,
+      "timer": {
+        "running": false,
+        "minutes_remaining": null
+      },
+      "elements": {
+        "A": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "B": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "C": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "E": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "F": {
+          "state": "active",
+          "level": null,
+          "label": null,
+          "hot": true,
+          "zone_size": null
+        }
+      },
+      "confidence": {
+        "A": 0.0,
+        "B": 0.0,
+        "C": 0.0,
+        "E": 0.0,
+        "F": 0.4
+      },
+      "warnings": [
+        "control lock not detected (Phase 4)",
+        "timer not detected (Phase 4)",
+        "element A not detected (Phase 3 only wires F)",
+        "element B not detected (Phase 3 only wires F)",
+        "element C not detected (Phase 3 only wires F)",
+        "element E not detected (Phase 3 only wires F)",
+        "active element has zero bar segments lit",
+        "zone size dots out of range"
+      ]
+    },
+    "detect_reconcile_all_elements": {
+      "panel_bbox_xyxy": [
+        615,
+        303,
+        1435,
+        2400
+      ],
+      "elements": {
+        "A": {
+          "signals": {
+            "cluster_lit_fraction": 0.0,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "B": {
+          "signals": {
+            "cluster_lit_fraction": 0.013151545103055322,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "C": {
+          "signals": {
+            "cluster_lit_fraction": 0.009145614698101689,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "E": {
+          "signals": {
+            "cluster_lit_fraction": 0.035667588634649236,
+            "on_indicator_lit_fraction": 0.13584183673469388,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "F": {
+          "signals": {
+            "cluster_lit_fraction": 0.11729318581845612,
+            "on_indicator_lit_fraction": 0.0352891156462585,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "file": "A4.jpeg",
+    "official_pipeline_json": {
+      "image_path": "/Users/valerifine/Code/cooktop2/groundtruths/A4.jpeg",
+      "timestamp": "2026-05-09T18:57:22Z",
+      "cooktop_on": true,
+      "control_lock": false,
+      "timer": {
+        "running": false,
+        "minutes_remaining": null
+      },
+      "elements": {
+        "A": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "B": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "C": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "E": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "F": {
+          "state": "active",
+          "level": null,
+          "label": null,
+          "hot": true,
+          "zone_size": null
+        }
+      },
+      "confidence": {
+        "A": 0.0,
+        "B": 0.0,
+        "C": 0.0,
+        "E": 0.0,
+        "F": 0.4
+      },
+      "warnings": [
+        "control lock not detected (Phase 4)",
+        "timer not detected (Phase 4)",
+        "element A not detected (Phase 3 only wires F)",
+        "element B not detected (Phase 3 only wires F)",
+        "element C not detected (Phase 3 only wires F)",
+        "element E not detected (Phase 3 only wires F)",
+        "active element has zero bar segments lit",
+        "zone size dots out of range"
+      ]
+    },
+    "detect_reconcile_all_elements": {
+      "panel_bbox_xyxy": [
+        470,
+        307,
+        1475,
+        2400
+      ],
+      "elements": {
+        "A": {
+          "signals": {
+            "cluster_lit_fraction": 0.0,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "B": {
+          "signals": {
+            "cluster_lit_fraction": 0.03462851104542404,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "C": {
+          "signals": {
+            "cluster_lit_fraction": 0.010586090524401796,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "E": {
+          "signals": {
+            "cluster_lit_fraction": 0.027240714561110397,
+            "on_indicator_lit_fraction": 0.16296928327645052,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "F": {
+          "signals": {
+            "cluster_lit_fraction": 0.1237173579109063,
+            "on_indicator_lit_fraction": 0.5123616082577208,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "file": "A5.jpeg",
+    "official_pipeline_json": {
+      "image_path": "/Users/valerifine/Code/cooktop2/groundtruths/A5.jpeg",
+      "timestamp": "2026-05-09T18:57:22Z",
+      "cooktop_on": true,
+      "control_lock": false,
+      "timer": {
+        "running": false,
+        "minutes_remaining": null
+      },
+      "elements": {
+        "A": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "B": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "C": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "E": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "F": {
+          "state": "active",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        }
+      },
+      "confidence": {
+        "A": 0.0,
+        "B": 0.0,
+        "C": 0.0,
+        "E": 0.0,
+        "F": 0.4
+      },
+      "warnings": [
+        "control lock not detected (Phase 4)",
+        "timer not detected (Phase 4)",
+        "element A not detected (Phase 3 only wires F)",
+        "element B not detected (Phase 3 only wires F)",
+        "element C not detected (Phase 3 only wires F)",
+        "element E not detected (Phase 3 only wires F)",
+        "active element has zero bar segments lit",
+        "zone size dots out of range"
+      ]
+    },
+    "detect_reconcile_all_elements": {
+      "panel_bbox_xyxy": [
+        446,
+        188,
+        1378,
+        2234
+      ],
+      "elements": {
+        "A": {
+          "signals": {
+            "cluster_lit_fraction": 0.0,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "B": {
+          "signals": {
+            "cluster_lit_fraction": 0.03965371776530575,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "C": {
+          "signals": {
+            "cluster_lit_fraction": 0.00046115067574295043,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "E": {
+          "signals": {
+            "cluster_lit_fraction": 0.03832612356206167,
+            "on_indicator_lit_fraction": 0.19826119826119826,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "F": {
+          "signals": {
+            "cluster_lit_fraction": 0.16269326061197067,
+            "on_indicator_lit_fraction": 0.5124740124740125,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "file": "A6.jpeg",
+    "official_pipeline_json": {
+      "image_path": "/Users/valerifine/Code/cooktop2/groundtruths/A6.jpeg",
+      "timestamp": "2026-05-09T18:57:22Z",
+      "cooktop_on": true,
+      "control_lock": false,
+      "timer": {
+        "running": false,
+        "minutes_remaining": null
+      },
+      "elements": {
+        "A": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "B": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "C": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "E": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "F": {
+          "state": "active",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        }
+      },
+      "confidence": {
+        "A": 0.0,
+        "B": 0.0,
+        "C": 0.0,
+        "E": 0.0,
+        "F": 0.4
+      },
+      "warnings": [
+        "control lock not detected (Phase 4)",
+        "timer not detected (Phase 4)",
+        "element A not detected (Phase 3 only wires F)",
+        "element B not detected (Phase 3 only wires F)",
+        "element C not detected (Phase 3 only wires F)",
+        "element E not detected (Phase 3 only wires F)",
+        "active element has zero bar segments lit",
+        "zone size dots out of range"
+      ]
+    },
+    "detect_reconcile_all_elements": {
+      "panel_bbox_xyxy": [
+        470,
+        171,
+        1400,
+        2400
+      ],
+      "elements": {
+        "A": {
+          "signals": {
+            "cluster_lit_fraction": 0.0,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "B": {
+          "signals": {
+            "cluster_lit_fraction": 0.035656989330446885,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "C": {
+          "signals": {
+            "cluster_lit_fraction": 0.0008805019342173637,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "E": {
+          "signals": {
+            "cluster_lit_fraction": 0.03708986415882968,
+            "on_indicator_lit_fraction": 0.23726611226611227,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "F": {
+          "signals": {
+            "cluster_lit_fraction": 0.17639745090388867,
+            "on_indicator_lit_fraction": 0.5668859649122807,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "file": "A7.jpeg",
+    "official_pipeline_json": {
+      "image_path": "/Users/valerifine/Code/cooktop2/groundtruths/A7.jpeg",
+      "timestamp": "2026-05-09T18:57:22Z",
+      "cooktop_on": true,
+      "control_lock": false,
+      "timer": {
+        "running": false,
+        "minutes_remaining": null
+      },
+      "elements": {
+        "A": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "B": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "C": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "E": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "F": {
+          "state": "active",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        }
+      },
+      "confidence": {
+        "A": 0.0,
+        "B": 0.0,
+        "C": 0.0,
+        "E": 0.0,
+        "F": 0.4
+      },
+      "warnings": [
+        "control lock not detected (Phase 4)",
+        "timer not detected (Phase 4)",
+        "element A not detected (Phase 3 only wires F)",
+        "element B not detected (Phase 3 only wires F)",
+        "element C not detected (Phase 3 only wires F)",
+        "element E not detected (Phase 3 only wires F)",
+        "active element has zero bar segments lit",
+        "zone size dots out of range"
+      ]
+    },
+    "detect_reconcile_all_elements": {
+      "panel_bbox_xyxy": [
+        506,
+        239,
+        1373,
+        2400
+      ],
+      "elements": {
+        "A": {
+          "signals": {
+            "cluster_lit_fraction": 0.0,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "B": {
+          "signals": {
+            "cluster_lit_fraction": 0.03396484041645332,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "C": {
+          "signals": {
+            "cluster_lit_fraction": 0.004517622461170849,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "E": {
+          "signals": {
+            "cluster_lit_fraction": 0.036514537180692454,
+            "on_indicator_lit_fraction": 0.25917297612114154,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "F": {
+          "signals": {
+            "cluster_lit_fraction": 0.17925632847511003,
+            "on_indicator_lit_fraction": 0.7732201791607732,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "file": "A8.jpeg",
+    "official_pipeline_json": {
+      "image_path": "/Users/valerifine/Code/cooktop2/groundtruths/A8.jpeg",
+      "timestamp": "2026-05-09T18:57:22Z",
+      "cooktop_on": true,
+      "control_lock": false,
+      "timer": {
+        "running": false,
+        "minutes_remaining": null
+      },
+      "elements": {
+        "A": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "B": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "C": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "E": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "F": {
+          "state": "active",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        }
+      },
+      "confidence": {
+        "A": 0.0,
+        "B": 0.0,
+        "C": 0.0,
+        "E": 0.0,
+        "F": 0.4
+      },
+      "warnings": [
+        "control lock not detected (Phase 4)",
+        "timer not detected (Phase 4)",
+        "element A not detected (Phase 3 only wires F)",
+        "element B not detected (Phase 3 only wires F)",
+        "element C not detected (Phase 3 only wires F)",
+        "element E not detected (Phase 3 only wires F)",
+        "active element has zero bar segments lit",
+        "zone size dots out of range"
+      ]
+    },
+    "detect_reconcile_all_elements": {
+      "panel_bbox_xyxy": [
+        473,
+        244,
+        1381,
+        2283
+      ],
+      "elements": {
+        "A": {
+          "signals": {
+            "cluster_lit_fraction": 0.0,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "B": {
+          "signals": {
+            "cluster_lit_fraction": 0.0272145201693012,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "C": {
+          "signals": {
+            "cluster_lit_fraction": 0.0019435086810054417,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "E": {
+          "signals": {
+            "cluster_lit_fraction": 0.02401610409312367,
+            "on_indicator_lit_fraction": 0.14594594594594595,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "F": {
+          "signals": {
+            "cluster_lit_fraction": 0.17100096274469762,
+            "on_indicator_lit_fraction": 0.42475633528265105,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "file": "A9.jpeg",
+    "official_pipeline_json": {
+      "image_path": "/Users/valerifine/Code/cooktop2/groundtruths/A9.jpeg",
+      "timestamp": "2026-05-09T18:57:22Z",
+      "cooktop_on": true,
+      "control_lock": false,
+      "timer": {
+        "running": false,
+        "minutes_remaining": null
+      },
+      "elements": {
+        "A": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "B": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "C": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "E": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "F": {
+          "state": "active",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        }
+      },
+      "confidence": {
+        "A": 0.0,
+        "B": 0.0,
+        "C": 0.0,
+        "E": 0.0,
+        "F": 0.4
+      },
+      "warnings": [
+        "control lock not detected (Phase 4)",
+        "timer not detected (Phase 4)",
+        "element A not detected (Phase 3 only wires F)",
+        "element B not detected (Phase 3 only wires F)",
+        "element C not detected (Phase 3 only wires F)",
+        "element E not detected (Phase 3 only wires F)",
+        "active element has zero bar segments lit",
+        "zone size dots out of range"
+      ]
+    },
+    "detect_reconcile_all_elements": {
+      "panel_bbox_xyxy": [
+        491,
+        256,
+        1382,
+        2304
+      ],
+      "elements": {
+        "A": {
+          "signals": {
+            "cluster_lit_fraction": 5.4932981762250056e-06,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "B": {
+          "signals": {
+            "cluster_lit_fraction": 0.029016734113529476,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "C": {
+          "signals": {
+            "cluster_lit_fraction": 0.002702702702702703,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "E": {
+          "signals": {
+            "cluster_lit_fraction": 0.02912431818450726,
+            "on_indicator_lit_fraction": 0.19928377855207124,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "F": {
+          "signals": {
+            "cluster_lit_fraction": 0.1815529249566189,
+            "on_indicator_lit_fraction": 0.18244289585753,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "file": "AOffH.jpeg",
+    "official_pipeline_json": {
+      "image_path": "/Users/valerifine/Code/cooktop2/groundtruths/AOffH.jpeg",
+      "timestamp": "2026-05-09T18:57:22Z",
+      "cooktop_on": false,
+      "control_lock": false,
+      "timer": {
+        "running": false,
+        "minutes_remaining": null
+      },
+      "elements": {
+        "A": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "B": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "C": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "E": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "F": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        }
+      },
+      "confidence": {
+        "A": 0.0,
+        "B": 0.0,
+        "C": 0.0,
+        "E": 0.0,
+        "F": 0.9
+      },
+      "warnings": [
+        "control lock not detected (Phase 4)",
+        "timer not detected (Phase 4)",
+        "element A not detected (Phase 3 only wires F)",
+        "element B not detected (Phase 3 only wires F)",
+        "element C not detected (Phase 3 only wires F)",
+        "element E not detected (Phase 3 only wires F)"
+      ]
+    },
+    "detect_reconcile_all_elements": {
+      "panel_bbox_xyxy": [
+        159,
+        228,
+        1398,
+        2400
+      ],
+      "elements": {
+        "A": {
+          "signals": {
+            "cluster_lit_fraction": 0.0,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.9,
+          "warnings": []
+        },
+        "B": {
+          "signals": {
+            "cluster_lit_fraction": 0.0006912442396313364,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "C": {
+          "signals": {
+            "cluster_lit_fraction": 0.029675189534710867,
+            "on_indicator_lit_fraction": 0.01935483870967742,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        },
+        "E": {
+          "signals": {
+            "cluster_lit_fraction": 0.025104079765603905,
+            "on_indicator_lit_fraction": 0.03994360902255639,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "F": {
+          "signals": {
+            "cluster_lit_fraction": 0.0,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.9,
+          "warnings": []
+        }
+      }
+    }
+  },
+  {
+    "file": "G2warm.jpeg",
+    "official_pipeline_json": {
+      "image_path": "/Users/valerifine/Code/cooktop2/groundtruths/G2warm.jpeg",
+      "timestamp": "2026-05-09T18:57:22Z",
+      "cooktop_on": false,
+      "control_lock": false,
+      "timer": {
+        "running": false,
+        "minutes_remaining": null
+      },
+      "elements": {
+        "A": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "B": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "C": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "E": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "F": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        }
+      },
+      "confidence": {
+        "A": 0.0,
+        "B": 0.0,
+        "C": 0.0,
+        "E": 0.0,
+        "F": 0.9
+      },
+      "warnings": [
+        "control lock not detected (Phase 4)",
+        "timer not detected (Phase 4)",
+        "element A not detected (Phase 3 only wires F)",
+        "element B not detected (Phase 3 only wires F)",
+        "element C not detected (Phase 3 only wires F)",
+        "element E not detected (Phase 3 only wires F)"
+      ]
+    },
+    "detect_reconcile_all_elements": {
+      "panel_bbox_xyxy": [
+        571,
+        295,
+        1269,
+        2400
+      ],
+      "elements": {
+        "A": {
+          "signals": {
+            "cluster_lit_fraction": 0.009733256886995932,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.9,
+          "warnings": []
+        },
+        "B": {
+          "signals": {
+            "cluster_lit_fraction": 0.002809636918900577,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "C": {
+          "signals": {
+            "cluster_lit_fraction": 0.048782319054249595,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        },
+        "E": {
+          "signals": {
+            "cluster_lit_fraction": 0.06400146708234,
+            "on_indicator_lit_fraction": 0.04116222760290557,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "F": {
+          "signals": {
+            "cluster_lit_fraction": 0.0,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.9,
+          "warnings": []
+        }
+      }
+    }
+  },
+  {
+    "file": "timer2minutes.jpeg",
+    "official_pipeline_json": {
+      "image_path": "/Users/valerifine/Code/cooktop2/groundtruths/timer2minutes.jpeg",
+      "timestamp": "2026-05-09T18:57:22Z",
+      "cooktop_on": true,
+      "control_lock": false,
+      "timer": {
+        "running": false,
+        "minutes_remaining": null
+      },
+      "elements": {
+        "A": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "B": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "C": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "E": {
+          "state": "off",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        },
+        "F": {
+          "state": "active",
+          "level": null,
+          "label": null,
+          "hot": false,
+          "zone_size": null
+        }
+      },
+      "confidence": {
+        "A": 0.0,
+        "B": 0.0,
+        "C": 0.0,
+        "E": 0.0,
+        "F": 0.4
+      },
+      "warnings": [
+        "control lock not detected (Phase 4)",
+        "timer not detected (Phase 4)",
+        "element A not detected (Phase 3 only wires F)",
+        "element B not detected (Phase 3 only wires F)",
+        "element C not detected (Phase 3 only wires F)",
+        "element E not detected (Phase 3 only wires F)",
+        "active element has zero bar segments lit",
+        "zone size dots out of range"
+      ]
+    },
+    "detect_reconcile_all_elements": {
+      "panel_bbox_xyxy": [
+        519,
+        519,
+        1345,
+        2009
+      ],
+      "elements": {
+        "A": {
+          "signals": {
+            "cluster_lit_fraction": 0.0140307363096975,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": true,
+              "K. WARM": true,
+              "SIMMER": true,
+              "BOIL": true
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": 10,
+            "label": "BOIL",
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.55,
+          "warnings": [
+            "multiple labels lit; precedence applied BOIL>SIMMER>K. WARM>MELT",
+            "bar graph strongly disagrees with lit label level; using label level"
+          ]
+        },
+        "B": {
+          "signals": {
+            "cluster_lit_fraction": 0.0,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "C": {
+          "signals": {
+            "cluster_lit_fraction": 0.002419039551703916,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": true,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "off",
+            "level": null,
+            "label": null,
+            "hot": true,
+            "zone_size": null
+          },
+          "confidence": 0.85,
+          "warnings": []
+        },
+        "E": {
+          "signals": {
+            "cluster_lit_fraction": 0.03430651823846531,
+            "on_indicator_lit_fraction": 0.13179643323183993,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": null
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit"
+          ]
+        },
+        "F": {
+          "signals": {
+            "cluster_lit_fraction": 0.0481954071273542,
+            "on_indicator_lit_fraction": 0.0,
+            "h_detected": false,
+            "bar_count": 0,
+            "label_lit": {
+              "MELT": false,
+              "K. WARM": false,
+              "SIMMER": false,
+              "BOIL": false
+            },
+            "zone_dot_count": 0
+          },
+          "reading": {
+            "state": "active",
+            "level": null,
+            "label": null,
+            "hot": false,
+            "zone_size": null
+          },
+          "confidence": 0.4,
+          "warnings": [
+            "active element has zero bar segments lit",
+            "zone size dots out of range"
+          ]
+        }
+      }
+    }
+  }
+]

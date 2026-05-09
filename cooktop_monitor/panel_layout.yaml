@@ -1,0 +1,62 @@
+# Coordinates as fractions of panel bounding box (0.0 to 1.0).
+# Origin: top-left of panel ROI.
+# Replace with calibrated values from: python -m cooktop_monitor.tools.calibrate
+
+elements:
+  A:
+    cluster_bbox: [0.05, 0.05, 0.30, 0.45]
+    on_indicator: [0.08, 0.08, 0.12, 0.18]
+    digit_area: [0.10, 0.20, 0.22, 0.40]
+    bar_graph: [0.06, 0.20, 0.10, 0.42]
+    label_melt: [0.10, 0.40, 0.20, 0.43]
+    label_kwarm: [0.10, 0.40, 0.20, 0.43]
+    label_simmer: [0.10, 0.40, 0.20, 0.43]
+    label_boil: [0.10, 0.40, 0.20, 0.43]
+    zone_size_dots: null
+  B:
+    cluster_bbox: [0.33, 0.05, 0.58, 0.45]
+    on_indicator: [0.36, 0.08, 0.40, 0.18]
+    digit_area: [0.38, 0.20, 0.50, 0.40]
+    bar_graph: [0.34, 0.20, 0.38, 0.42]
+    label_melt: [0.38, 0.40, 0.48, 0.43]
+    label_kwarm: [0.38, 0.40, 0.48, 0.43]
+    label_simmer: [0.38, 0.40, 0.48, 0.43]
+    label_boil: [0.38, 0.40, 0.48, 0.43]
+    zone_size_dots: null
+  C:
+    cluster_bbox: [0.61, 0.05, 0.86, 0.45]
+    on_indicator: [0.64, 0.08, 0.68, 0.18]
+    digit_area: [0.66, 0.20, 0.78, 0.40]
+    bar_graph: [0.62, 0.20, 0.66, 0.42]
+    label_melt: [0.66, 0.40, 0.76, 0.43]
+    label_kwarm: [0.66, 0.40, 0.76, 0.43]
+    label_simmer: [0.66, 0.40, 0.76, 0.43]
+    label_boil: [0.66, 0.40, 0.76, 0.43]
+    zone_size_dots: [0.80, 0.45, 0.86, 0.52]
+  E:
+    cluster_bbox: [0.40, 0.55, 0.65, 0.92]
+    on_indicator: [0.43, 0.58, 0.47, 0.72]
+    digit_area: [0.46, 0.72, 0.56, 0.88]
+    bar_graph: [0.42, 0.72, 0.46, 0.89]
+    label_melt: [0.46, 0.88, 0.56, 0.92]
+    label_kwarm: [0.46, 0.88, 0.56, 0.92]
+    label_simmer: [0.46, 0.88, 0.56, 0.92]
+    label_boil: [0.46, 0.88, 0.56, 0.92]
+    zone_size_dots: null
+  F:
+    cluster_bbox: [0.05, 0.55, 0.30, 0.92]
+    on_indicator: [0.08, 0.58, 0.12, 0.72]
+    digit_area: [0.10, 0.72, 0.22, 0.88]
+    bar_graph: [0.06, 0.72, 0.10, 0.89]
+    label_melt: [0.10, 0.88, 0.20, 0.92]
+    label_kwarm: [0.10, 0.88, 0.20, 0.92]
+    label_simmer: [0.10, 0.88, 0.20, 0.92]
+    label_boil: [0.10, 0.88, 0.20, 0.92]
+    zone_size_dots: [0.24, 0.88, 0.34, 0.95]
+
+timer:
+  digit_area: [0.68, 0.55, 0.76, 0.72]
+  minutes_label: [0.68, 0.72, 0.82, 0.78]
+
+control_lock:
+  text_area: [0.82, 0.62, 0.98, 0.92]

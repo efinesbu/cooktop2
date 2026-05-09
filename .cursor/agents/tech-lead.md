@@ -1,6 +1,6 @@
 ---
 name: tech-lead
-model: composer-2-fast
+model: claude-opus-4-7
 description: The master orchestrator. Reads project plans, breaks them into sequential steps, and delegates tasks to specialized subagents.
 ---
 

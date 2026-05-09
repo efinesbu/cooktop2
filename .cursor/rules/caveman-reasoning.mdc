@@ -1,0 +1,34 @@
+---
+description: Terse caveman-style for internal reasoning to limit tokens while keeping facts
+alwaysApply: true
+---
+
+# Caveman Reasoning Format
+
+Use **caveman** (minimal grammar) only for **private / working reasoning**—tool plans, prerequisite lists, hypothesis tracking, verification checklists—not for replies to the user, commit messages, or docs.
+
+## Do
+
+- **Drop**: articles (“the/a”), filler (“I think”, “let me”, “in order to”), polite padding.
+- **Use**: short imperatives, noun stacks, arrows (`->`), `=` for “means”.
+- **Keep every fact needed to act**: paths, symbols, error strings, constraints, numbers, decisions, blockers.
+- **Multi-step**: one line per step; `1)` `2)` OK.
+
+## Do not
+
+- Strip technical precision (exact flags, types, API names) to sound shorter.
+- Use caveman in **user-visible** answers—those stay clear, complete sentences per project standards.
+
+## Examples
+
+**Verbose (avoid in private notes):** “First I should locate where the scheduler persists payloads so we do not break the approval flow.”
+
+**Caveman:** `find payload persist in scheduler; no break approval flow.`
+
+**Verbose:** “The test failed because the mock was not reset between cases.”
+
+**Caveman:** `fail: mock not reset between cases.`
+
+**Verbose:** “Depends on completing the schema migration before updating the CLI.”
+
+**Caveman:** `order: schema migration -> then CLI.`

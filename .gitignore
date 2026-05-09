@@ -1,14 +1,5 @@
-# Secrets & config
-config.yaml
+# Secrets
 .env
-youtube_client_secrets.json
-youtube_token.json
-
-# Database
-db/velura.db
-db/velura.db-journal
-db/velura.db-wal
-ig_poster/queue.db
 
 # Python
 __pycache__/
@@ -19,28 +10,13 @@ dist/
 build/
 .venv/
 venv/
-*.egg
 
 # IDE
 .vscode/
 .idea/
 *.swp
-*.swo
+*.swm
 
 # OS
 .DS_Store
 Thumbs.db
-desktop.ini
-
-# Velura data (stored in ~/.velura/)
-videos/
-product-images/
-
-# Standalone sibling repo (local clone, not part of this project tree)
-cooktop/
-
-# Debug
-argv_debug.txt
-content_dump.txt
-payloads.txt
-tmp_text_review_verify*/
