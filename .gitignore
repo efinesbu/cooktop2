@@ -36,6 +36,9 @@ desktop.ini
 videos/
 product-images/
 
+# Standalone sibling repo (local clone, not part of this project tree)
+cooktop/
+
 # Debug
 argv_debug.txt
 content_dump.txt
